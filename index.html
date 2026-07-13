@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="PdfBox.Net browser tools and command-line packages.">
+  <title>PdfBox.Net</title>
+  <style>
+    :root { color: #172033; font: 16px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f2f4f6; }
+    header, section, footer { padding: 2rem max(1.25rem, calc((100vw - 68rem) / 2)); }
+    header { background: #fff; border-bottom: 1px solid #cbd2db; padding-block: 3.5rem; }
+    h1 { font-size: 4.5rem; line-height: 1; margin: 0 0 1rem; }
+    h2 { font-size: 1.25rem; margin: 0 0 .5rem; }
+    p { max-width: 48rem; }
+    .intro { color: #536174; font-size: 1.15rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.5rem; }
+    .primary { background: #14543c; border: 1px solid #14543c; color: #fff; font-weight: 700; padding: .7rem 1rem; text-decoration: none; }
+    .secondary { border: 1px solid #8996a8; color: #243b53; font-weight: 700; padding: .7rem 1rem; text-decoration: none; }
+    section { background: #fff; border-bottom: 1px solid #d7dce3; display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+    section a, footer a { color: #175f91; }
+    footer { color: #536174; font-size: .9rem; }
+    @media (max-width: 40rem) { h1 { font-size: 2.5rem; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PdfBox.Net</h1>
+    <p class="intro">PDF parsing, layout extraction, and conversion for .NET.</p>
+    <div class="actions">
+      <a class="primary" href="wasm/">Open PDF to HTML</a>
+      <a class="secondary" href="https://github.com/erikbra/pdfbox-net">View source</a>
+    </div>
+  </header>
+  <section aria-label="Available tools">
+    <div>
+      <h2>Browser converter</h2>
+      <p>Convert a PDF to continuous semantic HTML entirely in your browser. The selected document stays on your device.</p>
+      <a href="wasm/">Launch the browser-lite converter</a>
+    </div>
+    <div>
+      <h2>unpdf command line</h2>
+      <p>Install the self-contained PDF-to-HTML converter from a signed package repository.</p>
+      <a href="apt/">APT repository and installation</a>
+    </div>
+  </section>
+  <footer>
+    <a href="https://github.com/erikbra/pdfbox-net">PdfBox.Net on GitHub</a>
+  </footer>
+</body>
+</html>
