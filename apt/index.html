@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>unpdf APT repository</title>
+  <style>
+    body { max-width: 56rem; margin: 3rem auto; padding: 0 1rem; font: 1rem/1.5 system-ui, sans-serif; color: #172033; }
+    h1, h2 { line-height: 1.2; }
+    pre { overflow-x: auto; padding: 1rem; background: #f3f5f7; border: 1px solid #d8dde3; }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>unpdf APT repository</h1>
+    <p>Signed packages for Ubuntu and Debian on amd64 and arm64.</p>
+    
+        <section>
+          <h2>Preview channel</h2>
+          <pre><code>curl -fsSL https://erikbra.github.io/pdfbox-net/apt/unpdf-archive-keyring.gpg | sudo tee /etc/apt/keyrings/unpdf.gpg &gt;/dev/null
+curl -fsSL https://erikbra.github.io/pdfbox-net/apt/unpdf-preview.sources | sudo tee /etc/apt/sources.list.d/unpdf.sources &gt;/dev/null
+sudo apt update
+sudo apt install unpdf</code></pre>
+        </section>
+    <h2>Signing key</h2>
+    <p>Fingerprint: <code>1C65 ED46 DC97 C055 EB67 7577 22F9 EC17 9833 6E6A</code></p>
+    <p><a href="unpdf-archive-key.asc">Armored public key</a> · <a href="https://github.com/erikbra/pdfbox-net">source</a></p>
+  </main>
+</body>
+</html>

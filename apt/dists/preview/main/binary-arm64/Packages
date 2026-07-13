@@ -1,0 +1,16 @@
+Package: unpdf
+Version: 4.0.0~preview.1
+Architecture: arm64
+Maintainer: PdfBox.Net contributors <noreply@github.com>
+Filename: pool/main/u/unpdf/unpdf_4.0.0~preview.1_arm64.deb
+Size: 2769610
+MD5sum: c768bc7b8030eb80d3ab2a504d46b736
+SHA1: 8e61ec72dde7fc8fc4b138637efe5b2c5e96c165
+SHA256: 590e8ab37676b1e1c726376d1fd367e0624860d991d3d6571babb858eff786d6
+Section: utils
+Priority: optional
+Homepage: https://github.com/erikbra/pdfbox-net
+Description: Convert PDF documents to semantic HTML
+ unpdf is a self-contained NativeAOT command-line converter for producing
+ semantic or fixed-layout HTML from PDF documents.
+

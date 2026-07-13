@@ -1,0 +1,6 @@
+Types: deb
+URIs: https://erikbra.github.io/pdfbox-net/apt
+Suites: preview
+Components: main
+Architectures: amd64 arm64
+Signed-By: /etc/apt/keyrings/unpdf.gpg
