@@ -71,8 +71,7 @@ public sealed class WasmBrowserSmokeTest
             string fixture = Path.Combine(
                 repositoryRoot,
                 "tests",
-                "PdfBox.Net.Tests",
-                "Fixtures",
+                "SharedFixtures",
                 "classic-xref-fixture.pdf");
             await page.Locator("input[type=file]").SetInputFilesAsync(fixture);
 
