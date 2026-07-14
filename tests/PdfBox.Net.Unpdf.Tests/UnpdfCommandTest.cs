@@ -6,13 +6,13 @@ namespace PdfBox.Net.Unpdf.Tests;
 public sealed class UnpdfCommandTest
 {
     [Fact]
-    public void Help_DescribesLiteCapabilities()
+    public void Help_DescribesRenderingCapabilities()
     {
         CommandResult result = Run("--help");
 
         Assert.Equal(UnpdfExitCode.Success, result.ExitCode);
         Assert.Contains("Usage: unpdf", result.Output);
-        Assert.Contains("Lite capability notes", result.Output);
+        Assert.Contains("image export, and annotation/transparency raster fallbacks are enabled", result.Output);
         Assert.Empty(result.Error);
     }
 
@@ -21,7 +21,7 @@ public sealed class UnpdfCommandTest
     [InlineData("--output", "requires a value")]
     [InlineData("--text-mode", "requires a value")]
     [InlineData("--text-mode", "other", "must be 'semantic' or 'fixed'")]
-    [InlineData("--profile", "rendering", "supports only '--profile lite'")]
+    [InlineData("--profile", "rendering", "unknown option")]
     public void InvalidArguments_ReturnUsageError(params string[] argumentsAndExpectedMessage)
     {
         string expectedMessage = argumentsAndExpectedMessage[^1];
@@ -121,7 +121,7 @@ public sealed class UnpdfCommandTest
     }
 
     [Fact]
-    public void DependencyGraph_ExcludesRenderingPackages()
+    public void DependencyGraph_IncludesRenderingPackages()
     {
         string assetsPath = Path.Combine(RepositoryRoot, "apps", "PdfBox.Net.Unpdf", "obj", "project.assets.json");
         Assert.True(File.Exists(assetsPath), $"Restore the CLI before running this test: {assetsPath}");
@@ -131,9 +131,10 @@ public sealed class UnpdfCommandTest
             .Select(property => property.Name)
             .ToArray();
 
-        Assert.DoesNotContain(libraries, name => name.StartsWith("SkiaSharp/", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(libraries, name => name.StartsWith("Magick.NET", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(libraries, name => name.StartsWith("PdfBox.Net.Rendering/", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(libraries, name => name.StartsWith("SkiaSharp/", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(libraries, name => name.StartsWith("Magick.NET", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(libraries, name => name.StartsWith("PdfBox.Net.SkiaSharp/", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(libraries, name => name.StartsWith("PdfBox.Net.ImageMagick/", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string FixturePath => Path.Combine(AppContext.BaseDirectory, "Fixtures", "classic-xref-fixture.pdf");

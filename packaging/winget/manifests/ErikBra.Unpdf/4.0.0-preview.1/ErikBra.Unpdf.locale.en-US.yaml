@@ -4,14 +4,14 @@ PackageIdentifier: ErikBra.Unpdf
 PackageVersion: 4.0.0-preview.1
 PackageLocale: en-US
 Publisher: PdfBox.Net contributors
-PublisherUrl: https://github.com/erikbra/pdfbox-net
-PublisherSupportUrl: https://github.com/erikbra/pdfbox-net/issues
+PublisherUrl: https://github.com/erikbra/unpdf
+PublisherSupportUrl: https://github.com/erikbra/unpdf/issues
 PackageName: unpdf
-PackageUrl: https://github.com/erikbra/pdfbox-net
+PackageUrl: https://github.com/erikbra/unpdf
 License: Apache-2.0
-LicenseUrl: https://github.com/erikbra/pdfbox-net/blob/main/LICENSE
+LicenseUrl: https://github.com/erikbra/unpdf/blob/main/LICENSE
 ShortDescription: Convert PDF documents to semantic HTML from the command line.
-Description: unpdf is a self-contained NativeAOT command-line converter for producing semantic or fixed-layout HTML from PDF documents.
+Description: unpdf is a self-contained single-file command-line converter for producing semantic or fixed-layout HTML from PDF documents.
 Tags:
   - cli
   - html

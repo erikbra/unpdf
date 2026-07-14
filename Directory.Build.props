@@ -9,9 +9,14 @@
     <Company>unpdf contributors</Company>
     <PackageProjectUrl>https://github.com/erikbra/unpdf</PackageProjectUrl>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/erikbra/unpdf</RepositoryUrl>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <PropertyGroup Condition="'$(RepositoryBranch)' == '' and '$(GITHUB_REF_NAME)' != ''">
     <RepositoryBranch>$(GITHUB_REF_NAME)</RepositoryBranch>

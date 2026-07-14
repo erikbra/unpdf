@@ -7,8 +7,9 @@ unpdf \- convert PDF documents to HTML
 .RI [ options ]
 .SH DESCRIPTION
 .B unpdf
-converts PDF text, links, vector paths, semantic forms, and browser-safe
-embedded fonts to semantic or fixed-layout HTML.
+converts PDF text, links, vector paths, semantic forms, embedded fonts, and
+images to semantic or fixed-layout HTML. It includes rendering and image-codec
+fallbacks for supported annotations, color conversions, and transparency groups.
 .SH OPTIONS
 .TP
 .BR -o ", " --output " " directory
@@ -32,4 +33,4 @@ Show command help.
 .B --version
 Show the version.
 .SH HOMEPAGE
-https://github.com/erikbra/pdfbox-net
+https://github.com/erikbra/unpdf
