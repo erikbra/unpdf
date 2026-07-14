@@ -40,4 +40,4 @@ jobs:
       - name: Verify NativeAOT CLI
         run: eng/verify-unpdf-nativeaot.sh linux-x64
       - name: Publish WebAssembly sample
-        run: dotnet publish samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj --configuration Release --no-build
+        run: dotnet publish samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj --configuration Release --no-restore
