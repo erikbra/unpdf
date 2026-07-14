@@ -5,6 +5,8 @@ on:
     paths:
       - ".github/workflows/test-unpdf-winget.yml"
       - "eng/update_winget_manifests.py"
+      - "eng/build_unpdf_release.py"
+      - "apps/PdfBox.Net.Unpdf/**"
       - "packaging/winget/**"
       - "tests/release/test_update_winget_manifests.py"
   workflow_dispatch:
@@ -22,11 +24,32 @@ jobs:
         with:
           python-version: "3.13"
 
+      - uses: actions/setup-dotnet@v5.4.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build and serve current Windows release artifact
+        shell: pwsh
+        run: |
+          python eng/build_unpdf_release.py --version 4.0.0-preview.1 --rid win-x64 `
+            --output artifacts/unpdf-release --signing-status unsigned-preview
+          $archive = Get-ChildItem artifacts/unpdf-release/unpdf-*.zip | Select-Object -First 1
+          $manifest = @{
+            version = "4.0.0-preview.1"
+            artifacts = @(@{
+              rid = "win-x64"
+              url = "http://127.0.0.1:8765/$($archive.Name)"
+              sha256 = (Get-FileHash $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            })
+          }
+          $manifest | ConvertTo-Json -Depth 4 | Set-Content artifacts/release-manifest.json
+          Start-Process python -ArgumentList "-m", "http.server", "8765", "--directory", "artifacts/unpdf-release"
+
       - name: Generate preview manifests
         shell: pwsh
         run: |
           python eng/update_winget_manifests.py `
-            --manifest "https://github.com/erikbra/unpdf/releases/download/unpdf-v4.0.0-preview.1/release-manifest.json" `
+            --manifest "artifacts/release-manifest.json" `
             --output "artifacts/winget-manifests"
 
       - name: Validate manifests
