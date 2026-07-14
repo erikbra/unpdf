@@ -6,6 +6,9 @@ on:
       - ".github/workflows/test-unpdf-apt.yml"
       - ".github/workflows/publish-unpdf-apt.yml"
       - "eng/build_unpdf_apt_repository.py"
+      - "eng/build_unpdf_release.py"
+      - "eng/create_unpdf_release_manifest.py"
+      - "apps/PdfBox.Net.Unpdf/**"
       - "eng/publish_unpdf_apt_site.py"
       - "packaging/debian/**"
       - "tests/release/test_build_unpdf_apt_repository.py"
@@ -20,6 +23,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.0
+
+      - uses: actions/setup-dotnet@v5.4.0
+        with:
+          dotnet-version: 10.0.x
 
       - name: Install repository tools
         run: sudo apt-get update && sudo apt-get install -y apt-utils dpkg-dev gnupg
@@ -43,10 +50,33 @@ jobs:
           printf '%s' 'unpdf-ci-test-passphrase' > artifacts-gpg-passphrase
           echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
 
+      - name: Build current Linux release artifacts
+        run: |
+          python3 eng/build_unpdf_release.py --version 4.0.0-preview.1 --rid linux-x64 \
+            --output artifacts/releases/linux-x64 --signing-status unsigned-preview
+          python3 eng/build_unpdf_release.py --version 4.0.0-preview.1 --rid linux-arm64 \
+            --output artifacts/releases/linux-arm64 --signing-status unsigned-preview --skip-smoke
+          mkdir -p artifacts/release-contract
+          cp artifacts/releases/linux-*/*.tar.gz* artifacts/release-contract/
+          cp artifacts/releases/linux-*/*.manifest.json artifacts/release-contract/
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("artifacts/release-contract").resolve()
+          artifacts = []
+          for rid in ("linux-x64", "linux-arm64"):
+              archive = root / f"unpdf-4.0.0-preview.1-{rid}.tar.gz"
+              checksum = (root / f"{archive.name}.sha256").read_text().split()[0]
+              artifacts.append({"rid": rid, "file": archive.name, "sha256": checksum, "url": archive.as_uri()})
+          (root / "release-manifest.json").write_text(json.dumps({
+              "schemaVersion": 1, "product": "unpdf", "version": "4.0.0-preview.1", "artifacts": artifacts
+          }))
+          PY
+
       - name: Build signed test repository
         run: >-
           python3 eng/build_unpdf_apt_repository.py
-          --manifest https://github.com/erikbra/unpdf/releases/download/unpdf-v4.0.0-preview.1/release-manifest.json
+          --manifest artifacts/release-contract/release-manifest.json
           --output artifacts/apt-repository
           --suite preview
           --gpg-key "${{ steps.signing.outputs.fingerprint }}"

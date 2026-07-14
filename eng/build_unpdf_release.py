@@ -167,7 +167,14 @@ def verify_signing(executable: Path, rid: str, signing_status: str) -> None:
     raise RuntimeError(f"unsupported signing status: {signing_status}")
 
 
-def build_release(root: Path, version: str, rid: str, output: Path, signing_status: str) -> Path:
+def build_release(
+    root: Path,
+    version: str,
+    rid: str,
+    output: Path,
+    signing_status: str,
+    skip_smoke: bool = False,
+) -> Path:
     project = root / "apps/PdfBox.Net.Unpdf/PdfBox.Net.Unpdf.csproj"
     publish = output / "publish"
     stage = output / "stage"
@@ -220,14 +227,15 @@ def build_release(root: Path, version: str, rid: str, output: Path, signing_stat
     if sha256(archive) != checksum:
         raise RuntimeError("archive checksum verification failed")
 
-    subprocess.run([str(executable), "--version"], check=True)
-    fixture_output = output / "smoke-html"
-    subprocess.run([
-        str(executable), str(root / "tests/SharedFixtures/classic-xref-fixture.pdf"),
-        "--output", str(fixture_output), "--quiet",
-    ], check=True)
-    if "Hello" not in (fixture_output / "index.html").read_text(encoding="utf-8"):
-        raise RuntimeError("release executable smoke output did not contain expected text")
+    if not skip_smoke:
+        subprocess.run([str(executable), "--version"], check=True)
+        fixture_output = output / "smoke-html"
+        subprocess.run([
+            str(executable), str(root / "tests/SharedFixtures/classic-xref-fixture.pdf"),
+            "--output", str(fixture_output), "--quiet",
+        ], check=True)
+        if "Hello" not in (fixture_output / "index.html").read_text(encoding="utf-8"):
+            raise RuntimeError("release executable smoke output did not contain expected text")
     return archive
 
 
@@ -238,9 +246,13 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--signing-status", default="unsigned-preview",
                         choices=["unsigned-preview", "windows-authenticode", "macos-developer-id-notarized"])
+    parser.add_argument("--skip-smoke", action="store_true",
+                        help="package without executing the target binary (for cross-RID package tests)")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    archive = build_release(root, args.version, args.rid, args.output.resolve(), args.signing_status)
+    archive = build_release(
+        root, args.version, args.rid, args.output.resolve(), args.signing_status, args.skip_smoke
+    )
     print(json.dumps({"archive": str(archive), "checksum": str(archive.with_suffix(archive.suffix + '.sha256'))}))
     return 0
 
