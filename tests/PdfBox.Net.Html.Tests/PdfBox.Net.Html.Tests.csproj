@@ -25,9 +25,9 @@
     <ProjectReference Include="..\..\tools\conversion_quality\PdfBox.Net.ConversionQuality\PdfBox.Net.ConversionQuality.csproj" />
     <ProjectReference Include="..\..\src\PdfBox.Net.Html\PdfBox.Net.Html.csproj" />
     <ProjectReference Include="..\..\src\PdfBox.Net.Layout\PdfBox.Net.Layout.csproj" />
-    <ProjectReference Include="..\..\external\pdfbox-net\src\PdfBox.Net\PdfBox.Net.csproj" />
-    <ProjectReference Include="..\..\external\pdfbox-net\src\PdfBox.Net.ImageMagick\PdfBox.Net.ImageMagick.csproj" />
-    <ProjectReference Include="..\..\external\pdfbox-net\src\PdfBox.Net.SkiaSharp\PdfBox.Net.SkiaSharp.csproj" />
+    <PackageReference Include="PdfBox.Net.Core" />
+    <PackageReference Include="PdfBox.Net.ImageMagick" />
+    <PackageReference Include="PdfBox.Net.SkiaSharp" />
   </ItemGroup>
 
   <ItemGroup>

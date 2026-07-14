@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\external\pdfbox-net\src\PdfBox.Net\PdfBox.Net.csproj" />
+    <PackageReference Include="PdfBox.Net.Core" />
   </ItemGroup>
 
 </Project>

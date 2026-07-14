@@ -5,9 +5,8 @@ repository contains the `PdfBox.Net.Layout` and `PdfBox.Net.Html` libraries, the
 cross-platform `unpdf` command-line application, and the browser WebAssembly
 sample.
 
-The conversion projects use the Apache PDFBox-derived .NET libraries from the
-pinned [PdfBox.Net](https://github.com/erikbra/pdfbox-net) submodule. Clone with
-`git clone --recurse-submodules` (or run `git submodule update --init`).
+The conversion projects use the Apache PDFBox-derived .NET libraries published
+as [PdfBox.Net packages on NuGet](https://www.nuget.org/profiles/erikbra).
 
 ## Build and test
 
