@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <PackageId>PdfBox.Net.Layout</PackageId>
+    <Description>Shared page layout extraction model for PdfBox.Net conversion packages.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\external\pdfbox-net\src\PdfBox.Net\PdfBox.Net.csproj" />
+  </ItemGroup>
+
+</Project>

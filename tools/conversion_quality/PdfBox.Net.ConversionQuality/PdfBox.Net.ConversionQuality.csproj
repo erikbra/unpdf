@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Playwright" />
+    <ProjectReference Include="..\..\..\src\PdfBox.Net.Html\PdfBox.Net.Html.csproj" />
+    <ProjectReference Include="..\..\..\src\PdfBox.Net.Layout\PdfBox.Net.Layout.csproj" />
+    <ProjectReference Include="..\..\..\external\pdfbox-net\src\PdfBox.Net\PdfBox.Net.csproj" />
+    <ProjectReference Include="..\..\..\external\pdfbox-net\src\PdfBox.Net.ImageMagick\PdfBox.Net.ImageMagick.csproj" />
+    <ProjectReference Include="..\..\..\external\pdfbox-net\src\PdfBox.Net.SkiaSharp\PdfBox.Net.SkiaSharp.csproj" />
+  </ItemGroup>
+
+</Project>

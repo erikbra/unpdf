@@ -1,0 +1,69 @@
+name: Test unpdf WinGet Package
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/test-unpdf-winget.yml"
+      - "eng/update_winget_manifests.py"
+      - "packaging/winget/**"
+      - "tests/release/test_update_winget_manifests.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Generate preview manifests
+        shell: pwsh
+        run: |
+          python eng/update_winget_manifests.py `
+            --manifest "https://github.com/erikbra/unpdf/releases/download/unpdf-v4.0.0-preview.1/release-manifest.json" `
+            --output "artifacts/winget-manifests"
+
+      - name: Validate manifests
+        shell: pwsh
+        run: |
+          winget --version
+          winget validate --manifest artifacts/winget-manifests
+
+      - name: Install local manifest
+        shell: pwsh
+        run: |
+          winget settings --enable LocalManifestFiles
+          winget install --manifest artifacts/winget-manifests `
+            --accept-package-agreements --accept-source-agreements --disable-interactivity
+          New-Item -ItemType File artifacts/winget-installed | Out-Null
+
+      - name: Smoke-test installed command
+        shell: pwsh
+        run: |
+          $command = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\unpdf.exe"
+          if (-not (Test-Path $command)) { throw "WinGet did not create the unpdf command link" }
+          & $command --version
+          & $command tests/SharedFixtures/classic-xref-fixture.pdf `
+            --output artifacts/winget-smoke --quiet
+          if (-not (Select-String -Path artifacts/winget-smoke/index.html -Pattern "Hello" -Quiet)) {
+            throw "Installed unpdf did not produce expected fixture HTML"
+          }
+
+      - name: Uninstall and verify cleanup
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          if (-not (Test-Path artifacts/winget-installed)) {
+            Write-Host "Install did not complete; no WinGet package to remove."
+            exit 0
+          }
+          winget uninstall --manifest artifacts/winget-manifests `
+            --accept-source-agreements --disable-interactivity
+          $command = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\unpdf.exe"
+          if (Test-Path $command) { throw "WinGet left the unpdf command link after uninstall" }

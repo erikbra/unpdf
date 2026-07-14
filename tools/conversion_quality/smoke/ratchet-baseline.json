@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "description": "Ratchet baseline for the lightweight conversion-quality smoke corpus.",
+  "maxStatus": {
+    "failed": 0,
+    "known": 0
+  },
+  "maxCategories": {
+    "broken-assets": 0,
+    "crash": 0,
+    "diagnostics": 0,
+    "dom": 0,
+    "required-files": 0,
+    "required-substrings": 0,
+    "text-coverage": 0,
+    "visual": 0
+  },
+  "minMetrics": {
+    "minimumTextCoverage": 1.0
+  }
+}

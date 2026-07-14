@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+
+PackageIdentifier: ErikBra.Unpdf
+PackageVersion: 4.0.0-preview.1
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: unpdf.exe
+    PortableCommandAlias: unpdf
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/erikbra/unpdf/releases/download/unpdf-v4.0.0-preview.1/unpdf-4.0.0-preview.1-win-x64.zip
+    InstallerSha256: 0D7DAEDE0B41BAB0F297DAD47C1F5AC27F4656FD2D2789F31F6A52ACBD94209E
+ManifestType: installer
+ManifestVersion: 1.10.0

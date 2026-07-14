@@ -1,0 +1,35 @@
+.TH UNPDF 1 "July 2026" "unpdf" "User Commands"
+.SH NAME
+unpdf \- convert PDF documents to HTML
+.SH SYNOPSIS
+.B unpdf
+.I input.pdf
+.RI [ options ]
+.SH DESCRIPTION
+.B unpdf
+converts PDF text, links, vector paths, semantic forms, and browser-safe
+embedded fonts to semantic or fixed-layout HTML.
+.SH OPTIONS
+.TP
+.BR -o ", " --output " " directory
+Write generated HTML and assets to the directory.
+.TP
+.B --force
+Write into a non-empty output directory.
+.TP
+.BR --text-mode " semantic|fixed"
+Select semantic or fixed text layout.
+.TP
+.BR --page-mode " continuous|fixed"
+Select continuous flow or fixed PDF pages.
+.TP
+.BR -q ", " --quiet
+Suppress success and warning messages.
+.TP
+.BR -h ", " --help
+Show command help.
+.TP
+.B --version
+Show the version.
+.SH HOMEPAGE
+https://github.com/erikbra/pdfbox-net

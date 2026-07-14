@@ -1,0 +1,158 @@
+name: Build unpdf Release Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SemVer release version, for example 4.0.0-preview.1"
+        required: true
+        type: string
+      publish_release:
+        description: "Attach artifacts to a GitHub prerelease"
+        required: true
+        default: false
+        type: boolean
+  pull_request:
+    paths:
+      - ".github/workflows/publish-unpdf.yml"
+      - "apps/PdfBox.Net.Unpdf/**"
+      - "eng/build_unpdf_release.py"
+      - "tests/release/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unpdf-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            os: ubuntu-24.04
+          - rid: linux-arm64
+            os: ubuntu-24.04-arm
+          - rid: win-x64
+            os: windows-2025
+          - rid: osx-x64
+            os: macos-15-intel
+          - rid: osx-arm64
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || format('4.0.0-preview.ci.{0}', github.run_number) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5.4.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Test release builder
+        run: python -m unittest discover -s tests/release -p "test_*.py"
+
+      - name: Build and smoke-test unsigned preview artifact
+        run: >-
+          python eng/build_unpdf_release.py
+          --version "${{ env.RELEASE_VERSION }}"
+          --rid "${{ matrix.rid }}"
+          --output "artifacts/unpdf-release/${{ matrix.rid }}"
+          --signing-status unsigned-preview
+
+      - name: Upload RID artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: unpdf-${{ env.RELEASE_VERSION }}-${{ matrix.rid }}
+          path: |
+            artifacts/unpdf-release/${{ matrix.rid }}/unpdf-*
+          if-no-files-found: error
+
+  assemble:
+    name: Assemble release contract
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || format('4.0.0-preview.ci.{0}', github.run_number) }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+
+      - name: Download RID artifacts
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: unpdf-${{ env.RELEASE_VERSION }}-*
+          path: artifacts/release
+          merge-multiple: true
+
+      - name: Verify checksums and create release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts/release
+          cat ./*.sha256 | sort -k2 > checksums.sha256
+          while read -r checksum filename; do
+            printf '%s  %s\n' "$checksum" "$filename" | sha256sum --check --strict
+          done < checksums.sha256
+          python "$GITHUB_WORKSPACE/eng/create_unpdf_release_manifest.py" \
+            --version "$RELEASE_VERSION" \
+            --repository "$GITHUB_REPOSITORY" \
+            --directory . \
+            --output release-manifest.json
+          cat release-manifest.json
+
+      - name: Attest build provenance
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/attest@v4.1.0
+        with:
+          subject-path: |
+            artifacts/release/*.tar.gz
+            artifacts/release/*.zip
+
+      - name: Upload assembled release contract
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: unpdf-${{ env.RELEASE_VERSION }}-release
+          path: artifacts/release
+          if-no-files-found: error
+
+      - name: Publish unsigned GitHub prerelease
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_VERSION" != *-* ]]; then
+            echo "Stable unpdf releases require verified Windows signing and macOS signing/notarization." >&2
+            echo "This workflow currently produces explicitly unsigned preview artifacts only." >&2
+            exit 1
+          fi
+          mapfile -t assets < <(find artifacts/release -maxdepth 1 -type f | sort)
+          tag="unpdf-v$RELEASE_VERSION"
+          gh release create "$tag" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "unpdf $RELEASE_VERSION (unsigned preview)" \
+            --notes "Unsigned preview artifacts. Verify checksums and GitHub build provenance before use." \
+            --prerelease

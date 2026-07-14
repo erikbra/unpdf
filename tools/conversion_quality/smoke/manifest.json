@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "description": "Lightweight synthetic smoke fixture for the converter-independent quality harness.",
+  "fixtures": [
+    {
+      "id": "synthetic-html-text",
+      "title": "Synthetic fixed-layout HTML text",
+      "target": "html",
+      "categories": [
+        "html",
+        "text",
+        "assets"
+      ],
+      "outputs": {
+        "html": "synthetic-html-text/index.html",
+        "diagnostics": "synthetic-html-text/diagnostics.json",
+        "visual": "synthetic-html-text/visual.json"
+      },
+      "expectedText": "Hello PDF conversion Second line",
+      "expectations": {
+        "minTextCoverage": 1.0,
+        "maxBrokenLocalReferences": 0,
+        "maxDiagnostics": 0,
+        "minVisualChecks": 2,
+        "domSelectors": [
+          {
+            "selector": ".pdf-page",
+            "count": 1
+          },
+          {
+            "selector": ".text-run",
+            "count": 2
+          },
+          {
+            "selector": "[data-page-number]",
+            "count": 1
+          }
+        ],
+        "requiredFiles": [
+          "synthetic-html-text/index.html",
+          "synthetic-html-text/assets/page.css"
+        ],
+        "requiredSubstrings": [
+          {
+            "output": "html",
+            "text": "data-page-number=\"1\""
+          },
+          {
+            "output": "html",
+            "text": "position:absolute"
+          }
+        ]
+      }
+    }
+  ]
+}

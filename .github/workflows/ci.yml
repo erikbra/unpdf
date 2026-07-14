@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v5.4.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore Unpdf.slnx
+      - name: Build
+        run: dotnet build Unpdf.slnx --configuration Release --no-restore
+      - name: Test release tooling
+        run: python3 -m unittest discover -s tests/release -p 'test_*.py'
+      - name: Test conversion quality tooling
+        run: python3 -m unittest discover -s tests/conversion_quality -p 'test_*.py'
+      - name: Install Playwright browser
+        run: >-
+          tests/PdfBox.Net.Html.Tests/bin/Release/net10.0/.playwright/node/linux-x64/node
+          tests/PdfBox.Net.Html.Tests/bin/Release/net10.0/.playwright/package/cli.js
+          install --with-deps chromium
+      - name: Test
+        run: dotnet test Unpdf.slnx --configuration Release --no-build --nologo
+      - name: Verify single-file CLI
+        run: eng/verify-unpdf-single-file.sh linux-x64
+      - name: Verify NativeAOT CLI
+        run: eng/verify-unpdf-nativeaot.sh linux-x64
+      - name: Publish WebAssembly sample
+        run: dotnet publish samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj --configuration Release --no-build

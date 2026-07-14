@@ -1,0 +1,121 @@
+name: Publish PDF-to-HTML WASM Preview
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-wasm-pages.yml"
+      - "Directory.Packages.props"
+      - "eng/publish_wasm_pages_site.py"
+      - "packaging/pages/**"
+      - "samples/PdfBox.Net.Html.Wasm/**"
+      - "src/PdfBox.Net/**"
+      - "src/PdfBox.Net.FontBox/**"
+      - "src/PdfBox.Net.Html/**"
+      - "src/PdfBox.Net.IO/**"
+      - "src/PdfBox.Net.Layout/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: unpdf-pages-publication
+  cancel-in-progress: false
+
+env:
+  PAGES_BASE_URL: https://erikbra.github.io/unpdf
+  WASM_BASE_PATH: /unpdf/wasm/
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v5.4.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish browser-lite application
+        run: >-
+          dotnet publish
+          samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj
+          --configuration Release
+          --output artifacts/wasm-publish
+
+      - uses: actions/checkout@v7.0.0
+        with:
+          ref: gh-pages
+          path: artifacts/pages
+          fetch-depth: 0
+
+      - name: Merge application into Pages tree
+        run: >-
+          python3 eng/publish_wasm_pages_site.py
+          --application artifacts/wasm-publish/wwwroot
+          --site artifacts/pages
+          --landing-page packaging/pages/index.html
+          --not-found-page packaging/pages/404.html
+          --base-path "$WASM_BASE_PATH"
+
+      - name: Verify staged site
+        run: |
+          grep -F '<base href="/unpdf/wasm/"' artifacts/pages/wasm/index.html
+          grep -F 'PdfBox.Net' artifacts/pages/index.html
+          if grep -Fq 'PdfBox.Net.Html.Wasm.styles.css' artifacts/pages/wasm/index.html; then
+            echo "Published index references a missing scoped CSS bundle" >&2
+            exit 1
+          fi
+          test -n "$(find artifacts/pages/wasm/_framework -maxdepth 1 -name 'blazor.webassembly.*.js' -type f -print -quit)"
+          test -n "$(find artifacts/pages/wasm/_framework -maxdepth 1 -name 'dotnet.native.*.wasm' -type f -print -quit)"
+          test -f artifacts/pages/wasm/samples/hello.pdf
+          test -f artifacts/pages/apt/index.html
+
+      - name: Commit Pages update
+        id: publish
+        working-directory: artifacts/pages
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .nojekyll 404.html index.html wasm
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish browser-lite PDF-to-HTML preview"
+            git push origin gh-pages
+          fi
+          echo "root_sha256=$(sha256sum index.html | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "wasm_sha256=$(sha256sum wasm/index.html | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          framework_wasm="$(find wasm/_framework -maxdepth 1 -name 'dotnet.native.*.wasm' -type f -print -quit)"
+          test -n "$framework_wasm"
+          echo "framework_wasm=${framework_wasm#wasm/}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for GitHub Pages deployment
+        env:
+          ROOT_SHA256: ${{ steps.publish.outputs.root_sha256 }}
+          WASM_SHA256: ${{ steps.publish.outputs.wasm_sha256 }}
+        run: |
+          for _ in $(seq 1 60); do
+            root_sha="$(curl -fsS "$PAGES_BASE_URL/?run=$GITHUB_RUN_ID" | sha256sum | cut -d' ' -f1 || true)"
+            wasm_sha="$(curl -fsS "$PAGES_BASE_URL/wasm/?run=$GITHUB_RUN_ID" | sha256sum | cut -d' ' -f1 || true)"
+            if test "$root_sha" = "$ROOT_SHA256" && test "$wasm_sha" = "$WASM_SHA256"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "GitHub Pages did not publish the expected WASM site within ten minutes" >&2
+          exit 1
+
+      - name: Verify public assets
+        env:
+          FRAMEWORK_WASM: ${{ steps.publish.outputs.framework_wasm }}
+        run: |
+          curl -fsS "$PAGES_BASE_URL/wasm/samples/hello.pdf" -o "$RUNNER_TEMP/hello.pdf"
+          grep -a -q '%PDF-' "$RUNNER_TEMP/hello.pdf"
+          content_type="$(curl -fsSI "$PAGES_BASE_URL/wasm/$FRAMEWORK_WASM" | tr -d '\r' | awk -F': ' 'tolower($1) == "content-type" { print tolower($2) }')"
+          case "$content_type" in
+            application/wasm*) ;;
+            *) echo "Unexpected WebAssembly content type: $content_type" >&2; exit 1 ;;
+          esac

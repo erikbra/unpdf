@@ -1,0 +1,612 @@
+{
+  "schema": 1,
+  "description": "Pinned, freely available public PDFs spanning academic papers, government forms and publications, scans, presentations, technical documents, RTL content, bilingual brochures, and national park maps for remote HTML conversion quality checks. PDFs are downloaded into ignored artifacts/cache storage and are never committed.",
+  "documents": [
+    {
+      "id": "jmlr-lda",
+      "title": "JMLR: Latent Dirichlet Allocation",
+      "sourcePage": "https://www.jmlr.org/papers/v3/blei03a.html",
+      "pdfUrl": "https://www.jmlr.org/papers/volume3/blei03a/blei03a.pdf",
+      "sha256": "4667de63545b57d55d6c43e5af6f3429edfaac9472ed9eff68fdf43572735dd9",
+      "categories": [
+        "text-heavy",
+        "tables",
+        "figures",
+        "formulas"
+      ],
+      "qualityPages": 2,
+      "notes": "Long-form academic article with equations, tables, and figures.",
+      "expectations": {
+        "pageCount": 30,
+        "requiredText": [
+          "latent",
+          "dirichlet",
+          "allocation"
+        ],
+        "minTextRuns": 5000,
+        "minImagePlacements": 1,
+        "minVectorPaths": 1000
+      }
+    },
+    {
+      "id": "acl-bert",
+      "title": "ACL Anthology: BERT",
+      "sourcePage": "https://aclanthology.org/N19-1423/",
+      "pdfUrl": "https://aclanthology.org/N19-1423.pdf",
+      "sha256": "987545ffb087f1ece898142c403a516baeabeb70ce19089397fac6f7db12c3d4",
+      "categories": [
+        "complex-columns",
+        "text-heavy",
+        "tables",
+        "figures"
+      ],
+      "qualityPages": 2,
+      "notes": "Dense two-column academic paper with many tables, figures, and links.",
+      "expectations": {
+        "pageCount": 16,
+        "requiredText": [
+          "bert",
+          "pretraining",
+          "bidirectional",
+          "transformers"
+        ],
+        "minTextRuns": 4000,
+        "minImagePlacements": 5,
+        "minVectorPaths": 100,
+        "minLinks": 50
+      }
+    },
+    {
+      "id": "arxiv-adam",
+      "title": "arXiv: Adam",
+      "sourcePage": "https://arxiv.org/abs/1412.6980",
+      "pdfUrl": "https://arxiv.org/pdf/1412.6980",
+      "sha256": "eab9c73ae2ceda884b94830bda99312254bac4806f6c9f045cbab90721ecda31",
+      "categories": [
+        "math-focused",
+        "formulas",
+        "algorithms"
+      ],
+      "qualityPages": 2,
+      "notes": "Formula-heavy paper with mathematical notation and algorithms.",
+      "expectations": {
+        "pageCount": 15,
+        "requiredText": [
+          "adam",
+          "stochastic",
+          "optimization"
+        ],
+        "minTextRuns": 4000,
+        "minVectorPaths": 500
+      }
+    },
+    {
+      "id": "arxiv-unet",
+      "title": "arXiv: U-Net",
+      "sourcePage": "https://arxiv.org/abs/1505.04597",
+      "pdfUrl": "https://arxiv.org/pdf/1505.04597",
+      "sha256": "a3172b2124f38e260dc2c7ed968d87c31bc94dbc19a42a7ab3dcbd7534319c44",
+      "categories": [
+        "image-heavy",
+        "diagrams",
+        "complex-columns"
+      ],
+      "qualityPages": 8,
+      "notes": "Image- and diagram-heavy paper with a two-column academic layout.",
+      "expectations": {
+        "pageCount": 8,
+        "requiredText": [
+          "u-net",
+          "convolutional",
+          "biomedical",
+          "segmentation"
+        ],
+        "minTextRuns": 2000,
+        "minImagePlacements": 8,
+        "minVectorPaths": 100,
+        "minLinks": 20
+      }
+    },
+    {
+      "id": "arxiv-svt",
+      "title": "arXiv: A Singular Value Thresholding Algorithm for Matrix Completion",
+      "sourcePage": "https://arxiv.org/abs/0810.3286",
+      "pdfUrl": "https://arxiv.org/pdf/0810.3286",
+      "sha256": "5f7f969ec4caf973e49a76524ea9baca3b61ec9ee6334db478968e06c3ac8a76",
+      "categories": [
+        "math-focused",
+        "formulas",
+        "figures",
+        "links"
+      ],
+      "qualityPages": 2,
+      "notes": "Long formula-heavy paper with figures, dense vector content, and many citation links.",
+      "expectations": {
+        "pageCount": 28,
+        "requiredText": [
+          "singular",
+          "value",
+          "thresholding",
+          "matrix",
+          "completion"
+        ],
+        "minTextRuns": 12000,
+        "minImagePlacements": 75,
+        "minVectorPaths": 2400,
+        "minLinks": 100
+      }
+    },
+    {
+      "id": "arxiv-ddpm",
+      "title": "arXiv: Denoising Diffusion Probabilistic Models",
+      "sourcePage": "https://arxiv.org/abs/2006.11239",
+      "pdfUrl": "https://arxiv.org/pdf/2006.11239",
+      "sha256": "aee5e07a802e8dfd2a386374c94fd61d1d056cb7e1e0fec4f28e8120ff5d8505",
+      "categories": [
+        "complex-columns",
+        "formulas",
+        "figures",
+        "links"
+      ],
+      "qualityPages": 2,
+      "notes": "Two-column machine-learning paper with equations, generated-image figures, and citation links.",
+      "expectations": {
+        "pageCount": 25,
+        "requiredText": [
+          "denoising",
+          "diffusion",
+          "probabilistic",
+          "models"
+        ],
+        "minTextRuns": 4000,
+        "minImagePlacements": 15,
+        "minVectorPaths": 2400,
+        "minLinks": 140
+      }
+    },
+    {
+      "id": "irs-w9",
+      "title": "IRS Form W-9",
+      "sourcePage": "https://www.irs.gov/forms-pubs/about-form-w-9",
+      "pdfUrl": "https://www.irs.gov/pub/irs-pdf/fw9.pdf",
+      "sha256": "2d420cbb4123dcf1fb82595b2359cfbb5d81f00b9df9d359fcc7af361d093f53",
+      "categories": [
+        "government-form",
+        "forms",
+        "vector-heavy"
+      ],
+      "qualityPages": 6,
+      "notes": "Multi-page federal tax form with boxed fields, instructions, and dense vector line work.",
+      "expectations": {
+        "pageCount": 6,
+        "requiredText": [
+          "request",
+          "taxpayer",
+          "identification",
+          "certification"
+        ],
+        "minTextRuns": 750,
+        "minVectorPaths": 100,
+        "minFormControls": 20,
+        "semanticOrderedListItemCountsByPage": {
+          "1": [
+            4
+          ]
+        }
+      }
+    },
+    {
+      "id": "uscis-i9",
+      "title": "USCIS Form I-9",
+      "sourcePage": "https://www.uscis.gov/i-9",
+      "pdfUrl": "https://www.uscis.gov/sites/default/files/document/forms/i-9.pdf",
+      "sha256": "780f348c34df694bb0b4dbbfaf9f22b99b9757b80d16a37ba89aadf069597281",
+      "categories": [
+        "government-form",
+        "forms",
+        "vector-heavy",
+        "links"
+      ],
+      "qualityPages": 4,
+      "notes": "Employment eligibility form with structured fields, embedded images, vector line work, and links.",
+      "expectations": {
+        "pageCount": 4,
+        "requiredText": [
+          "employment",
+          "eligibility",
+          "verification"
+        ],
+        "minTextRuns": 400,
+      "minImagePlacements": 5,
+      "minVectorPaths": 240,
+      "minLinks": 5,
+      "minFormControls": 100
+      }
+    },
+    {
+      "id": "nist-sp800-171r3",
+      "title": "NIST SP 800-171 Revision 3",
+      "sourcePage": "https://csrc.nist.gov/pubs/sp/800/171/r3/final",
+      "pdfUrl": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-171r3.pdf",
+      "sha256": "3e4631df8b5d61f40a6e542b52779ef30ddbbfff31e09214fa94ad6e6f5e6d08",
+      "categories": [
+        "government-publication",
+        "text-heavy",
+        "tables",
+        "figures",
+        "links"
+      ],
+      "qualityPages": 15,
+      "notes": "Long government publication with structured requirements, tables, figures, dense vectors, and extensive links.",
+      "expectations": {
+        "pageCount": 120,
+        "requiredText": [
+          "protecting",
+          "controlled",
+          "unclassified",
+          "information"
+        ],
+        "minTextRuns": 6500,
+        "minImagePlacements": 30,
+        "minVectorPaths": 6500,
+        "minLinks": 1000
+      }
+    },
+    {
+      "id": "nps-mount-rainier",
+      "title": "National Park Service: Mount Rainier Park Brochure",
+      "sourcePage": "https://www.nps.gov/mora/planyourvisit/park-brochure.htm",
+      "pdfUrl": "https://www.nps.gov/mora/planyourvisit/upload/Mount-Rainier-Brochure-final_Combo_508_v2023.pdf",
+      "sha256": "c2e3006635137aef1fa67b0787280b1602c0f19535f6f2a21df6e9c286186e49",
+      "categories": [
+        "park-brochure",
+        "complex-layout",
+        "image-heavy",
+        "maps"
+      ],
+      "qualityPages": 2,
+      "notes": "Two-page park brochure with photographs, maps, compact text regions, and irregular layout.",
+      "expectations": {
+        "pageCount": 2,
+        "requiredText": [
+          "mount",
+          "rainier",
+          "national",
+          "park"
+        ],
+        "minTextRuns": 200,
+        "minImagePlacements": 18,
+        "minImagePlacementsByPage": {
+          "2": 1
+        },
+        "minVectorPaths": 30
+      }
+    },
+    {
+      "id": "nps-point-reyes-map",
+      "title": "National Park Service: Point Reyes Park Map",
+      "sourcePage": "https://www.nps.gov/pore/planyourvisit/parkbrochure.htm",
+      "pdfUrl": "https://www.nps.gov/pore/planyourvisit/upload/map_park.pdf",
+      "sha256": "dcc4afa633ad924a69a35a9bdd19bd3b29782849b7993158acab720260168d2f",
+      "categories": [
+        "park-map",
+        "complex-layout",
+        "image-heavy",
+        "vector-heavy"
+      ],
+      "qualityPages": 1,
+      "notes": "Single-page park map with exceptionally dense image placements, labels, and vector geometry.",
+      "expectations": {
+        "pageCount": 1,
+        "requiredText": [
+          "point",
+          "reyes",
+          "national",
+          "seashore"
+        ],
+        "minTextRuns": 800,
+        "minImagePlacements": 750,
+        "minVectorPaths": 850
+      }
+    },
+    {
+      "id": "arxiv-attention",
+      "title": "arXiv: Attention Is All You Need v7",
+      "sourcePage": "https://arxiv.org/abs/1706.03762v7",
+      "pdfUrl": "https://arxiv.org/pdf/1706.03762v7",
+      "sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
+      "categories": [
+        "complex-columns",
+        "formulas",
+        "tables",
+        "diagrams",
+        "vector-heavy",
+        "links"
+      ],
+      "qualityPages": 2,
+      "notes": "Formula-heavy machine-learning paper with tables, vector attention figures, dense paths, and citation links.",
+      "expectations": {
+        "pageCount": 15,
+        "requiredText": [
+          "attention",
+          "sequence",
+          "transformer"
+        ],
+        "minTextRuns": 2300,
+        "minImagePlacements": 2,
+        "minVectorPaths": 2400,
+        "minLinks": 100
+      }
+    },
+    {
+      "id": "arxiv-scaling-hamiltonian",
+      "title": "arXiv: The Scaling Hamiltonian v1",
+      "sourcePage": "https://arxiv.org/abs/1910.14368v1",
+      "pdfUrl": "https://arxiv.org/pdf/1910.14368v1",
+      "sha256": "c55618121c95dfa301aea350b74eca7e902690396629041f486414a513ca079e",
+      "categories": [
+        "math-focused",
+        "formulas",
+        "text-heavy",
+        "links"
+      ],
+      "qualityPages": 2,
+      "notes": "Long mathematics paper with dense notation, formulas, Type 1 fonts, and extensive citation links.",
+      "expectations": {
+        "pageCount": 22,
+        "requiredText": [
+          "scaling",
+          "hamiltonian",
+          "riemann"
+        ],
+        "minTextRuns": 5400,
+        "minImagePlacements": 2,
+        "minVectorPaths": 600,
+        "minLinks": 125
+      }
+    },
+    {
+      "id": "fbi-fd258",
+      "title": "FBI FD-258 Fingerprint Card",
+      "sourcePage": "https://www.fbi.gov/file-repository/cjis/fd-258.pdf/view",
+      "pdfUrl": "https://www.fbi.gov/file-repository/cjis/fd-258.pdf/@@download/file/FD-258fillable.pdf",
+      "sha256": "04f108e1adadefef05c0ab68682bd7f490534920086762508c5163f0b90784b5",
+      "categories": [
+        "government-form",
+        "forms",
+        "tagged-pdf",
+        "unusual-layout",
+        "vector-heavy"
+      ],
+      "qualityPages": 2,
+      "notes": "Tagged two-page AcroForm with a fingerprint-card grid, sample fingerprint images, and dense instructions.",
+      "expectations": {
+        "pageCount": 2,
+        "requiredText": [
+          "applicant",
+          "fingerprinted",
+          "federal bureau of investigation"
+        ],
+        "minTextRuns": 1400,
+        "minImagePlacements": 1,
+        "minVectorPaths": 50,
+        "minLinks": 1,
+        "minFormControls": 1
+      }
+    },
+    {
+      "id": "opm-of306",
+      "title": "OPM OF-306 Declaration for Federal Employment",
+      "sourcePage": "https://www.opm.gov/forms/Optional-forms/",
+      "pdfUrl": "https://www.opm.gov/media/dxrbwvmb/declaration-for-federal-employment-optional-form-august-2023.pdf",
+      "sha256": "b690ec40015e42b0ed0424e5c0193616dc6491b70525240463d24b951e6ce46c",
+      "categories": [
+        "government-form",
+        "forms",
+        "tagged-pdf",
+        "form-controls",
+        "vector-heavy"
+      ],
+      "qualityPages": 2,
+      "notes": "Tagged fillable employment declaration with many text fields, checkboxes, tables, and vector rules.",
+      "expectations": {
+        "pageCount": 3,
+        "requiredText": [
+          "declaration",
+          "federal employment",
+          "privacy act"
+        ],
+        "minTextRuns": 280,
+        "minImagePlacements": 50,
+        "minVectorPaths": 225,
+        "minFormControls": 50
+      }
+    },
+    {
+      "id": "nasa-artemis-i",
+      "title": "NASA Artemis I Press Kit",
+      "sourcePage": "https://www.nasa.gov/artemis-i-press-kit/",
+      "pdfUrl": "https://www.nasa.gov/wp-content/uploads/2026/01/artemis-i-press-kit.pdf",
+      "sha256": "551f510e493f3ef9bc834afe740d659b1f9772f3dc39845aba0bd7a8433b40c7",
+      "categories": [
+        "government-publication",
+        "graphic-heavy",
+        "image-heavy",
+        "complex-layout",
+        "links"
+      ],
+      "qualityPages": 2,
+      "notes": "Modern graphic press kit with full-page photography, branded layouts, timelines, and navigation links.",
+      "expectations": {
+        "pageCount": 41,
+        "requiredText": [
+          "artemis",
+          "mission overview",
+          "orion spacecraft"
+        ],
+        "minTextRuns": 1400,
+        "minImagePlacements": 40,
+        "minVectorPaths": 180,
+        "minLinks": 35
+      }
+    },
+    {
+      "id": "nasa-apollo11-scan",
+      "title": "NASA Apollo 11 Scanned Press Kit",
+      "sourcePage": "https://www.nasa.gov/specials/apollo50th/press.html",
+      "pdfUrl": "https://www.nasa.gov/wp-content/uploads/static/apollo50th/pdf/A11_PressKit.pdf",
+      "sha256": "fcb1ae7a88e5251559dde0b7d51ec71f06795cf78f64491aa9594fdf9ca89334",
+      "categories": [
+        "government-publication",
+        "historical-scan",
+        "image-over-text",
+        "long-document"
+      ],
+      "qualityPages": 2,
+      "notes": "Historical 254-page scanned press kit with one page image per page and an OCR text layer.",
+      "expectations": {
+        "pageCount": 254,
+        "requiredText": [
+          "apollo 11",
+          "lunar landing mission",
+          "national aeronautics and space administration"
+        ],
+        "minTextRuns": 29000,
+        "minImagePlacements": 250,
+        "minVectorPaths": 280
+      }
+    },
+    {
+      "id": "raspberry-pi4-datasheet",
+      "title": "Raspberry Pi 4 Model B Datasheet",
+      "sourcePage": "https://www.raspberrypi.com/documentation/computers/raspberry-pi.html",
+      "pdfUrl": "https://datasheets.raspberrypi.com/rpi4/raspberry-pi-4-datasheet.pdf",
+      "sha256": "8febd042d004c7a2897a60fe6e1b2c007a941c3c4119f4fb791dc0afb669a860",
+      "categories": [
+        "technical-datasheet",
+        "tables",
+        "technical-drawings",
+        "diagrams",
+        "links"
+      ],
+      "qualityPages": 2,
+      "notes": "Hardware datasheet with tables, pin diagrams, mechanical drawings, dense vectors, and links.",
+      "expectations": {
+        "pageCount": 13,
+        "requiredText": [
+          "raspberry pi 4 model b",
+          "datasheet",
+          "mechanical specification"
+        ],
+        "minTextRuns": 1500,
+        "minImagePlacements": 1,
+        "minVectorPaths": 1800,
+        "minLinks": 30
+      }
+    },
+    {
+      "id": "nist-floating-point-slides",
+      "title": "NIST: Validating Floating Point Implementations",
+      "sourcePage": "https://csrc.nist.gov/presentations/2026/mpts2026-2b2",
+      "pdfUrl": "https://csrc.nist.gov/csrc/media/presentations/2026/mpts2026-2b2/images-media/mpts2026-2b2-slides-float-point-ciadoux.pdf",
+      "sha256": "492b156147376bd72dafd2ebb06c952d43c6682ce2e6553a0d2c33ab6904d71f",
+      "categories": [
+        "government-presentation",
+        "slides",
+        "tagged-pdf",
+        "technical-content",
+        "image-heavy"
+      ],
+      "qualityPages": 2,
+      "notes": "Tagged technical presentation with sparse slide text, diagrams, screenshots, and mathematical notation.",
+      "expectations": {
+        "pageCount": 13,
+        "requiredText": [
+          "validating floating point implementations",
+          "nist",
+          "ieee754"
+        ],
+        "minTextRuns": 150,
+        "minImagePlacements": 30,
+        "minVectorPaths": 80
+      }
+    },
+    {
+      "id": "un-system-arabic",
+      "title": "UN System Chart 2025 Arabic",
+      "sourcePage": "https://www.un.org/en/delegate/page/un-system-chart",
+      "pdfUrl": "https://www.un.org/sites/un2.un.org/files/un_system_chart_arabic.pdf",
+      "sha256": "a9f4dd6641db49258c14adf720fcf0424f9b51e2c7bec554ebcd53a7cff1466b",
+      "categories": [
+        "rtl",
+        "arabic",
+        "organizational-chart",
+        "complex-layout",
+        "vector-heavy"
+      ],
+      "qualityPages": 1,
+      "notes": "Single-page Arabic RTL organizational chart with many compact labels, connectors, and columns.",
+      "expectations": {
+        "pageCount": 1,
+        "requiredText": [
+          "ecosoc"
+        ],
+        "minTextRuns": 325,
+        "minVectorPaths": 40
+      }
+    },
+    {
+      "id": "eeas-europe-japanese",
+      "title": "EEAS: Let's Explore Europe Japanese/English",
+      "sourcePage": "https://www.eeas.europa.eu/delegations/japan/lets-explore-europe-japanese-and-english-edition-0_en",
+      "pdfUrl": "https://www.eeas.europa.eu/sites/default/files/documents/2023/Lets%20explore%20Europe_JP_web.pdf",
+      "sha256": "f9aa34f34d4c3cfa37dc01772296114c655988bad56eb9b54d4bd5c1f6a1e369",
+      "categories": [
+        "bilingual",
+        "japanese",
+        "graphic-heavy",
+        "brochure",
+        "complex-layout"
+      ],
+      "qualityPages": 2,
+      "notes": "Bilingual Japanese/English educational brochure with illustrations, photographs, and dense vector graphics.",
+      "expectations": {
+        "pageCount": 28,
+        "requiredText": [
+          "let's explore europe",
+          "european union",
+          "learning the lessons of history"
+        ],
+        "minTextRuns": 1500,
+        "minImagePlacements": 22,
+        "minVectorPaths": 7000
+      }
+    },
+    {
+      "id": "eu-access-city-form",
+      "title": "EU Access City Award 2026 Application Form",
+      "sourcePage": "https://commission.europa.eu/strategy-and-policy/policies/justice-and-fundamental-rights/disability/access-city-award_en",
+      "pdfUrl": "https://access-city-award.ec.europa.eu/sites/default/files/downloads/Annex%20I%20Application%20Form%20-%20ACA%202026%20-%20EN.pdf",
+      "sha256": "59fc6f3f9ad902a3a98c4151f8719eedf0931f26111cf3c92d7683a5307fe4ca",
+      "categories": [
+        "government-form",
+        "structured-form",
+        "tagged-pdf",
+        "tables"
+      ],
+      "qualityPages": 2,
+      "notes": "Tagged structured application form with long prompts, response boxes, tables, and embedded graphics.",
+      "expectations": {
+        "pageCount": 7,
+        "requiredText": [
+          "access city award 2026",
+          "application form",
+          "application platform"
+        ],
+        "minTextRuns": 220,
+        "minImagePlacements": 12,
+        "minVectorPaths": 100
+      }
+    }
+  ]
+}

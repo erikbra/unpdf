@@ -1,0 +1,3 @@
+[submodule "external/pdfbox-net"]
+	path = external/pdfbox-net
+	url = https://github.com/erikbra/pdfbox-net.git

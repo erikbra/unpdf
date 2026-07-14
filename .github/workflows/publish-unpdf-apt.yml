@@ -1,0 +1,169 @@
+name: Publish unpdf APT Repository
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing unpdf GitHub Release tag
+        required: true
+        default: unpdf-v4.0.0-preview.1
+      suite:
+        description: APT channel to update
+        required: true
+        type: choice
+        options:
+          - preview
+          - stable
+        default: preview
+
+permissions:
+  contents: write
+
+concurrency:
+  group: unpdf-pages-publication
+  cancel-in-progress: false
+
+env:
+  APT_BASE_URL: https://erikbra.github.io/unpdf/apt
+  RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
+  APT_SUITE: ${{ github.event_name == 'release' && (github.event.release.prerelease && 'preview' || 'stable') || inputs.suite }}
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'unpdf-v')
+    runs-on: ubuntu-24.04
+    environment: unpdf-apt-production
+    outputs:
+      suite: ${{ steps.release.outputs.suite }}
+      inrelease_sha256: ${{ steps.publish.outputs.inrelease_sha256 }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Install repository tools
+        run: sudo apt-get update && sudo apt-get install -y apt-utils dpkg-dev gnupg
+
+      - name: Validate release selection
+        id: release
+        run: |
+          case "$RELEASE_TAG" in
+            unpdf-v*) ;;
+            *) echo "release tag must start with unpdf-v" >&2; exit 1 ;;
+          esac
+          case "$APT_SUITE" in
+            preview|stable) ;;
+            *) echo "unsupported APT suite: $APT_SUITE" >&2; exit 1 ;;
+          esac
+          echo "suite=$APT_SUITE" >> "$GITHUB_OUTPUT"
+          echo "manifest=https://github.com/erikbra/unpdf/releases/download/$RELEASE_TAG/release-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Import protected archive-signing key
+        id: signing
+        env:
+          PRIVATE_KEY_BASE64: ${{ secrets.UNPDF_APT_SIGNING_KEY_BASE64 }}
+          SIGNING_PASSPHRASE: ${{ secrets.UNPDF_APT_SIGNING_PASSPHRASE }}
+        run: |
+          test -n "$PRIVATE_KEY_BASE64"
+          test -n "$SIGNING_PASSPHRASE"
+          printf '%s' "$PRIVATE_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/unpdf-apt-private-key.asc"
+          printf '%s' "$SIGNING_PASSPHRASE" > "$RUNNER_TEMP/unpdf-apt-passphrase"
+          chmod 0600 "$RUNNER_TEMP/unpdf-apt-private-key.asc" "$RUNNER_TEMP/unpdf-apt-passphrase"
+          gpg --batch --import "$RUNNER_TEMP/unpdf-apt-private-key.asc"
+          fingerprint="$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1 == "fpr" { print $10; exit }')"
+          test -n "$fingerprint"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed repository suite
+        run: >-
+          python3 eng/build_unpdf_apt_repository.py
+          --manifest "${{ steps.release.outputs.manifest }}"
+          --output artifacts/generated-apt
+          --suite "$APT_SUITE"
+          --gpg-key "${{ steps.signing.outputs.fingerprint }}"
+          --gpg-passphrase-file "$RUNNER_TEMP/unpdf-apt-passphrase"
+
+      - name: Verify generated signature
+        run: >-
+          gpgv
+          --keyring artifacts/generated-apt/unpdf-archive-keyring.gpg
+          "artifacts/generated-apt/dists/$APT_SUITE/InRelease"
+
+      - uses: actions/checkout@v7.0.0
+        with:
+          ref: gh-pages
+          path: artifacts/pages
+          fetch-depth: 0
+
+      - name: Merge suite into Pages tree
+        run: >-
+          python3 eng/publish_unpdf_apt_site.py
+          --repository artifacts/generated-apt
+          --site artifacts/pages
+          --suite "$APT_SUITE"
+          --base-url "$APT_BASE_URL"
+          --fingerprint "${{ steps.signing.outputs.fingerprint }}"
+
+      - name: Commit Pages update
+        id: publish
+        working-directory: artifacts/pages
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .nojekyll apt
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish unpdf $RELEASE_TAG to APT $APT_SUITE"
+            git push origin gh-pages
+          fi
+          sha="$(sha256sum "apt/dists/$APT_SUITE/InRelease" | cut -d' ' -f1)"
+          echo "inrelease_sha256=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for GitHub Pages deployment
+        env:
+          EXPECTED_SHA256: ${{ steps.publish.outputs.inrelease_sha256 }}
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS "$APT_BASE_URL/dists/$APT_SUITE/InRelease?run=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/InRelease" && \
+               test "$(sha256sum "$RUNNER_TEMP/InRelease" | cut -d' ' -f1)" = "$EXPECTED_SHA256"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "GitHub Pages did not publish the expected InRelease within ten minutes" >&2
+          exit 1
+
+  public-install:
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            architecture: amd64
+          - os: ubuntu-24.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Configure public APT source
+        env:
+          APT_SUITE: ${{ needs.publish.outputs.suite }}
+          EXPECTED_SHA256: ${{ needs.publish.outputs.inrelease_sha256 }}
+        run: |
+          curl -fsSL "$APT_BASE_URL/unpdf-archive-keyring.gpg" -o /tmp/unpdf.gpg
+          sudo install -m 0644 /tmp/unpdf.gpg /etc/apt/keyrings/unpdf.gpg
+          curl -fsSL "$APT_BASE_URL/unpdf-$APT_SUITE.sources" | sudo tee /etc/apt/sources.list.d/unpdf.sources >/dev/null
+          curl -fsSL "$APT_BASE_URL/dists/$APT_SUITE/InRelease" -o /tmp/InRelease
+          test "$(sha256sum /tmp/InRelease | cut -d' ' -f1)" = "$EXPECTED_SHA256"
+          sudo apt-get update
+
+      - name: Install and convert through public repository
+        run: |
+          sudo apt-get install -y unpdf
+          test "$(dpkg-query -W -f='${Architecture}' unpdf)" = "${{ matrix.architecture }}"
+          unpdf tests/PdfBox.Net.Tests/Fixtures/classic-xref-fixture.pdf \
+            --output artifacts/public-apt-smoke --quiet
+          grep -q Hello artifacts/public-apt-smoke/index.html
+          sudo apt-get purge -y unpdf
+          test ! -e /usr/bin/unpdf

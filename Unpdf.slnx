@@ -1,0 +1,20 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PdfBox.Net.Layout/PdfBox.Net.Layout.csproj" />
+    <Project Path="src/PdfBox.Net.Html/PdfBox.Net.Html.csproj" />
+  </Folder>
+  <Folder Name="/apps/">
+    <Project Path="apps/PdfBox.Net.Unpdf/PdfBox.Net.Unpdf.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PdfBox.Net.Layout.Tests/PdfBox.Net.Layout.Tests.csproj" />
+    <Project Path="tests/PdfBox.Net.Html.Tests/PdfBox.Net.Html.Tests.csproj" />
+    <Project Path="tests/PdfBox.Net.Unpdf.Tests/PdfBox.Net.Unpdf.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/conversion_quality/PdfBox.Net.ConversionQuality/PdfBox.Net.ConversionQuality.csproj" />
+  </Folder>
+</Solution>

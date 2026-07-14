@@ -1,0 +1,277 @@
+# PDF-to-HTML WASM, NativeAOT, Hosting, and Distribution Plan
+
+This plan covers four related outcomes:
+
+1. run a useful PDF-to-HTML converter entirely in a browser;
+2. publish a trimmed, single-file command-line converter, using NativeAOT where practical;
+3. host the browser application as a privacy-preserving static site; and
+4. distribute command-line release artifacts through common package managers.
+
+The GitHub roadmap is [issue #790](https://github.com/erikbra/pdfbox-net/issues/790).
+
+## Product Boundaries
+
+The first browser and command-line milestones use the lite dependency graph:
+
+```text
+PdfBox.Net.Html -> PdfBox.Net.Layout -> PdfBox.Net.Core
+```
+
+They do not reference `PdfBox.Net.Rendering`, `PdfBox.Net.SkiaSharp`, or
+`PdfBox.Net.ImageMagick`. This is important for both browser compatibility and
+trimming. The lite products must remain useful without a rendering backend and
+must report unsupported operations instead of silently losing content.
+
+SkiaSharp WASM is a later, optional fidelity layer. ImageMagick is not part of
+the browser plan because the current Magick.NET package has desktop/server
+native assets and no `browser-wasm` runtime asset.
+
+```mermaid
+flowchart LR
+    A["Browser lite"] --> B["Browser asset policies"] --> C["WASM quality gates"] --> D["SkiaSharp WASM"]
+    E["CLI"] --> F["Trimmed single file"] --> G["NativeAOT"] --> H["Release artifacts"]
+    A --> I["Static hosting evaluation"] --> J["Public preview"] --> K["Hosting hardening"]
+    H --> L["Homebrew"]
+    H --> M["WinGet"]
+    H --> N["APT"]
+    H --> O["Secondary channels"]
+```
+
+## Workstream 1: Browser WASM
+
+### Phase 1: browser lite
+
+Tracked by [#782](https://github.com/erikbra/pdfbox-net/issues/782).
+
+Deliver a standalone Blazor WebAssembly application that:
+
+- accepts a local PDF through a browser file picker;
+- reads the file into memory without uploading it;
+- extracts layout with images and raster fallbacks disabled;
+- creates continuous semantic HTML;
+- inlines generated CSS and browser-safe assets into an iframe preview; and
+- displays conversion time, page count, input size, and diagnostics.
+
+Quality gates:
+
+- Release publish succeeds for `browser-wasm`.
+- A Playwright test uploads a deterministic PDF and finds expected text in the
+  generated iframe.
+- There are no network requests after the local file is selected.
+- The resolved package graph contains no SkiaSharp or ImageMagick dependency.
+- CI builds and publishes the browser sample.
+
+The first capability contract is:
+
+| Capability | Browser-lite status |
+|---|---|
+| Text and semantic grouping | Supported |
+| Links and vector paths | Supported |
+| Semantic AcroForm controls | Supported |
+| Embedded TrueType/OpenType fonts | Supported when browser-loadable |
+| Raw browser-safe images | Planned in #781 |
+| CMYK/YCCK JPEG and ICC conversion | Diagnostic/degraded |
+| JPX/JPEG2000 and TIFF conversion | Diagnostic/degraded |
+| Annotation appearance rasterization | Requires a browser rendering backend |
+| Transparency-group raster fallback | Requires a browser rendering backend |
+
+### Phase 2: browser-safe image policy
+
+Tracked by [#781](https://github.com/erikbra/pdfbox-net/issues/781).
+
+Add explicit strict, degraded, and backend-required policies. Preserve encoded
+JPEG/PNG bytes when a browser can display them without decoding. Every omitted
+asset must produce a stable diagnostic code.
+
+### Phase 3: payload and browser ratchets
+
+Tracked by [#775](https://github.com/erikbra/pdfbox-net/issues/775).
+
+Record raw and Brotli payload by asset, first-load time, conversion time, and
+the largest tested input. Check in a baseline and fail CI only on unexplained
+regressions. Published Blazor WebAssembly apps are trimmed and statically
+compressed; the host must serve the precompressed assets correctly.
+
+### Phase 4: SkiaSharp WASM
+
+Tracked by [#779](https://github.com/erikbra/pdfbox-net/issues/779).
+
+Create a separate browser backend or browser-specific target so desktop native
+assets never leak into the WASM graph. Start with image decode/encode and only
+the drawing operations needed by HTML fallbacks. Compare fidelity and payload
+against browser lite before making it a default download.
+
+Microsoft documents that WebAssembly native dependencies must be built for
+WebAssembly and linked with the Emscripten toolchain. NuGet packages should use
+`browser-wasm` runtime assets, and prebuilt native objects must match the SDK's
+Emscripten version. See the [.NET native dependency guidance](https://learn.microsoft.com/en-us/aspnet/core/blazor/webassembly-native-dependencies?view=aspnetcore-10.0).
+
+## Workstream 2: Single-file and NativeAOT CLI
+
+### Phase 1: focused CLI
+
+Tracked by [#776](https://github.com/erikbra/pdfbox-net/issues/776).
+
+Create `unpdf` as a small executable project referencing the lite graph.
+The initial default is continuous semantic HTML. It needs stable exit codes,
+help/version output, overwrite behavior, diagnostics, and end-to-end tests.
+
+### Phase 2: trim and single-file
+
+Tracked by [#777](https://github.com/erikbra/pdfbox-net/issues/777).
+
+Measure these builds separately:
+
+1. framework-dependent baseline;
+2. self-contained baseline;
+3. trimmed self-contained;
+4. trimmed, compressed single-file.
+
+Enable trim and single-file analyzers. Resolve reflection and resource warnings
+with source changes or narrow preservation rules. PDFBox glyph lists, AFM data,
+CMaps, and other manifest resources require explicit regression coverage.
+
+The target publish settings are:
+
+```xml
+<PublishTrimmed>true</PublishTrimmed>
+<PublishSingleFile>true</PublishSingleFile>
+<EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+<SelfContained>true</SelfContained>
+```
+
+See the official [.NET trimming](https://learn.microsoft.com/en-us/dotnet/core/deploying/trimming/trim-self-contained)
+and [single-file](https://learn.microsoft.com/en-us/dotnet/core/deploying/single-file/overview)
+documentation.
+
+### Phase 3: NativeAOT
+
+Tracked by [#778](https://github.com/erikbra/pdfbox-net/issues/778).
+
+Enable AOT analyzers before `PublishAot`. The initial AOT product remains lite:
+optional rendering backends are not dynamically loaded into an AOT process.
+NativeAOT does not support dynamic assembly loading or runtime code generation,
+and it requires trimming compatibility. See the official
+[NativeAOT deployment guidance](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/).
+
+The RID matrix should eventually cover:
+
+| OS | Architectures | First artifact |
+|---|---|---|
+| Linux | x64, arm64 | NativeAOT, self-contained fallback if blocked |
+| Windows | x64, arm64 where supported | NativeAOT, signed before stable release |
+| macOS | x64, arm64 | NativeAOT, signed/notarized before stable release |
+
+Each artifact must run the same deterministic conversion fixture. Record size,
+startup, conversion time, and output hash/structural equivalence.
+
+### Phase 4: release contract
+
+Tracked by [#780](https://github.com/erikbra/pdfbox-net/issues/780).
+
+GitHub Releases become the immutable source for package managers. Artifacts use
+stable names, include license/notices, publish SHA-256 checksums and an SBOM,
+and are smoke-tested on their native runner. Signing state must be explicit.
+
+## Workstream 3: WASM Hosting
+
+Tracked by [#784](https://github.com/erikbra/pdfbox-net/issues/784),
+[#783](https://github.com/erikbra/pdfbox-net/issues/783), and
+[#785](https://github.com/erikbra/pdfbox-net/issues/785).
+
+The first GitHub Pages preview is documented in
+[PDF-to-HTML Browser Preview](pdf-html-wasm-pages.md).
+
+A standalone Blazor WebAssembly app is a set of static files and does not need
+a .NET server. Microsoft explicitly supports static/CDN hosting for this model.
+See the [Blazor hosting-model documentation](https://learn.microsoft.com/en-us/aspnet/core/blazor/hosting-models?view=aspnetcore-10.0).
+
+| Option | Best fit | Strengths | Risks/work |
+|---|---|---|---|
+| GitHub Pages | Public demo and preview | Existing repository/Actions, TLS, no new cloud account, official Blazor guidance | Repository base path, limited header control, public-site orientation |
+| Azure Static Web Apps | Managed production candidate | First-class Blazor docs, preview environments, custom domains, auth/API path if ever needed | Azure ownership and deployment-token/resource setup |
+| Cloudflare Pages | Managed production/CDN candidate | Global static delivery, Git integration, direct CI upload, preview deployments | Provider-specific configuration and header/caching validation |
+| Static object storage plus CDN or self-hosted Nginx | Vendor-neutral/control-oriented | Full headers, cache, domain, and operational control | More infrastructure, monitoring, TLS, and release ownership |
+
+Recommendation:
+
+- Use GitHub Pages for the first public preview because it is low-friction and
+  keeps the demo next to the repository.
+- Compare Azure Static Web Apps and Cloudflare Pages for production once payload
+  and header requirements are measured.
+- Keep deployment output host-neutral: publish `wwwroot` as static files, with
+  no host SDK in the application.
+
+Relevant primary documentation:
+
+- [Blazor WebAssembly on GitHub Pages](https://learn.microsoft.com/en-us/aspnet/core/blazor/host-and-deploy/webassembly/github-pages?view=aspnetcore-10.0)
+- [GitHub Pages custom Actions deployment](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
+- [Blazor WebAssembly on Azure Static Web Apps](https://learn.microsoft.com/en-us/aspnet/core/blazor/host-and-deploy/webassembly/azure-static-web-apps?view=aspnetcore-10.0)
+- [Cloudflare Pages](https://developers.cloudflare.com/pages/)
+
+Production hardening must verify CSP/security headers, correct WebAssembly MIME
+types and Brotli/Gzip delivery, immutable fingerprinted caching, SPA fallback,
+large-file cancellation/memory behavior, and content-safe telemetry. No host
+needs or receives the source PDF.
+
+## Workstream 4: Command-line Distribution
+
+Package-manager metadata consumes the release contract from #780. It does not
+build a subtly different executable.
+
+### Homebrew
+
+Tracked by [#786](https://github.com/erikbra/pdfbox-net/issues/786).
+
+Start with a project-owned tap. A formula selects the release artifact by OS and
+architecture, verifies SHA-256, installs the executable, and runs a real
+conversion in `brew test`. A later homebrew-core submission can be considered
+after releases are stable. See the official
+[Homebrew Formula Cookbook](https://docs.brew.sh/Formula-Cookbook).
+
+### WinGet
+
+Tracked by [#787](https://github.com/erikbra/pdfbox-net/issues/787).
+
+Generate and validate manifests against immutable Windows release URLs. Test
+install, PATH, conversion, upgrade, and uninstall on Windows. External
+submission remains a reviewable PR to `microsoft/winget-pkgs`; automation must
+not submit it silently. See Microsoft's [manifest creation](https://learn.microsoft.com/en-us/windows/package-manager/package/manifest)
+and [repository submission](https://learn.microsoft.com/en-us/windows/package-manager/package/repository)
+guidance.
+
+### Debian and APT
+
+Tracked by [#788](https://github.com/erikbra/pdfbox-net/issues/788).
+
+Create architecture-specific `.deb` packages with standard paths, metadata,
+license/notices, and a man page. Publish signed package indices to a test APT
+repository and test install/upgrade/remove in Debian and Ubuntu containers. An
+official Debian archive submission is a separate, longer-term process. See the
+[Debian packaging introduction](https://wiki.debian.org/Packaging/Intro) and
+[repository overview](https://wiki.debian.org/DebianRepository/).
+
+### Secondary channels
+
+Tracked by [#789](https://github.com/erikbra/pdfbox-net/issues/789).
+
+The completed [secondary-channel comparison](unpdf-secondary-distribution-channels.md)
+selects Scoop as the next low-maintenance channel after stable Windows
+Authenticode signing is available. Chocolatey, Snap, AUR, containers, and a
+direct installer are deferred because they currently add more moderation,
+payload, or support cost than audience value. Checksummed release archives
+remain the package-manager-independent fallback.
+
+## Delivery Order
+
+1. Complete browser-lite issue #782.
+2. Build the CLI in #776.
+3. Use real products to complete browser asset policy and trim analysis.
+4. Add payload and NativeAOT gates.
+5. Establish immutable release artifacts.
+6. Deploy the static preview and harden hosting.
+7. Publish Homebrew, WinGet, and APT metadata in that order.
+8. Add secondary distribution only after update automation is reliable.
+
+Each issue is delivered on its own branch with local tests before CI. Dependent
+issues start only after their prerequisite behavior is merged and measured.

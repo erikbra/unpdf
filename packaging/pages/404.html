@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>unpdf</title>
+</head>
+<body>
+  <main>
+    <h1>Page not found</h1>
+    <p><a href="/pdfbox-net/">Return to unpdf</a></p>
+  </main>
+  <script>
+    const appBase = "__WASM_BASE_PATH__";
+    if (window.location.pathname.startsWith(appBase)) {
+      fetch(`${appBase}index.html`, { cache: "no-cache" })
+        .then(response => {
+          if (!response.ok) throw new Error(`Could not load the browser converter (${response.status})`);
+          return response.text();
+        })
+        .then(documentHtml => {
+          document.open();
+          document.write(documentHtml);
+          document.close();
+        });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.Playwright" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\tools\conversion_quality\PdfBox.Net.ConversionQuality\PdfBox.Net.ConversionQuality.csproj" />
+    <ProjectReference Include="..\..\src\PdfBox.Net.Html\PdfBox.Net.Html.csproj" />
+    <ProjectReference Include="..\..\src\PdfBox.Net.Layout\PdfBox.Net.Layout.csproj" />
+    <ProjectReference Include="..\..\external\pdfbox-net\src\PdfBox.Net\PdfBox.Net.csproj" />
+    <ProjectReference Include="..\..\external\pdfbox-net\src\PdfBox.Net.ImageMagick\PdfBox.Net.ImageMagick.csproj" />
+    <ProjectReference Include="..\..\external\pdfbox-net\src\PdfBox.Net.SkiaSharp\PdfBox.Net.SkiaSharp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Fixtures\arxiv-ddpm-page-2.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Fixtures\arxiv-adam-page-2.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Fixtures\arxiv-unet-pages-4-5.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Fixtures\arxiv-unet-page-8.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Fixtures\irs-w9.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Fixtures\arxiv-svt-pages-1-2.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Fixtures\acl-bert-page-3.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\PdfBox.Net.Layout.Tests\Fixtures\jmlr-lda-page-4.pdf" Link="Fixtures\jmlr-lda-page-4.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\PdfBox.Net.Layout.Tests\Fixtures\jmlr-lda-page-11.pdf" Link="Fixtures\jmlr-lda-page-11.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\PdfBox.Net.Layout.Tests\Fixtures\jmlr-lda-page-12.pdf" Link="Fixtures\jmlr-lda-page-12.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\SharedFixtures\TextExtraction\Issue412\arxiv-sample.pdf" Link="Fixtures\arxiv-sample.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\SharedFixtures\TextExtraction\Issue412\4PP-Highlighting.pdf" Link="Fixtures\4PP-Highlighting.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\SharedFixtures\TextExtraction\Issue412\Acroform-PDFBOX-2333.pdf" Link="Fixtures\Acroform-PDFBOX-2333.pdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\SharedFixtures\Fonts\LiberationSans-Regular.ttf" Link="Fixtures\LiberationSans-Regular.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

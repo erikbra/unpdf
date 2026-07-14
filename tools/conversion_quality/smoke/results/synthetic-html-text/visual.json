@@ -1,0 +1,23 @@
+{
+  "checks": [
+    {
+      "name": "page-screenshot-dimensions",
+      "passed": true,
+      "metrics": {
+        "actualHeight": 1056,
+        "actualWidth": 816,
+        "expectedHeight": 1056,
+        "expectedWidth": 816
+      }
+    },
+    {
+      "name": "foreground-mask",
+      "passed": true,
+      "metrics": {
+        "browserMissRatio": 0.01,
+        "foregroundDeltaRatio": 0.02,
+        "pdfMissRatio": 0.01
+      }
+    }
+  ]
+}

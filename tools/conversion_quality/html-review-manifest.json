@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "description": "HTML conversion review examples generated in CI. Download the artifact and open html-examples/index.html, or open an example compare.html to view the source PDF and generated HTML side by side.",
+  "examples": [
+    {
+      "id": "arxiv-sample",
+      "title": "arxiv-sample",
+      "sourcePdf": "../../tests/SharedFixtures/TextExtraction/Issue412/arxiv-sample.pdf",
+      "qualityPages": 2,
+      "notes": "Existing multi-page regression fixture. This is useful for seeing current fixed-layout HTML behavior on a real paper-style PDF."
+    },
+    {
+      "id": "pdfbox-4pp-highlighting",
+      "title": "4PP highlighting fixture",
+      "sourcePdf": "../../tests/SharedFixtures/TextExtraction/Issue412/4PP-Highlighting.pdf",
+      "qualityPages": 1,
+      "notes": "Readable multi-column fixture with repeated text blocks and highlighted line labels."
+    },
+    {
+      "id": "pdfbox-2333-acroform",
+      "title": "PDFBOX-2333 AcroForm alignment fixture",
+      "sourcePdf": "../../tests/SharedFixtures/TextExtraction/Issue412/Acroform-PDFBOX-2333.pdf",
+      "qualityPages": 1,
+      "notes": "Public Apache PDFBox form fixture used to review semantic AcroForm controls, aligned labels, field geometry, and appearance suppression.",
+      "expectations": {
+        "minFormControls": 1
+      }
+    },
+    {
+      "id": "ghent-pr-word-layout",
+      "title": "Ghent PR Word-layout sample",
+      "sourcePdf": "../../artifacts/external-pdf-samples/ghent/Ghent_PDF_Output_Suite_V50_Testpages/PR_Ghent-PDF-Output-Suite-5-Conformance-Certification.pdf",
+      "qualityPages": 4,
+      "notes": "Ghent Workgroup press release with embedded fonts, mixed emphasis, links, images, and page decoration.",
+      "expectations": {
+        "pageCount": 4,
+        "requiredText": ["Ghent", "Conformance", "Certification"],
+        "minTextRuns": 250,
+        "minImagePlacements": 5,
+        "minLinks": 10,
+        "semanticUnorderedListItemCountsByPage": {
+          "3": [10]
+        }
+      }
+    },
+    {
+      "id": "ghent-output-x4-page",
+      "title": "Ghent Output Suite 5.0 PDF/X-4 assembled test page",
+      "sourcePdf": "../../artifacts/external-pdf-samples/ghent/Ghent_PDF_Output_Suite_V50_Testpages/Ghent_PDF-Output-Test-V50_ALL_X4.pdf",
+      "qualityPages": 6,
+      "notes": "Six assembled Ghent test pages exercising color, shadings, overprint, DeviceN, fonts, masks, and complex graphics.",
+      "expectations": {
+        "pageCount": 6,
+        "requiredText": ["Ghent", "PDF", "Output", "Suite"],
+        "minTextRuns": 1000,
+        "minImagePlacements": 70,
+        "minVectorPaths": 1200
+      }
+    }
+  ]
+}
