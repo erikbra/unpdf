@@ -1,5 +1,5 @@
 Types: deb
-URIs: https://erikbra.github.io/pdfbox-net/apt
+URIs: https://erikbra.github.io/unpdf/apt
 Suites: preview
 Components: main
 Architectures: amd64 arm64
