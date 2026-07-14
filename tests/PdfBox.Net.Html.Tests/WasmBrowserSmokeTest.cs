@@ -88,8 +88,56 @@ public sealed class WasmBrowserSmokeTest
         }
     }
 
+    [Fact(Timeout = 120_000)]
+    public async Task BrowserAdaptive_BrowserSafeImagesAreExportedWithoutNetworkRequests()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        int port = ReservePort();
+        using Process server = StartServer(repositoryRoot, port);
+
+        try
+        {
+            Uri appUri = new($"http://127.0.0.1:{port}");
+            await WaitForServerAsync(appUri, server);
+
+            using IPlaywright playwright = await Playwright.CreateAsync();
+            await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
+            IPage page = await browser.NewPageAsync();
+            List<string> conversionRequests = [];
+            page.Request += (_, request) => conversionRequests.Add($"{request.Method} {request.Url}");
+            await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            conversionRequests.Clear();
+
+            string fixture = Path.Combine(
+                repositoryRoot,
+                "tests",
+                "PdfBox.Net.Html.Tests",
+                "Fixtures",
+                "acl-bert-page-3.pdf");
+            await page.Locator("input[type=file]").SetInputFilesAsync(fixture);
+
+            await page.GetByText("acl-bert-page-3.pdf", new PageGetByTextOptions { Exact = true }).WaitForAsync();
+            IFrameLocator preview = page.FrameLocator("iframe[title='Converted HTML preview']");
+            await preview.Locator("img.pdf-image").First.WaitForAsync(new LocatorWaitForOptions
+            {
+                Timeout = 90_000
+            });
+
+            Assert.Empty(conversionRequests);
+            Assert.True(await preview.Locator("img.pdf-image").CountAsync() > 0);
+            Assert.Equal(0, await page.Locator(".status.error").CountAsync());
+        }
+        finally
+        {
+            StopServer(server);
+        }
+    }
+
     [Fact]
-    public void BrowserLite_DependencyGraph_ExcludesRenderingPackages()
+    public void BrowserAdaptive_DependencyGraph_IncludesSkiaButExcludesImageMagick()
     {
         string repositoryRoot = FindRepositoryRoot();
         string assetsPath = Path.Combine(
@@ -105,10 +153,10 @@ public sealed class WasmBrowserSmokeTest
             .Select(property => property.Name)
             .ToArray();
 
-        Assert.DoesNotContain(libraries, name => name.StartsWith("SkiaSharp/", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(libraries, name => name.StartsWith("SkiaSharp/", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(libraries, name => name.StartsWith("SkiaSharp.NativeAssets.WebAssembly/", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(libraries, name => name.StartsWith("Magick.NET", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(libraries, name => name.StartsWith("PdfBox.Net.Rendering/", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(libraries, name => name.StartsWith("PdfBox.Net.SkiaSharp/", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(libraries, name => name.StartsWith("PdfBox.Net.SkiaSharp/", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(libraries, name => name.StartsWith("PdfBox.Net.ImageMagick/", StringComparison.OrdinalIgnoreCase));
     }
 

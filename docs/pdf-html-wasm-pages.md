@@ -39,3 +39,38 @@ requests occur after a local PDF is selected.
 Disabling or removing this workflow does not affect package build or test CI.
 The current preview is public and has no telemetry, upload endpoint, or server
 conversion component.
+
+## Rendering backends and loading
+
+The browser build registers `PdfBox.Net.SkiaSharp` and links
+`SkiaSharp.NativeAssets.WebAssembly`. This requires the .NET `wasm-tools`
+workload at publish time. Skia handles page rendering and browser-safe image
+encoding without loading a desktop native library.
+
+Image extraction uses the degraded policy by default: directly usable image
+streams are preserved, Skia converts images it supports, and an unavailable
+codec produces a stable diagnostic instead of aborting the whole document.
+Callers that require every requested image can select the strict policy.
+
+The Skia static archive is linked into the main application WebAssembly module,
+so Blazor managed-assembly lazy loading cannot defer its native bytes. A truly
+optional Skia download would require a separately compiled WebAssembly side
+module or separate browser deployments.
+
+ImageMagick is intentionally not part of initial startup. The
+`@imagemagick/magick-wasm` package exposes a JavaScript module and a separate
+`magick.wasm` payload, which makes dynamic import practical for uncommon codecs
+that direct passthrough and Skia cannot handle. It is not binary-compatible
+with the .NET ImageMagick rendering backend; browser support needs an async
+JavaScript interop adapter before extraction retries the failed image.
+
+## Browser memory model
+
+The file picker reads into one exactly sized byte array rather than copying via
+`MemoryStream` and `ToArray`. PDFBox still requires random access to the PDF,
+and browser file streams are not a general seekable backing store, so the input
+currently remains resident for conversion. True bounded-memory input requires
+a core random-access source backed by browser `Blob.slice()` calls. Cancellation
+is honored while reading and between conversion stages; interrupting synchronous
+PDFBox extraction itself requires moving extraction to a worker or adding
+cancellation points in the core parser.
