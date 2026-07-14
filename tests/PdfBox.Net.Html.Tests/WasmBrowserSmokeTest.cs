@@ -3,6 +3,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.Playwright;
+using PdfBox.Net.PDModel;
+using PdfBox.Net.PDModel.Graphics.Image;
 
 namespace PdfBox.Net.Html.Tests;
 
@@ -93,6 +95,7 @@ public sealed class WasmBrowserSmokeTest
     {
         string repositoryRoot = FindRepositoryRoot();
         int port = ReservePort();
+        string fixture = CreateTinyLosslessImagePdf();
         using Process server = StartServer(repositoryRoot, port);
 
         try
@@ -111,15 +114,9 @@ public sealed class WasmBrowserSmokeTest
             await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
             conversionRequests.Clear();
 
-            string fixture = Path.Combine(
-                repositoryRoot,
-                "tests",
-                "PdfBox.Net.Html.Tests",
-                "Fixtures",
-                "acl-bert-page-3.pdf");
             await page.Locator("input[type=file]").SetInputFilesAsync(fixture);
 
-            await page.GetByText("acl-bert-page-3.pdf", new PageGetByTextOptions { Exact = true }).WaitForAsync();
+            await page.GetByText("wasm-skia-image.pdf", new PageGetByTextOptions { Exact = true }).WaitForAsync();
             IFrameLocator preview = page.FrameLocator("iframe[title='Converted HTML preview']");
             await preview.Locator("img.pdf-image").First.WaitForAsync(new LocatorWaitForOptions
             {
@@ -133,6 +130,7 @@ public sealed class WasmBrowserSmokeTest
         finally
         {
             StopServer(server);
+            File.Delete(fixture);
         }
     }
 
@@ -175,6 +173,28 @@ public sealed class WasmBrowserSmokeTest
         process.BeginErrorReadLine();
         process.BeginOutputReadLine();
         return process;
+    }
+
+    private static string CreateTinyLosslessImagePdf()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}", "wasm-skia-image.pdf");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+        PDImageXObject image = LosslessFactory.CreateFromRawData(
+            document,
+            [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255],
+            2,
+            2,
+            8,
+            3);
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.DrawImage(image, 72, 600, 120, 60);
+        }
+        document.Save(path);
+        return path;
     }
 
     private static async Task WaitForServerAsync(Uri uri, Process server)
