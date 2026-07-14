@@ -1,31 +1,35 @@
 using System.Reflection;
 using PdfBox.Net.Html;
+using PdfBox.Net.ImageMagick;
 using PdfBox.Net.Layout;
 using PdfBox.Net.PDModel;
+using PdfBox.Net.Rendering;
 
 namespace PdfBox.Net.Unpdf;
 
 public static class UnpdfCommand
 {
+    private static readonly object RenderingRegistrationLock = new();
+    private static bool _renderingBackendRegistered;
+
     private const string Usage = """
         Usage: unpdf <input.pdf> [options]
 
-        Convert a PDF to HTML without requiring a rendering backend.
+        Convert a PDF to HTML with image export and rendering fallbacks.
 
         Options:
           -o, --output <directory>     Output directory. Defaults to <input>-html.
               --force                  Write into a non-empty output directory.
               --text-mode <mode>       semantic (default) or fixed.
               --page-mode <mode>       continuous (default) or fixed.
-              --profile <profile>      lite (default). rendering is not available in this build.
               --title <title>          HTML document title. Defaults to the input file name.
           -q, --quiet                  Suppress success and warning messages.
           -h, --help                   Show help.
               --version                Show version.
 
-        Lite capability notes:
-          Text, links, vector paths, semantic forms, and browser-safe embedded fonts are enabled.
-          Image export and annotation/transparency raster fallbacks require a rendering-enabled build.
+        Capability notes:
+          Text, links, vector paths, semantic forms, browser-safe embedded fonts,
+          image export, and annotation/transparency raster fallbacks are enabled.
         """;
 
     public static int Run(string[] args, TextWriter output, TextWriter error)
@@ -74,14 +78,15 @@ public static class UnpdfCommand
         PdfHtmlDocument html;
         try
         {
+            EnsureRenderingBackendRegistered();
             using PDDocument document = Loader.LoadPDF(inputPath);
             layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
             {
-                IncludeAnnotationAppearances = false,
+                IncludeAnnotationAppearances = true,
                 IncludeFontAssets = true,
-                IncludeImageAssets = false,
-                IncludeImages = false,
-                IncludeTransparencyGroupFallbacks = false
+                IncludeImageAssets = true,
+                IncludeImages = true,
+                IncludeTransparencyGroupFallbacks = true
             });
             html = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
             {
@@ -174,16 +179,6 @@ public static class UnpdfCommand
                         return ParseResult.Fail(titleError!);
                     }
                     break;
-                case "--profile":
-                    if (!TryReadValue(args, ref index, argument, out string? profile, out string? profileError))
-                    {
-                        return ParseResult.Fail(profileError!);
-                    }
-                    if (!string.Equals(profile, "lite", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return ParseResult.Fail("this executable supports only '--profile lite'; rendering support is a separate future build");
-                    }
-                    break;
                 case "--text-mode":
                     if (!TryReadValue(args, ref index, argument, out string? textModeValue, out string? textModeError))
                     {
@@ -221,6 +216,26 @@ public static class UnpdfCommand
         return inputPath is null
             ? ParseResult.Fail("an input PDF is required")
             : ParseResult.Success(new Options(inputPath, outputPath, title, force, quiet, textMode, pageMode));
+    }
+
+    private static void EnsureRenderingBackendRegistered()
+    {
+        if (_renderingBackendRegistered)
+        {
+            return;
+        }
+
+        lock (RenderingRegistrationLock)
+        {
+            if (_renderingBackendRegistered)
+            {
+                return;
+            }
+
+            SkiaRenderingBackend.Register();
+            PdfBoxNetImageMagick.Register();
+            _renderingBackendRegistered = true;
+        }
     }
 
     private static bool TryReadValue(

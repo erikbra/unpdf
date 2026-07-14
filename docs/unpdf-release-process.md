@@ -1,9 +1,14 @@
 # unpdf release process
 
-The `Build unpdf Release Artifacts` workflow builds NativeAOT archives on five
+The `Build unpdf Release Artifacts` workflow builds trimmed, compressed,
+self-contained single-file archives on five
 native GitHub-hosted runners: Linux x64 and ARM64, Windows x64, and macOS Intel
 and ARM64. Each runner executes the resulting binary and converts a deterministic
 PDF before uploading it.
+
+NativeAOT remains a separate CI benchmark and compatibility target. It is not
+the deployed artifact because SkiaSharp, HarfBuzzSharp, and ImageMagick remain
+separate native files in the NativeAOT publish.
 
 Every archive contains:
 

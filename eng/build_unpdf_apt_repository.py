@@ -52,9 +52,9 @@ Section: utils
 Priority: optional
 Architecture: {architecture}
 Maintainer: PdfBox.Net contributors <noreply@github.com>
-Homepage: https://github.com/erikbra/pdfbox-net
+Homepage: https://github.com/erikbra/unpdf
 Description: Convert PDF documents to semantic HTML
- unpdf is a self-contained NativeAOT command-line converter for producing
+ unpdf is a self-contained single-file command-line converter for producing
  semantic or fixed-layout HTML from PDF documents.
 """
 

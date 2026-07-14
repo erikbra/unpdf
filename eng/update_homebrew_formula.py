@@ -43,10 +43,10 @@ def generate_formula(manifest: dict) -> str:
 
     return f'''# frozen_string_literal: true
 
-# NativeAOT PDF-to-HTML command-line converter.
+# Self-contained PDF-to-HTML command-line converter.
 class Unpdf < Formula
   desc "Convert PDF documents to semantic HTML"
-  homepage "https://github.com/erikbra/pdfbox-net"
+  homepage "https://github.com/erikbra/unpdf"
   version "{version}"
   license "Apache-2.0"
 

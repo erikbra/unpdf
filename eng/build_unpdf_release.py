@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and package a reproducible unpdf NativeAOT release artifact."""
+"""Build and package a reproducible unpdf self-contained single-file release artifact."""
 
 from __future__ import annotations
 
@@ -98,7 +98,7 @@ def create_sbom(stage: Path, version: str, rid: str, executable: Path, assets: P
         "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
         "name": f"unpdf-{version}-{rid}",
-        "documentNamespace": f"https://github.com/erikbra/pdfbox-net/sbom/unpdf/{version}/{rid}/{executable_hash[:16]}",
+        "documentNamespace": f"https://github.com/erikbra/unpdf/sbom/{version}/{rid}/{executable_hash[:16]}",
         "creationInfo": {
             "created": "1980-01-01T00:00:00Z",
             "creators": ["Tool: PdfBox.Net release builder"],
@@ -176,7 +176,7 @@ def build_release(root: Path, version: str, rid: str, output: Path, signing_stat
     stage.mkdir()
     subprocess.run([
         "dotnet", "publish", str(project), "-c", "Release", "-r", rid,
-        "-p:PublishProfile=NativeAot", f"-p:Version={version}", "-o", str(publish),
+        "-p:PublishProfile=SingleFile", f"-p:Version={version}", "-o", str(publish),
     ], check=True)
 
     executable_name = "unpdf.exe" if rid.startswith("win-") else "unpdf"
@@ -206,7 +206,7 @@ def build_release(root: Path, version: str, rid: str, output: Path, signing_stat
         "executable": executable_name,
         "executableSha256": sha256(stage / executable_name),
         "signing": {"status": signing_status},
-        "source": "https://github.com/erikbra/pdfbox-net",
+        "source": "https://github.com/erikbra/unpdf",
     }
     write_json(stage / "artifact-manifest.json", manifest)
     sidecar_manifest = output / f"unpdf-{version}-{rid}.manifest.json"

@@ -6,12 +6,27 @@
 unpdf input.pdf --output output-directory
 ```
 
-The initial executable is a lite build. It converts text, links, vector paths,
-semantic forms, and browser-safe embedded fonts without loading
-`PdfBox.Net.Rendering`, SkiaSharp, or ImageMagick. Image export and raster
-fallbacks are planned as explicit optional capabilities.
+The executable includes the PdfBox.Net SkiaSharp and ImageMagick providers. It
+exports images and enables raster fallbacks for annotation appearances and
+compact transparency groups by default; there is no reduced `lite` CLI profile.
+
+This improves coverage but is not a claim of complete PDF
+feature support. Unsupported or degraded operations remain diagnostics, and
+semantic HTML cannot reproduce arbitrary PDF painting without raster fallbacks.
 
 Run `unpdf --help` for all options and exit-code behavior.
+
+## .NET tool
+
+The framework-dependent CLI is also packaged as a .NET global/local tool:
+
+```console
+dotnet tool install --global unpdf
+```
+
+This form requires a compatible .NET runtime and includes native runtime assets
+for every supported platform. Prefer the RID-specific release archive or OS
+package manager when download size matters.
 
 ## Exit codes
 
@@ -44,6 +59,12 @@ dotnet publish apps/PdfBox.Net.Unpdf/PdfBox.Net.Unpdf.csproj \
   -p:PublishProfile=SingleFile
 ```
 
+This produces one approximately 34 MB self-contained distribution file on
+macOS ARM64. The SkiaSharp, HarfBuzzSharp, and ImageMagick native libraries are
+embedded in that file and extracted to the .NET bundle extraction location when
+the program runs. No separately installed .NET runtime or native packages are
+required, but this is not an extraction-free executable.
+
 Run `eng/verify-unpdf-single-file.sh <rid>` to compare the single executable
 with an untrimmed self-contained baseline. The gate converts the same PDF with
 both executables, requires byte-identical HTML/CSS output, and writes size and
@@ -54,7 +75,8 @@ quality-gated milestones.
 
 ## NativeAOT publish
 
-The lite dependency graph can also be compiled directly to native code:
+The complete rendering-enabled dependency graph can be compiled directly to
+native code:
 
 ```console
 dotnet publish apps/PdfBox.Net.Unpdf/PdfBox.Net.Unpdf.csproj \
@@ -69,6 +91,13 @@ not support general cross-OS compilation, so the release matrix must use native
 Linux, Windows, and macOS runners. `osx-arm64` and `osx-x64` have been verified
 locally; `linux-x64` is enforced in CI. Linux ARM64 and Windows x64 are release
 matrix targets pending their native hosted-runner gates.
+
+NativeAOT publication has been verified on macOS ARM64 with the SkiaSharp and
+ImageMagick native libraries copied beside the executable. Each release RID
+still requires a native smoke test because those libraries are platform-specific.
+Setting `PublishSingleFile` and `IncludeNativeLibrariesForSelfExtract` on the
+NativeAOT publish currently leaves those native libraries beside the executable;
+it does not create a true one-file NativeAOT deployment.
 
 Cross-platform archives, checksums, SBOMs, provenance, and signing policy are
 documented in [`docs/unpdf-release-process.md`](../../docs/unpdf-release-process.md).

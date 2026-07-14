@@ -22,5 +22,20 @@ Run the command-line application with:
 dotnet run --project apps/PdfBox.Net.Unpdf -- input.pdf --output output-directory
 ```
 
+Install the framework-dependent .NET global tool with:
+
+```sh
+dotnet tool install --global unpdf
+```
+
+The tool package includes the platform-native SkiaSharp, HarfBuzzSharp, and
+ImageMagick assets. The GitHub release archives, Homebrew, WinGet, and APT use
+the smaller RID-specific self-contained single-file executables instead.
+
+Library consumers can reference `PdfBox.Net.Html` for HTML conversion or
+`PdfBox.Net.Layout` for layout extraction. Rendering-enabled applications also
+reference `PdfBox.Net.SkiaSharp` and `PdfBox.Net.ImageMagick` and register those
+providers before requesting image or raster-fallback output.
+
 See [the CLI documentation](apps/PdfBox.Net.Unpdf/README.md) and
 [release process](docs/unpdf-release-process.md) for distribution details.
