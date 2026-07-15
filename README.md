@@ -25,7 +25,7 @@ dotnet run --project apps/PdfBox.Net.Unpdf -- input.pdf --output output-director
 Install the framework-dependent .NET global tool with:
 
 ```sh
-dotnet tool install --global unpdf
+dotnet tool install --global unpdf.tool
 ```
 
 The tool package includes the platform-native SkiaSharp, HarfBuzzSharp, and

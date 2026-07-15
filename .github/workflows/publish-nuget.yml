@@ -43,7 +43,7 @@ jobs:
           dotnet pack apps/PdfBox.Net.Unpdf/PdfBox.Net.Unpdf.csproj --configuration Release --no-build --output artifacts/packages -p:Version="${{ inputs.version }}"
       - name: Install and smoke-test .NET tool package
         run: |
-          dotnet tool install unpdf --tool-path artifacts/tool-smoke --version "${{ inputs.version }}" --add-source artifacts/packages --ignore-failed-sources
+          dotnet tool install unpdf.tool --tool-path artifacts/tool-smoke --version "${{ inputs.version }}" --add-source artifacts/packages --ignore-failed-sources
           artifacts/tool-smoke/unpdf tests/SharedFixtures/classic-xref-fixture.pdf --output artifacts/tool-smoke-output --quiet
           grep -q Hello artifacts/tool-smoke-output/index.html
       - uses: actions/upload-artifact@v7.0.1

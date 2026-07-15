@@ -21,7 +21,7 @@ Run `unpdf --help` for all options and exit-code behavior.
 The framework-dependent CLI is also packaged as a .NET global/local tool:
 
 ```console
-dotnet tool install --global unpdf
+dotnet tool install --global unpdf.tool
 ```
 
 This form requires a compatible .NET runtime and includes native runtime assets
