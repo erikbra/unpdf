@@ -2737,6 +2737,7 @@ public static class PdfLayoutExtractor
                     index,
                     "fill")
                 : null;
+            PdfLayoutStrokeStyle? resolvedStroke = includeStroke ? StrokeStyle(graphicsState, index) : null;
             IReadOnlyList<string> colorantNames = effectiveDeviceCmykFill is not null &&
                 !composedDeviceN &&
                 !composedSeparation &&
@@ -2753,12 +2754,24 @@ public static class PdfLayoutExtractor
                 ReplacePathFill(backdropPathIndex, precomposedFill, effectiveDeviceCmykFill);
             }
 
+            NeutralizeCoveredOverprintPair(
+                commands,
+                bounds,
+                fillRule,
+                clipBounds,
+                clipPaths,
+                resolvedFill,
+                resolvedStroke,
+                graphicsState,
+                colorantNames,
+                effectiveDeviceCmykFill);
+
             _paths.Add(new PdfLayoutPath(
                 index,
                 commands,
                 bounds,
                 resolvedFill,
-                includeStroke ? StrokeStyle(graphicsState, index) : null,
+                resolvedStroke,
                 fillRule,
                 usesShapeAlpha,
                 colorantNames,
@@ -2784,6 +2797,83 @@ public static class PdfLayoutExtractor
             {
                 groupPathBounds.Add(bounds);
             }
+        }
+
+        private void NeutralizeCoveredOverprintPair(
+            IReadOnlyList<PdfLayoutPathCommand> commands,
+            PdfLayoutRectangle bounds,
+            int? fillRule,
+            PdfLayoutRectangle? clipBounds,
+            IReadOnlyList<PdfLayoutClipPath> clipPaths,
+            PdfLayoutColor? fill,
+            PdfLayoutStrokeStyle? stroke,
+            PDGraphicsState graphicsState,
+            IReadOnlyList<string> colorantNames,
+            float[]? effectiveDeviceCmykFill)
+        {
+            if (!graphicsState.IsNonStrokingOverprint() ||
+                fill is not PdfLayoutColor coverColor ||
+                stroke is null ||
+                coverColor.Alpha < 0.999f ||
+                stroke.Color.Alpha < 0.999f ||
+                !SameColor(coverColor, stroke.Color) ||
+                _paths.Count == 0)
+            {
+                return;
+            }
+
+            int previousIndex = _paths.Count - 1;
+            PdfLayoutPath previous = _paths[previousIndex];
+            if (previous.FillColor is null ||
+                previous.Stroke is not PdfLayoutStrokeStyle previousStroke ||
+                previous.UsesShapeAlpha ||
+                previous.UsesSoftMask ||
+                previous.FillRule != fillRule ||
+                previous.ClipBounds != clipBounds ||
+                !SameClipPaths(previous.ClipPaths, clipPaths) ||
+                !NearlySameRectangle(previous.Bounds, bounds, 0.1f) ||
+                !SamePathGeometry(previous.Commands, commands, 0.1f) ||
+                MathF.Abs(previousStroke.Width - stroke.Width) > 0.01f)
+            {
+                return;
+            }
+
+            // Some prepress PDFs emit an ordinary colored contour followed by an
+            // opaque overprinting contour in the background color. Their coordinates
+            // can differ by a few hundredths of a point. PDF rasterizers collapse the
+            // pair, while independent SVG paths expose a colored antialiasing fringe.
+            _paths[previousIndex] = new PdfLayoutPath(
+                previous.Index,
+                previous.Commands,
+                previous.Bounds,
+                coverColor,
+                new PdfLayoutStrokeStyle(
+                    coverColor,
+                    previousStroke.Width,
+                    previousStroke.LineCap,
+                    previousStroke.LineJoin,
+                    previousStroke.MiterLimit,
+                    previousStroke.DashArray,
+                    previousStroke.DashPhase),
+                previous.FillRule,
+                previous.UsesShapeAlpha,
+                colorantNames,
+                previous.ClipBounds,
+                previous.UsesSoftMask,
+                previous.ClipPaths);
+            if (effectiveDeviceCmykFill is not null)
+            {
+                _effectiveDeviceCmykFills[previousIndex] = effectiveDeviceCmykFill.ToArray();
+            }
+        }
+
+        private static bool SameColor(PdfLayoutColor first, PdfLayoutColor second)
+        {
+            const float tolerance = 0.5f / 255f;
+            return MathF.Abs(first.Red - second.Red) <= tolerance &&
+                MathF.Abs(first.Green - second.Green) <= tolerance &&
+                MathF.Abs(first.Blue - second.Blue) <= tolerance &&
+                MathF.Abs(first.Alpha - second.Alpha) <= tolerance;
         }
 
         private static bool IsOverprintNoOp(PDGraphicsState graphicsState)
@@ -3285,9 +3375,11 @@ public static class PdfLayoutExtractor
                 .ToArray();
         }
 
-        private static bool NearlySameRectangle(PdfLayoutRectangle first, PdfLayoutRectangle second)
+        private static bool NearlySameRectangle(
+            PdfLayoutRectangle first,
+            PdfLayoutRectangle second,
+            float tolerance = 0.01f)
         {
-            const float tolerance = 0.01f;
             return MathF.Abs(first.X - second.X) <= tolerance &&
                 MathF.Abs(first.Y - second.Y) <= tolerance &&
                 MathF.Abs(first.Width - second.Width) <= tolerance &&
