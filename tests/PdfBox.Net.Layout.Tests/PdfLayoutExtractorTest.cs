@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Text;
 using ImageMagick;
 using PdfBox.Net.COS;
@@ -803,6 +805,30 @@ public class PdfLayoutExtractorTest
     }
 
     [Fact]
+    public void Extract_OneBitGrayscaleAsset_ExportsPackedPixelsWithoutRgbExpansion()
+    {
+        using PDDocument document = CreateOneBitGrayscaleImageDocument();
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+
+        PdfLayoutImageAsset asset = Assert.Single(layout.ImageAssets);
+        Assert.Equal("image/png", asset.ContentType);
+        Assert.Equal(1, asset.Data[24]);
+        Assert.Equal(0, asset.Data[25]);
+
+        int compressedLength = BinaryPrimitives.ReadInt32BigEndian(asset.Data.AsSpan(33, 4));
+        Assert.Equal("IDAT", Encoding.ASCII.GetString(asset.Data, 37, 4));
+        using MemoryStream input = new(asset.Data, 41, compressedLength);
+        using ZLibStream zlib = new(input, CompressionMode.Decompress);
+        using MemoryStream pixels = new();
+        zlib.CopyTo(pixels);
+        Assert.Equal([0, 0b0101_1111], pixels.ToArray());
+    }
+
+    [Fact]
     public void Extract_TransparencyGroups_RetainsCompositingHierarchy()
     {
         using PDDocument document = Loader.LoadPDF(Path.Combine(AppContext.BaseDirectory, "Fixtures", "arxiv-sample.pdf"));
@@ -1339,6 +1365,27 @@ public class PdfLayoutExtractorTest
         document.AddPage(page);
         using MemoryStream input = new(jpeg);
         PDImageXObject image = JPEGFactory.CreateFromStream(document, input);
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.DrawImage(image, 72, 600, 120, 60);
+        }
+
+        return document;
+    }
+
+    private static PDDocument CreateOneBitGrayscaleImageDocument()
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+        PDImageXObject image = LosslessFactory.CreateFromRawData(
+            document,
+            [0b1010_0000],
+            3,
+            1,
+            1,
+            1);
+        image.GetCOSObject()!.SetItem(COSName.DECODE, COSArray.Of(1f, 0f));
         using (PDPageContentStream content = new(document, page))
         {
             content.DrawImage(image, 72, 600, 120, 60);

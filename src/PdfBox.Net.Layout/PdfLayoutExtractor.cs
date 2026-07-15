@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using System.Globalization;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using PdfBox.Net.ContentStream;
@@ -3422,6 +3424,11 @@ public static class PdfLayoutExtractor
             EnsureImageExportBackendIfRequired(index);
             try
             {
+                if (TryExportOneBitGrayscalePng(image, out byte[]? pngData))
+                {
+                    return _imageAssets.Add(assetId, "png", "image/png", pngData).AssetId;
+                }
+
                 PdfImageExportResult result = PdfImageExporter.ExportForBrowser(image, _colorManagementContext);
                 return _imageAssets.Add(
                     assetId,
@@ -3433,6 +3440,142 @@ public static class PdfLayoutExtractor
             {
                 return HandleImageExportFailure(assetId, index, ex);
             }
+        }
+
+        private static bool TryExportOneBitGrayscalePng(PDImageXObject image, out byte[] data)
+        {
+            data = [];
+            if (image.GetBitsPerComponent() != 1 ||
+                image.GetColorSpace() is not PDDeviceGray ||
+                image.GetSoftMask() != null)
+            {
+                return false;
+            }
+
+            COSDictionary? dictionary = image.GetCOSObject();
+            if (dictionary == null ||
+                dictionary.GetDictionaryObject(COSName.GetPDFName("Mask")) != null ||
+                dictionary.GetBoolean(COSName.GetPDFName("ImageMask"), false) ||
+                !TryGetOneBitDecodeInversion(dictionary.GetCOSArray(COSName.DECODE), out bool invert))
+            {
+                return false;
+            }
+
+            int width = image.GetWidth();
+            int height = image.GetHeight();
+            int rowBytes = (width + 7) / 8;
+            byte[] samples = image.GetImageData();
+            if (width <= 0 || height <= 0 || samples.Length != rowBytes * height)
+            {
+                return false;
+            }
+
+            data = EncodeOneBitGrayscalePng(samples, width, height, rowBytes, invert);
+            return true;
+        }
+
+        private static bool TryGetOneBitDecodeInversion(COSArray? decode, out bool invert)
+        {
+            invert = false;
+            if (decode == null)
+            {
+                return true;
+            }
+
+            if (decode.Count() != 2 ||
+                decode.GetObject(0) is not COSNumber lowValue ||
+                decode.GetObject(1) is not COSNumber highValue)
+            {
+                return false;
+            }
+
+            float low = lowValue.FloatValue();
+            float high = highValue.FloatValue();
+            if (MathF.Abs(low) <= 0.001f && MathF.Abs(high - 1f) <= 0.001f)
+            {
+                return true;
+            }
+
+            if (MathF.Abs(low - 1f) <= 0.001f && MathF.Abs(high) <= 0.001f)
+            {
+                invert = true;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static byte[] EncodeOneBitGrayscalePng(
+            byte[] samples,
+            int width,
+            int height,
+            int rowBytes,
+            bool invert)
+        {
+            using MemoryStream compressed = new();
+            using (ZLibStream zlib = new(compressed, CompressionLevel.Optimal, leaveOpen: true))
+            {
+                byte[]? invertedRow = invert ? new byte[rowBytes] : null;
+                for (int row = 0; row < height; row++)
+                {
+                    zlib.WriteByte(0);
+                    ReadOnlySpan<byte> source = samples.AsSpan(row * rowBytes, rowBytes);
+                    if (invertedRow == null)
+                    {
+                        zlib.Write(source);
+                        continue;
+                    }
+
+                    for (int index = 0; index < source.Length; index++)
+                    {
+                        invertedRow[index] = (byte)~source[index];
+                    }
+                    zlib.Write(invertedRow);
+                }
+            }
+
+            using MemoryStream png = new();
+            png.Write([137, 80, 78, 71, 13, 10, 26, 10]);
+            Span<byte> header = stackalloc byte[13];
+            BinaryPrimitives.WriteInt32BigEndian(header, width);
+            BinaryPrimitives.WriteInt32BigEndian(header[4..], height);
+            header[8] = 1;
+            header[9] = 0;
+            WritePngChunk(png, "IHDR"u8, header);
+            WritePngChunk(png, "IDAT"u8, compressed.GetBuffer().AsSpan(0, checked((int)compressed.Length)));
+            WritePngChunk(png, "IEND"u8, []);
+            return png.ToArray();
+        }
+
+        private static void WritePngChunk(Stream output, ReadOnlySpan<byte> type, ReadOnlySpan<byte> payload)
+        {
+            Span<byte> value = stackalloc byte[4];
+            BinaryPrimitives.WriteInt32BigEndian(value, payload.Length);
+            output.Write(value);
+            output.Write(type);
+            output.Write(payload);
+
+            uint crc = uint.MaxValue;
+            crc = UpdatePngCrc(crc, type);
+            crc = UpdatePngCrc(crc, payload) ^ uint.MaxValue;
+            BinaryPrimitives.WriteUInt32BigEndian(value, crc);
+            output.Write(value);
+        }
+
+        private static uint UpdatePngCrc(uint crc, ReadOnlySpan<byte> data)
+        {
+            foreach (byte value in data)
+            {
+                crc ^= value;
+                for (int bit = 0; bit < 8; bit++)
+                {
+                    crc = (crc & 1) != 0
+                        ? 0xedb88320u ^ (crc >> 1)
+                        : crc >> 1;
+                }
+            }
+
+            return crc;
         }
 
         private string ExportInlineImageAsset(PDImage image, string assetId, int index)
