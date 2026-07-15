@@ -19,7 +19,10 @@ on:
         default: preview
 
 permissions:
-  contents: write
+  contents: read
+  actions: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: unpdf-pages-publication
@@ -89,11 +92,9 @@ jobs:
           --keyring artifacts/generated-apt/unpdf-archive-keyring.gpg
           "artifacts/generated-apt/dists/$APT_SUITE/InRelease"
 
-      - uses: actions/checkout@v7.0.0
+      - uses: ./.github/actions/restore-pages-site
         with:
-          ref: gh-pages
-          path: artifacts/pages
-          fetch-depth: 0
+          github-token: ${{ github.token }}
 
       - name: Merge suite into Pages tree
         run: >-
@@ -104,36 +105,50 @@ jobs:
           --base-url "$APT_BASE_URL"
           --fingerprint "${{ steps.signing.outputs.fingerprint }}"
 
-      - name: Commit Pages update
+      - name: Record Pages update
         id: publish
-        working-directory: artifacts/pages
         run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .nojekyll apt
-          if ! git diff --cached --quiet; then
-            git commit -m "Publish unpdf $RELEASE_TAG to APT $APT_SUITE"
-            git push origin gh-pages
-          fi
-          sha="$(sha256sum "apt/dists/$APT_SUITE/InRelease" | cut -d' ' -f1)"
+          sha="$(sha256sum "artifacts/pages/apt/dists/$APT_SUITE/InRelease" | cut -d' ' -f1)"
           echo "inrelease_sha256=$sha" >> "$GITHUB_OUTPUT"
 
-      - name: Wait for GitHub Pages deployment
+      - name: Save assembled Pages site
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: pages-site-state
+          path: artifacts/pages
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+
+      - name: Retain only the latest Pages state
         env:
-          EXPECTED_SHA256: ${{ steps.publish.outputs.inrelease_sha256 }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          for _ in $(seq 1 60); do
-            if curl -fsS "$APT_BASE_URL/dists/$APT_SUITE/InRelease?run=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/InRelease" && \
-               test "$(sha256sum "$RUNNER_TEMP/InRelease" | cut -d' ' -f1)" = "$EXPECTED_SHA256"; then
-              exit 0
-            fi
-            sleep 10
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.name == \"pages-site-state\" and .workflow_run.id != ${GITHUB_RUN_ID}) | .id" |
+          while read -r artifact_id; do
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
           done
-          echo "GitHub Pages did not publish the expected InRelease within ten minutes" >&2
-          exit 1
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: artifacts/pages
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5.0.0
 
   public-install:
-    needs: publish
+    needs: [publish, deploy]
     strategy:
       fail-fast: false
       matrix:

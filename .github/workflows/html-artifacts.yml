@@ -6,10 +6,12 @@ on:
 permissions:
   contents: read
   actions: write
+  pages: write
+  id-token: write
 
 concurrency:
-  group: full-html-artifacts
-  cancel-in-progress: true
+  group: unpdf-pages-publication
+  cancel-in-progress: false
 
 env:
   ARTIFACT_NAME: full-html-artifacts
@@ -57,6 +59,7 @@ jobs:
           path: artifacts/html-examples
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
 
       - name: Retain only the latest artifact
         env:
@@ -67,3 +70,52 @@ jobs:
           while read -r artifact_id; do
             gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
           done
+
+      - uses: ./.github/actions/restore-pages-site
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Merge examples into Pages site
+        run: |
+          rm -rf artifacts/pages/examples
+          mv artifacts/html-examples artifacts/pages/examples
+          cp packaging/pages/index.html artifacts/pages/index.html
+          test -f artifacts/pages/examples/index.html
+          test -f artifacts/pages/wasm/index.html
+          test -f artifacts/pages/apt/index.html
+
+      - name: Save assembled Pages site
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: pages-site-state
+          path: artifacts/pages
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+
+      - name: Retain only the latest Pages state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.name == \"pages-site-state\" and .workflow_run.id != ${GITHUB_RUN_ID}) | .id" |
+          while read -r artifact_id; do
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
+          done
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: artifacts/pages
+
+  deploy:
+    needs: generate
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5.0.0

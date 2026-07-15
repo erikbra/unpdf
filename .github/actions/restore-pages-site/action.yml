@@ -1,0 +1,32 @@
+name: Restore Pages site
+description: Restore the latest assembled Pages site, bootstrapping from gh-pages once when necessary.
+
+inputs:
+  github-token:
+    description: Token used to read Actions artifacts.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore assembled site
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        rm -rf artifacts/pages
+        artifact_id="$(
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" |
+            jq -r '[.[].artifacts[] | select(.name == "pages-site-state" and (.expired | not))] | sort_by(.created_at) | reverse | first | .id // empty'
+        )"
+        if test -n "$artifact_id"; then
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "$RUNNER_TEMP/pages-site-state.zip"
+          mkdir -p artifacts/pages
+          unzip -q "$RUNNER_TEMP/pages-site-state.zip" -d artifacts/pages
+        else
+          git clone --depth 1 --branch gh-pages \
+            "https://github.com/${GITHUB_REPOSITORY}.git" artifacts/pages
+          rm -rf artifacts/pages/.git
+        fi
+        test -f artifacts/pages/.nojekyll
+        test -f artifacts/pages/index.html
