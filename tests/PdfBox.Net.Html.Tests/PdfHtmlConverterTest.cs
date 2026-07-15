@@ -203,6 +203,7 @@ public class PdfHtmlConverterTest
         Assert.DoesNotContain(vectorClip.Descendants(), element => element.Name.LocalName == "rect");
 
         XElement image = Assert.Single(ElementsByClass(dom, "pdf-image"));
+        Assert.Equal("img", image.Name.LocalName);
         Assert.Contains("clip-path:url(#pdf-image-page-1-clip-0)", image.Attribute("style")?.Value, StringComparison.Ordinal);
         XElement imageClip = Assert.Single(dom.Descendants(), element =>
             element.Name.LocalName == "clipPath" &&
@@ -280,6 +281,72 @@ public class PdfHtmlConverterTest
             element.Name.LocalName == "clipPath" &&
             element.Attribute("id")?.Value.StartsWith("pdf-image-page-1-clip-0-step-", StringComparison.Ordinal) == true);
         Assert.Equal("M 0 0 L 1 0 L 1 1 L 0 1 Z", Assert.Single(clip.Elements()).Attribute("d")?.Value);
+    }
+
+    [Fact]
+    public void Convert_MixedImageClipChain_OmitsContainingRectangleAncestors()
+    {
+        static PdfLayoutClipPath Clip(PdfLayoutRectangle bounds, params PdfLayoutPathCommand[] commands) =>
+            new(commands, bounds, 1);
+
+        PdfLayoutRectangle pageBounds = new(0f, 0f, 612f, 792f);
+        PdfLayoutRectangle imageBounds = new(100f, 100f, 100f, 100f);
+        PdfLayoutClipPath pageRectangle = Clip(
+            pageBounds,
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.MoveTo, 0f, 0f, 0f, 0f, 0f, 0f),
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, 612f, 0f, 0f, 0f, 0f, 0f),
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, 612f, 792f, 0f, 0f, 0f, 0f),
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, 0f, 792f, 0f, 0f, 0f, 0f),
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.ClosePath, 0f, 0f, 0f, 0f, 0f, 0f));
+        PdfLayoutClipPath triangle = Clip(
+            imageBounds,
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.MoveTo, 100f, 100f, 0f, 0f, 0f, 0f),
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, 200f, 100f, 0f, 0f, 0f, 0f),
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, 150f, 200f, 0f, 0f, 0f, 0f),
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.ClosePath, 0f, 0f, 0f, 0f, 0f, 0f));
+        PdfLayoutImage image = new(
+            0,
+            "image",
+            PdfLayoutImageKind.XObject,
+            imageBounds,
+            new PdfLayoutTransform(100f, 0f, 0f, 100f, 100f, 100f),
+            1,
+            1,
+            8,
+            "DeviceRGB",
+            false,
+            "Im0",
+            clipPaths: [pageRectangle, triangle]);
+        PdfLayoutPage page = new(
+            1,
+            pageBounds,
+            pageBounds,
+            pageBounds.Width,
+            pageBounds.Height,
+            0,
+            [],
+            [],
+            [],
+            [],
+            [image],
+            [],
+            [],
+            [],
+            []);
+        PdfLayoutDocument layout = new(
+            [page],
+            [new PdfLayoutImageAsset("image", "assets/images/image.png", "image/png", [1, 2, 3])],
+            []);
+
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(layout).Html);
+
+        XElement clip = Assert.Single(dom.Descendants(), element =>
+            element.Name.LocalName == "clipPath" &&
+            element.Attribute("id")?.Value == "pdf-image-page-1-clip-0");
+        Assert.DoesNotContain(dom.Descendants(), element =>
+            element.Name.LocalName == "clipPath" &&
+            element.Attribute("id")?.Value.StartsWith("pdf-image-page-1-clip-0-step-", StringComparison.Ordinal) == true);
+        Assert.Equal("M 0 0 L 1 0 L 0.5 1 Z", Assert.Single(clip.Elements()).Attribute("d")?.Value);
     }
 
     [Fact]
