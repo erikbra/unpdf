@@ -3405,24 +3405,66 @@ public static class PdfHtmlConverter
 
     private static bool IsAxisAlignedRectangle(PdfLayoutClipPath clipPath)
     {
-        if (clipPath.Commands.Count is not (5 or 6) ||
+        if (clipPath.Commands.Count < 5 ||
             clipPath.Commands[^1].Kind != PdfLayoutPathCommandKind.ClosePath)
         {
             return false;
         }
 
         const float tolerance = 0.01f;
-        PdfLayoutPathCommand[] points = clipPath.Commands.Take(clipPath.Commands.Count - 1).ToArray();
-        if (points.Length == 5 &&
-            MathF.Abs(points[^1].X1 - points[0].X1) <= tolerance &&
-            MathF.Abs(points[^1].Y1 - points[0].Y1) <= tolerance)
+        PdfLayoutPathCommand move = clipPath.Commands[0];
+        if (move.Kind != PdfLayoutPathCommandKind.MoveTo)
         {
-            points = points[..^1];
+            return false;
         }
 
-        if (points.Length != 4 ||
-            points[0].Kind != PdfLayoutPathCommandKind.MoveTo ||
-            points.Skip(1).Any(static command => command.Kind != PdfLayoutPathCommandKind.LineTo))
+        List<(float X, float Y)> points = [(move.X1, move.Y1)];
+        (float X, float Y) current = points[0];
+        foreach (PdfLayoutPathCommand command in clipPath.Commands.Skip(1).SkipLast(1))
+        {
+            (float X, float Y) end;
+            switch (command.Kind)
+            {
+                case PdfLayoutPathCommandKind.LineTo:
+                    end = (command.X1, command.Y1);
+                    break;
+                case PdfLayoutPathCommandKind.CurveTo:
+                    end = (command.X3, command.Y3);
+                    bool vertical = Near(current.X, end.X, tolerance) &&
+                        Near(command.X1, current.X, tolerance) &&
+                        Near(command.X2, current.X, tolerance);
+                    bool horizontal = Near(current.Y, end.Y, tolerance) &&
+                        Near(command.Y1, current.Y, tolerance) &&
+                        Near(command.Y2, current.Y, tolerance);
+                    if (!vertical && !horizontal)
+                    {
+                        return false;
+                    }
+
+                    break;
+                default:
+                    return false;
+            }
+
+            if (!Near(current.X, end.X, tolerance) && !Near(current.Y, end.Y, tolerance))
+            {
+                return false;
+            }
+
+            points.Add(end);
+            current = end;
+        }
+
+        if (points.Count == 5 &&
+            Near(points[^1].X, points[0].X, tolerance) &&
+            Near(points[^1].Y, points[0].Y, tolerance))
+        {
+            points.RemoveAt(points.Count - 1);
+        }
+
+        if (points.Count != 4 ||
+            (!Near(points[^1].X, points[0].X, tolerance) &&
+                !Near(points[^1].Y, points[0].Y, tolerance)))
         {
             return false;
         }
@@ -3432,12 +3474,12 @@ public static class PdfHtmlConverter
         bool topRight = false;
         bool bottomRight = false;
         bool bottomLeft = false;
-        foreach (PdfLayoutPathCommand command in points)
+        foreach ((float x, float y) in points)
         {
-            bool left = MathF.Abs(command.X1 - bounds.X) <= tolerance;
-            bool right = MathF.Abs(command.X1 - bounds.Right) <= tolerance;
-            bool top = MathF.Abs(command.Y1 - bounds.Y) <= tolerance;
-            bool bottom = MathF.Abs(command.Y1 - bounds.Bottom) <= tolerance;
+            bool left = Near(x, bounds.X, tolerance);
+            bool right = Near(x, bounds.Right, tolerance);
+            bool top = Near(y, bounds.Y, tolerance);
+            bool bottom = Near(y, bounds.Bottom, tolerance);
             topLeft |= left && top;
             topRight |= right && top;
             bottomRight |= right && bottom;
@@ -3446,6 +3488,9 @@ public static class PdfHtmlConverter
 
         return topLeft && topRight && bottomRight && bottomLeft;
     }
+
+    private static bool Near(float first, float second, float tolerance) =>
+        MathF.Abs(first - second) <= tolerance;
 
     private static string VectorClipPathId(string clipIdPrefix, PdfLayoutVectorGroup group)
     {
