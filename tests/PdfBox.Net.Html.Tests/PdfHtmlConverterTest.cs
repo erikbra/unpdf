@@ -668,6 +668,95 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Extract_TransparencyGroupFallback_MatchesFullPageRenderCrop()
+    {
+        const float scale = 3f;
+        using PDDocument document = CreateCompactTransparencyGroupDocument(knockout: true, isolated: false);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true,
+            IncludeTransparencyGroupFallbacks = true
+        });
+
+        PdfLayoutImage fallback = Assert.Single(
+            Assert.Single(layout.Pages).Images,
+            image => image.Kind == PdfLayoutImageKind.TransparencyGroupFallback);
+        using BufferedImage fullPage = new PDFRenderer(document).RenderImage(0, scale, ImageType.RGB);
+        AssertFallbackMatchesFullPageCrop(layout, fallback, fullPage, scale);
+    }
+
+    [Fact]
+    public void Extract_TransparencyGroupFallback_BatchedRegionsMatchFullPageRenderCrops()
+    {
+        const float scale = 3f;
+        using PDDocument document = CreateMultipleCompactTransparencyGroupDocument();
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true,
+            IncludeTransparencyGroupFallbacks = true
+        });
+
+        PdfLayoutImage[] fallbacks = Assert.Single(layout.Pages).Images
+            .Where(image => image.Kind == PdfLayoutImageKind.TransparencyGroupFallback)
+            .OrderBy(static image => image.Bounds.X)
+            .ToArray();
+        Assert.Equal(2, fallbacks.Length);
+        using BufferedImage fullPage = new PDFRenderer(document).RenderImage(0, scale, ImageType.RGB);
+        foreach (PdfLayoutImage fallback in fallbacks)
+        {
+            AssertFallbackMatchesFullPageCrop(layout, fallback, fullPage, scale);
+        }
+    }
+
+    [Fact]
+    public void Extract_TransparencyGroupFallback_NonZeroCropBoxMatchesFullPageRenderCrop()
+    {
+        const float scale = 3f;
+        using PDDocument document = CreateCompactTransparencyGroupDocument(knockout: true, isolated: false);
+        document.GetPage(0).SetCropBox(new PDRectangle(50, 100, 300, 400));
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true,
+            IncludeTransparencyGroupFallbacks = true
+        });
+
+        PdfLayoutImage fallback = Assert.Single(
+            Assert.Single(layout.Pages).Images,
+            image => image.Kind == PdfLayoutImageKind.TransparencyGroupFallback);
+        using BufferedImage fullPage = new PDFRenderer(document).RenderImage(0, scale, ImageType.RGB);
+        AssertFallbackMatchesFullPageCrop(layout, fallback, fullPage, scale);
+    }
+
+    private static void AssertFallbackMatchesFullPageCrop(
+        PdfLayoutDocument layout,
+        PdfLayoutImage fallback,
+        BufferedImage fullPage,
+        float scale)
+    {
+        PdfLayoutImageAsset asset = Assert.Single(
+            layout.ImageAssets,
+            candidate => candidate.AssetId == fallback.AssetId);
+        using BufferedImage actual = DecodePng(asset.Data);
+        int left = Math.Clamp((int)MathF.Floor(fallback.Bounds.X * scale), 0, fullPage.Width - 1);
+        int top = Math.Clamp((int)MathF.Floor(fallback.Bounds.Y * scale), 0, fullPage.Height - 1);
+        int right = Math.Clamp((int)MathF.Ceiling(fallback.Bounds.Right * scale), left + 1, fullPage.Width);
+        int bottom = Math.Clamp((int)MathF.Ceiling(fallback.Bounds.Bottom * scale), top + 1, fullPage.Height);
+
+        Assert.Equal(right - left, actual.Width);
+        Assert.Equal(bottom - top, actual.Height);
+        for (int y = top; y < bottom; y++)
+        {
+            for (int x = left; x < right; x++)
+            {
+                Assert.Equal(fullPage.GetRgb(x, y), actual.GetRgb(x - left, y - top));
+            }
+        }
+    }
+
+    [Fact]
     public void Convert_LuminositySoftMaskedUnderlay_DerivesTextDropShadowGeometry()
     {
         using PDDocument document = CreateLuminositySoftMaskedTextShadowDocument();
@@ -8189,6 +8278,33 @@ public class PdfHtmlConverterTest
         pageContent.Transform(new Matrix(1, 0, 0, 1, 100, 300));
         pageContent.DrawForm(group);
         pageContent.RestoreGraphicsState();
+        return document;
+    }
+
+    private static PDDocument CreateMultipleCompactTransparencyGroupDocument()
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+        PDTransparencyGroup group = new(new PDStream(document));
+        group.SetBBox(new PDRectangle(0, 0, 40, 40));
+        PDTransparencyGroupAttributes attributes = new();
+        attributes.GetCOSObject().SetBoolean(COSName.K, true);
+        group.SetGroup(attributes);
+        using (Stream formContent = group.GetContentStream().CreateOutputStream())
+        {
+            formContent.Write(Encoding.ASCII.GetBytes("1 0 0 rg\n0 0 40 40 re\nf\n"));
+        }
+
+        using PDPageContentStream pageContent = new(document, page);
+        foreach (float x in new[] { 100f, 200f })
+        {
+            pageContent.SaveGraphicsState();
+            pageContent.Transform(new Matrix(1, 0, 0, 1, x, 300));
+            pageContent.DrawForm(group);
+            pageContent.RestoreGraphicsState();
+        }
+
         return document;
     }
 
