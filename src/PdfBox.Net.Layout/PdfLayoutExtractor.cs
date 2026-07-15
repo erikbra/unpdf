@@ -2235,6 +2235,7 @@ public static class PdfLayoutExtractor
         private readonly PDColorManagementContext? _colorManagementContext;
         private readonly List<PdfLayoutImage> _images = new();
         private readonly List<PdfLayoutPath> _paths = new();
+        private readonly List<float[]?> _effectiveDeviceCmykFills = new();
         private readonly List<PdfLayoutShading> _shadings = new();
         private readonly List<PdfLayoutVectorGroup> _vectorGroups = new();
         private readonly List<PdfLayoutDiagnostic> _diagnostics = new();
@@ -2508,22 +2509,57 @@ public static class PdfLayoutExtractor
             bool usesShapeAlpha = graphicsState.GetAlphaSource();
             bool suppressFill = includeFill && IsProcessColorOverprintNoOp(graphicsState);
             PdfLayoutRectangle? clipBounds = DistinctPathClipBounds(graphicsState);
+            IReadOnlyList<PdfLayoutClipPath> clipPaths = AdditionalPathClipPaths(graphicsState);
+            PDColor fillSource = graphicsState.GetNonStrokingColor();
+            float fillAlpha = graphicsState.GetNonStrokeAlphaConstant();
+            int? precomposedBackdropPathIndex = null;
+            float[]? effectiveDeviceCmykFill = includeFill && !suppressFill
+                ? EffectiveDeviceCmykFill(
+                    fillSource,
+                    fillAlpha,
+                    graphicsState,
+                    commands,
+                    bounds,
+                    fillRule,
+                    includeStroke,
+                    clipBounds,
+                    clipPaths,
+                    out precomposedBackdropPathIndex)
+                : null;
+            PdfLayoutColor? resolvedFill = includeFill && !suppressFill
+                ? ResolveColor(
+                    effectiveDeviceCmykFill is null
+                        ? fillSource
+                        : new PDColor(effectiveDeviceCmykFill, fillSource.GetColorSpace()),
+                    fillAlpha,
+                    index,
+                    "fill")
+                : null;
+            IReadOnlyList<string> colorantNames = effectiveDeviceCmykFill is not null && !includeStroke
+                ? DeviceCmykColorants(effectiveDeviceCmykFill)
+                : ExplicitColorants(
+                    includeFill ? fillSource : null,
+                    includeStroke ? graphicsState.GetStrokingColor() : null);
+            if (precomposedBackdropPathIndex is int backdropPathIndex &&
+                resolvedFill is PdfLayoutColor precomposedFill &&
+                effectiveDeviceCmykFill is not null)
+            {
+                ReplacePathFill(backdropPathIndex, precomposedFill, effectiveDeviceCmykFill);
+            }
+
             _paths.Add(new PdfLayoutPath(
                 index,
                 commands,
                 bounds,
-                includeFill && !suppressFill
-                    ? ResolveColor(graphicsState.GetNonStrokingColor(), graphicsState.GetNonStrokeAlphaConstant(), index, "fill")
-                    : null,
+                resolvedFill,
                 includeStroke ? StrokeStyle(graphicsState, index) : null,
                 fillRule,
                 usesShapeAlpha,
-                ExplicitColorants(
-                    includeFill ? graphicsState.GetNonStrokingColor() : null,
-                    includeStroke ? graphicsState.GetStrokingColor() : null),
+                colorantNames,
                 clipBounds,
                 usesSoftMask: graphicsState.GetSoftMask() is not null,
-                clipPaths: AdditionalPathClipPaths(graphicsState)));
+                clipPaths: clipPaths));
+            _effectiveDeviceCmykFills.Add(effectiveDeviceCmykFill);
             _paintOperations.Add(new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Path, index));
             bool requiresShapeAlphaFallback = usesShapeAlpha &&
                 ((includeFill && graphicsState.GetNonStrokeAlphaConstant() < 0.999f) ||
@@ -2553,6 +2589,214 @@ public static class PdfLayoutExtractor
             PDColor color = graphicsState.GetNonStrokingColor();
             return color.GetColorSpace() is PDDeviceCMYK &&
                 color.GetComponents().All(static component => component == 0f);
+        }
+
+        private float[]? EffectiveDeviceCmykFill(
+            PDColor color,
+            float alpha,
+            PDGraphicsState graphicsState,
+            IReadOnlyList<PdfLayoutPathCommand> commands,
+            PdfLayoutRectangle bounds,
+            int? fillRule,
+            bool includeStroke,
+            PdfLayoutRectangle? clipBounds,
+            IReadOnlyList<PdfLayoutClipPath> clipPaths,
+            out int? precomposedBackdropPathIndex)
+        {
+            precomposedBackdropPathIndex = null;
+            if (color.GetColorSpace() is not PDDeviceCMYK || color.GetComponents().Length < 4)
+            {
+                return null;
+            }
+
+            float[] components = color.GetComponents()
+                .Take(4)
+                .Select(static component => Math.Clamp(component, 0f, 1f))
+                .ToArray();
+            if (!graphicsState.IsNonStrokingOverprint() ||
+                graphicsState.GetOverprintMode() != 1 ||
+                alpha < 0.999f ||
+                includeStroke ||
+                graphicsState.GetAlphaSource() ||
+                graphicsState.GetSoftMask() is not null ||
+                _paths.Count == 0)
+            {
+                return components;
+            }
+
+            // Repeated near-identical contours form one visual shape in some OPM1 content.
+            // Single overlaps need a full page backdrop compositor and remain unchanged here.
+            DeviceCmykBackdrop? backdrop = FindDeviceCmykBackdrop(
+                components,
+                commands,
+                bounds,
+                fillRule,
+                clipBounds,
+                clipPaths);
+            if (backdrop is null)
+            {
+                return components;
+            }
+
+            precomposedBackdropPathIndex = backdrop.Value.PathIndex;
+            for (int component = 0; component < 4; component++)
+            {
+                if (components[component] == 0f)
+                {
+                    components[component] = backdrop.Value.Components[component];
+                }
+            }
+
+            return components;
+        }
+
+        private DeviceCmykBackdrop? FindDeviceCmykBackdrop(
+            IReadOnlyList<float> sourceComponents,
+            IReadOnlyList<PdfLayoutPathCommand> commands,
+            PdfLayoutRectangle bounds,
+            int? fillRule,
+            PdfLayoutRectangle? clipBounds,
+            IReadOnlyList<PdfLayoutClipPath> clipPaths)
+        {
+            const int duplicatePathSearchLimit = 8;
+            List<float[]> interveningComponents = [];
+            int firstCandidate = Math.Max(0, _paths.Count - duplicatePathSearchLimit);
+            for (int index = _paths.Count - 1; index >= firstCandidate; index--)
+            {
+                PdfLayoutPath path = _paths[index];
+                float[]? pathComponents = _effectiveDeviceCmykFills[index];
+                if (pathComponents is not { Length: >= 4 } ||
+                    path.FillColor is not PdfLayoutColor fill ||
+                    fill.Alpha < 0.999f ||
+                    path.IsStroked ||
+                    path.UsesShapeAlpha ||
+                    path.UsesSoftMask ||
+                    path.FillRule != fillRule ||
+                    path.ClipBounds != clipBounds ||
+                    !SameClipPaths(path.ClipPaths, clipPaths) ||
+                    !NearlySameRectangle(path.Bounds, bounds) ||
+                    !SamePathGeometry(path.Commands, commands, 0.01f))
+                {
+                    return null;
+                }
+
+                if (!SamePathGeometry(path.Commands, commands, 0.0001f))
+                {
+                    interveningComponents.Add(pathComponents);
+                    continue;
+                }
+
+                float[] composed = pathComponents.Take(4).ToArray();
+                for (int component = 0; component < 4; component++)
+                {
+                    if (sourceComponents[component] != 0f)
+                    {
+                        composed[component] = sourceComponents[component];
+                    }
+                }
+
+                return interveningComponents.Count > 0 &&
+                    interveningComponents.All(candidate =>
+                        SameComponents(candidate, pathComponents) || SameComponents(candidate, composed))
+                    ? new DeviceCmykBackdrop(index, pathComponents)
+                    : null;
+            }
+
+            return null;
+        }
+
+        private void ReplacePathFill(int pathIndex, PdfLayoutColor fill, float[] effectiveComponents)
+        {
+            PdfLayoutPath path = _paths[pathIndex];
+            _paths[pathIndex] = new PdfLayoutPath(
+                path.Index,
+                path.Commands,
+                path.Bounds,
+                fill,
+                path.Stroke,
+                path.FillRule,
+                path.UsesShapeAlpha,
+                DeviceCmykColorants(effectiveComponents),
+                path.ClipBounds,
+                path.UsesSoftMask,
+                path.ClipPaths);
+            _effectiveDeviceCmykFills[pathIndex] = effectiveComponents.ToArray();
+        }
+
+        private readonly record struct DeviceCmykBackdrop(int PathIndex, float[] Components);
+
+        private static string[] DeviceCmykColorants(IReadOnlyList<float> components)
+        {
+            string[] names = ["Cyan", "Magenta", "Yellow", "Black"];
+            return names
+                .Where((_, index) => index < components.Count && components[index] > 0.0001f)
+                .ToArray();
+        }
+
+        private static bool NearlySameRectangle(PdfLayoutRectangle first, PdfLayoutRectangle second)
+        {
+            const float tolerance = 0.01f;
+            return MathF.Abs(first.X - second.X) <= tolerance &&
+                MathF.Abs(first.Y - second.Y) <= tolerance &&
+                MathF.Abs(first.Width - second.Width) <= tolerance &&
+                MathF.Abs(first.Height - second.Height) <= tolerance;
+        }
+
+        private static bool SameComponents(IReadOnlyList<float> first, IReadOnlyList<float> second)
+        {
+            const float tolerance = 0.0001f;
+            return first.Count >= 4 && second.Count >= 4 &&
+                Enumerable.Range(0, 4).All(index => MathF.Abs(first[index] - second[index]) <= tolerance);
+        }
+
+        private static bool SamePathGeometry(
+            IReadOnlyList<PdfLayoutPathCommand> first,
+            IReadOnlyList<PdfLayoutPathCommand> second,
+            float tolerance)
+        {
+            if (first.Count != second.Count)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < first.Count; index++)
+            {
+                PdfLayoutPathCommand left = first[index];
+                PdfLayoutPathCommand right = second[index];
+                if (left.Kind != right.Kind ||
+                    MathF.Abs(left.X1 - right.X1) > tolerance ||
+                    MathF.Abs(left.Y1 - right.Y1) > tolerance ||
+                    MathF.Abs(left.X2 - right.X2) > tolerance ||
+                    MathF.Abs(left.Y2 - right.Y2) > tolerance ||
+                    MathF.Abs(left.X3 - right.X3) > tolerance ||
+                    MathF.Abs(left.Y3 - right.Y3) > tolerance)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool SameClipPaths(
+            IReadOnlyList<PdfLayoutClipPath> first,
+            IReadOnlyList<PdfLayoutClipPath> second)
+        {
+            if (first.Count != second.Count)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < first.Count; index++)
+            {
+                if (first[index].WindingRule != second[index].WindingRule ||
+                    !SamePathGeometry(first[index].Commands, second[index].Commands, 0.01f))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private void CollectShading(PDShadingType2 shading)
