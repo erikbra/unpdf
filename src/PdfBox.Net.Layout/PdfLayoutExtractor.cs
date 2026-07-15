@@ -333,8 +333,22 @@ public static class PdfLayoutExtractor
                 byte[] data = ReadStream(trueTypeStream);
                 if (TryGetSfntFormat(data, out string contentType, out string cssFormat))
                 {
-                    program = new FontProgram(data, contentType, cssFormat, cssFontStyle, cssFontWeight);
-                    return true;
+                    if (SfntWebFontNormalizer.TryNormalize(
+                            data,
+                            out byte[] normalizedData,
+                            out string? failureReason))
+                    {
+                        program = new FontProgram(
+                            normalizedData,
+                            contentType,
+                            cssFormat,
+                            cssFontStyle,
+                            cssFontWeight);
+                        return true;
+                    }
+
+                    unsupportedReason = $"FontFile2 cannot be normalized for browser use: {failureReason}";
+                    return false;
                 }
 
                 unsupportedReason = "FontFile2 does not contain a browser-readable sfnt program.";
@@ -349,8 +363,22 @@ public static class PdfLayoutExtractor
                     byte[] data = ReadStream(fontFile3);
                     if (TryGetSfntFormat(data, out string contentType, out string cssFormat))
                     {
-                        program = new FontProgram(data, contentType, cssFormat, cssFontStyle, cssFontWeight);
-                        return true;
+                        if (SfntWebFontNormalizer.TryNormalize(
+                                data,
+                                out byte[] normalizedData,
+                                out string? failureReason))
+                        {
+                            program = new FontProgram(
+                                normalizedData,
+                                contentType,
+                                cssFormat,
+                                cssFontStyle,
+                                cssFontWeight);
+                            return true;
+                        }
+
+                        unsupportedReason = $"OpenType FontFile3 cannot be normalized for browser use: {failureReason}";
+                        return false;
                     }
 
                     unsupportedReason = "OpenType FontFile3 does not contain a browser-readable sfnt program.";
