@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Text;
 using PdfBox.Net.Layout;
 using PdfBox.Net.PDModel.Graphics;
@@ -12,6 +13,20 @@ namespace PdfBox.Net.Html;
 public static class PdfHtmlConverter
 {
     private const float BrowserFontBaselineRatio = 0.8f;
+    private static readonly ConditionalWeakTable<PdfLayoutPage, FormulaPageLookup> FormulaPageLookups = new();
+
+    private sealed class FormulaPageLookup
+    {
+        public FormulaPageLookup(HashSet<PdfTextRun> proseLineRuns, PdfTextGlyph[] largeOperators)
+        {
+            ProseLineRuns = proseLineRuns;
+            LargeOperators = largeOperators;
+        }
+
+        public HashSet<PdfTextRun> ProseLineRuns { get; }
+
+        public PdfTextGlyph[] LargeOperators { get; }
+    }
 
     internal sealed class FallbackSemanticIsland
     {
@@ -9559,6 +9574,9 @@ public static class PdfHtmlConverter
     {
         HashSet<PdfTextRun> sourceRuns = FormulaSourceRuns(element)
             .ToHashSet((IEqualityComparer<PdfTextRun>)ReferenceEqualityComparer.Instance);
+        FormulaPageLookup pageLookup = FormulaPageLookups.GetValue(
+            page,
+            static layoutPage => CreateFormulaPageLookup(layoutPage));
         bool hasMathFontContext = page.Runs.Any(run =>
             HasMathFont(run.FontName) &&
             RectanglesIntersect(run.Bounds, bounds, 0.75f));
@@ -9568,8 +9586,8 @@ public static class PdfHtmlConverter
                 PdfMathMlFormula.IsEligibleGlyph(glyph) &&
                 !IsClaimedFormulaGlyph(glyph, claimedFormulaGlyphs)))
             .Where(run => sourceRuns.Contains(run) ||
-                IsFormulaOperatorLimitRun(page, bounds, run) ||
-                !IsRunOnProseLine(page, run) &&
+                IsFormulaOperatorLimitRun(bounds, run, pageLookup.LargeOperators) ||
+                !pageLookup.ProseLineRuns.Contains(run) &&
                 (RectanglesIntersect(run.Bounds, bounds, 0.75f) &&
                         (IsFormulaRunCandidate(run) ||
                             hasMathFontContext && IsCompactFormulaContextRun(run)) ||
@@ -9629,16 +9647,23 @@ public static class PdfHtmlConverter
             !text.Any(char.IsWhiteSpace);
     }
 
-    private static bool IsRunOnProseLine(PdfLayoutPage page, PdfTextRun run)
+    private static FormulaPageLookup CreateFormulaPageLookup(PdfLayoutPage page)
     {
-        HashSet<PdfTextGlyph> runGlyphs = run.Glyphs
+        HashSet<PdfTextGlyph> proseGlyphs = page.Lines
+            .Where(line => IsProseLikeFormulaSourceLine(line) ||
+                IsShortProseDominantFormulaSourceLine(line.Text, line.Runs))
+            .SelectMany(static line => line.Runs)
+            .SelectMany(static run => run.Glyphs)
             .ToHashSet((IEqualityComparer<PdfTextGlyph>)ReferenceEqualityComparer.Instance);
-        return page.Lines.Any(line =>
-            (IsProseLikeFormulaSourceLine(line) ||
-                IsShortProseDominantFormulaSourceLine(line.Text, line.Runs)) &&
-            line.Runs
-                .SelectMany(static lineRun => lineRun.Glyphs)
-                .Any(runGlyphs.Contains));
+        HashSet<PdfTextRun> proseLineRuns = page.Runs
+            .Where(run => run.Glyphs.Any(proseGlyphs.Contains))
+            .ToHashSet((IEqualityComparer<PdfTextRun>)ReferenceEqualityComparer.Instance);
+        PdfTextGlyph[] largeOperators = page.Glyphs
+            .Where(static glyph =>
+                PdfMathMlFormula.IsEligibleGlyph(glyph) &&
+                glyph.Text is "∑" or "∏" or "∫")
+            .ToArray();
+        return new FormulaPageLookup(proseLineRuns, largeOperators);
     }
 
     private static bool IsProseLikeFormulaSourceLine(PdfTextLine line)
@@ -9797,6 +9822,17 @@ public static class PdfHtmlConverter
         PdfLayoutRectangle bounds,
         PdfTextRun run)
     {
+        FormulaPageLookup pageLookup = FormulaPageLookups.GetValue(
+            page,
+            static layoutPage => CreateFormulaPageLookup(layoutPage));
+        return IsFormulaOperatorLimitRun(bounds, run, pageLookup.LargeOperators);
+    }
+
+    private static bool IsFormulaOperatorLimitRun(
+        PdfLayoutRectangle bounds,
+        PdfTextRun run,
+        IReadOnlyList<PdfTextGlyph> largeOperators)
+    {
         string text = run.Text.Trim();
         bool hasMathFont = HasMathFont(run.FontName);
         bool plausibleNonMathLimit = text.Length == 1 &&
@@ -9810,8 +9846,7 @@ public static class PdfHtmlConverter
 
         foreach (PdfTextGlyph limit in run.Glyphs.Where(PdfMathMlFormula.IsEligibleGlyph))
         {
-            foreach (PdfTextGlyph largeOperator in page.Glyphs.Where(static glyph =>
-                PdfMathMlFormula.IsEligibleGlyph(glyph) && glyph.Text is "∑" or "∏" or "∫"))
+            foreach (PdfTextGlyph largeOperator in largeOperators)
             {
                 if (!RectanglesIntersect(largeOperator.Bounds, bounds, 1.5f) ||
                     limit.FontSize >= largeOperator.FontSize * 0.85f)
