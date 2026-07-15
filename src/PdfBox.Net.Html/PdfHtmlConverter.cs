@@ -2741,7 +2741,9 @@ public static class PdfHtmlConverter
         html.Append("    <img class=\"pdf-image\" id=\"")
             .Append(ImagePlacementId(page.PageNumber, image.Index))
             .Append("\" src=\"")
-            .Append(HtmlAttribute(asset.RelativePath))
+            .Append(HtmlAttribute(image.OverprintCompositeColor is PdfLayoutColor compositeColor
+                ? SolidColorImageDataUri(compositeColor)
+                : asset.RelativePath))
             .Append("\" alt=\"\" data-asset-id=\"")
             .Append(HtmlAttribute(image.AssetId));
 
@@ -2767,6 +2769,12 @@ public static class PdfHtmlConverter
         }
 
         html.AppendLine("\" />");
+    }
+
+    private static string SolidColorImageDataUri(PdfLayoutColor color)
+    {
+        string svg = $"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1 1\"><rect width=\"1\" height=\"1\" fill=\"{ColorHex(color)}\"/></svg>";
+        return "data:image/svg+xml;base64," + System.Convert.ToBase64String(Encoding.UTF8.GetBytes(svg));
     }
 
     private static bool CanPaintUniformImageWithoutClip(

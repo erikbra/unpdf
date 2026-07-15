@@ -2541,6 +2541,7 @@ public static class PdfLayoutExtractor
             PDColor fillSource = graphicsState.GetNonStrokingColor();
             float fillAlpha = graphicsState.GetNonStrokeAlphaConstant();
             int? precomposedBackdropPathIndex = null;
+            bool composedDeviceN = false;
             float[]? effectiveDeviceCmykFill = includeFill && !suppressFill
                 ? EffectiveDeviceCmykFill(
                     fillSource,
@@ -2554,16 +2555,31 @@ public static class PdfLayoutExtractor
                     clipPaths,
                     out precomposedBackdropPathIndex)
                 : null;
+            if (effectiveDeviceCmykFill is null && includeFill && !suppressFill)
+            {
+                effectiveDeviceCmykFill = EffectiveDeviceNOverprintFill(
+                    fillSource,
+                    fillAlpha,
+                    graphicsState,
+                    commands,
+                    bounds,
+                    fillRule,
+                    includeStroke,
+                    clipBounds,
+                    clipPaths,
+                    out precomposedBackdropPathIndex);
+                composedDeviceN = effectiveDeviceCmykFill is not null;
+            }
             PdfLayoutColor? resolvedFill = includeFill && !suppressFill
                 ? ResolveColor(
                     effectiveDeviceCmykFill is null
                         ? fillSource
-                        : new PDColor(effectiveDeviceCmykFill, fillSource.GetColorSpace()),
+                        : new PDColor(effectiveDeviceCmykFill, PDDeviceCMYK.Instance),
                     fillAlpha,
                     index,
                     "fill")
                 : null;
-            IReadOnlyList<string> colorantNames = effectiveDeviceCmykFill is not null && !includeStroke
+            IReadOnlyList<string> colorantNames = effectiveDeviceCmykFill is not null && !composedDeviceN && !includeStroke
                 ? DeviceCmykColorants(effectiveDeviceCmykFill)
                 : ExplicitColorants(
                     includeFill ? fillSource : null,
@@ -2678,6 +2694,149 @@ public static class PdfLayoutExtractor
             return components;
         }
 
+        private float[]? EffectiveDeviceNOverprintFill(
+            PDColor color,
+            float alpha,
+            PDGraphicsState graphicsState,
+            IReadOnlyList<PdfLayoutPathCommand> commands,
+            PdfLayoutRectangle bounds,
+            int? fillRule,
+            bool includeStroke,
+            PdfLayoutRectangle? clipBounds,
+            IReadOnlyList<PdfLayoutClipPath> clipPaths,
+            out int? precomposedBackdropPathIndex)
+        {
+            precomposedBackdropPathIndex = null;
+            if (color.GetColorSpace() is not PDDeviceN deviceN ||
+                !graphicsState.IsNonStrokingOverprint() ||
+                graphicsState.GetOverprintMode() != 1 ||
+                alpha < 0.999f ||
+                includeStroke ||
+                graphicsState.GetAlphaSource() ||
+                graphicsState.GetSoftMask() is not null)
+            {
+                return null;
+            }
+
+            float[]? sourceComponents = DeviceNProcessComponents(deviceN, color.GetComponents());
+            if (sourceComponents is null)
+            {
+                return null;
+            }
+
+            DeviceCmykBackdrop? backdrop = FindExactProcessBackdrop(
+                commands,
+                bounds,
+                fillRule,
+                clipBounds,
+                clipPaths);
+            if (backdrop is null)
+            {
+                return null;
+            }
+
+            float[] composed = ComposeProcessComponents(backdrop.Value.Components, sourceComponents);
+            precomposedBackdropPathIndex = backdrop.Value.PathIndex;
+            return composed;
+        }
+
+        private DeviceCmykBackdrop? FindExactProcessBackdrop(
+            IReadOnlyList<PdfLayoutPathCommand> commands,
+            PdfLayoutRectangle bounds,
+            int? fillRule,
+            PdfLayoutRectangle? clipBounds,
+            IReadOnlyList<PdfLayoutClipPath> clipPaths)
+        {
+            const int searchLimit = 12;
+            int firstCandidate = Math.Max(0, _paths.Count - searchLimit);
+            for (int index = _paths.Count - 1; index >= firstCandidate; index--)
+            {
+                PdfLayoutPath path = _paths[index];
+                if (!BoundsOverlap(path.Bounds, bounds))
+                {
+                    continue;
+                }
+
+                float[]? pathComponents = _effectiveDeviceCmykFills[index];
+                if (pathComponents is { Length: >= 4 } &&
+                    path.FillColor is PdfLayoutColor fill &&
+                    fill.Alpha >= 0.999f &&
+                    !path.IsStroked &&
+                    !path.UsesShapeAlpha &&
+                    !path.UsesSoftMask &&
+                    path.FillRule == fillRule &&
+                    path.ClipBounds == clipBounds &&
+                    SameClipPaths(path.ClipPaths, clipPaths) &&
+                    NearlySameRectangle(path.Bounds, bounds) &&
+                    SamePathGeometry(path.Commands, commands, 0.0001f))
+                {
+                    return new DeviceCmykBackdrop(index, pathComponents);
+                }
+
+                // An intervening paint at the same location makes local composition ambiguous.
+                return null;
+            }
+
+            return null;
+        }
+
+        private static float[]? DeviceNProcessComponents(PDDeviceN deviceN, IReadOnlyList<float> components)
+        {
+            IReadOnlyList<string> names = deviceN.GetColorantNames();
+            if (components.Count < names.Count)
+            {
+                return null;
+            }
+
+            float[] process = [float.NaN, float.NaN, float.NaN, float.NaN];
+            for (int index = 0; index < names.Count; index++)
+            {
+                string name = names[index];
+                if (string.Equals(name, "None", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                int processIndex = ProcessColorantIndex(name);
+                if (processIndex < 0)
+                {
+                    return null;
+                }
+
+                process[processIndex] = Math.Clamp(components[index], 0f, 1f);
+            }
+
+            return process.Any(static component => !float.IsNaN(component)) ? process : null;
+        }
+
+        private static float[] ComposeProcessComponents(
+            IReadOnlyList<float> backdrop,
+            IReadOnlyList<float> source)
+        {
+            float[] composed = backdrop.Take(4).ToArray();
+            for (int index = 0; index < composed.Length; index++)
+            {
+                if (!float.IsNaN(source[index]))
+                {
+                    composed[index] = source[index];
+                }
+            }
+
+            return composed;
+        }
+
+        private static int ProcessColorantIndex(string name)
+        {
+            return name.ToUpperInvariant() switch
+            {
+                "CYAN" => 0,
+                "MAGENTA" => 1,
+                "YELLOW" => 2,
+                "BLACK" => 3,
+                _ => -1
+            };
+        }
+
         private DeviceCmykBackdrop? FindDeviceCmykBackdrop(
             IReadOnlyList<float> sourceComponents,
             IReadOnlyList<PdfLayoutPathCommand> commands,
@@ -2770,6 +2929,14 @@ public static class PdfLayoutExtractor
                 MathF.Abs(first.Height - second.Height) <= tolerance;
         }
 
+        private static bool BoundsOverlap(PdfLayoutRectangle first, PdfLayoutRectangle second)
+        {
+            return first.X < second.Right &&
+                first.Right > second.X &&
+                first.Y < second.Bottom &&
+                first.Bottom > second.Y;
+        }
+
         private static bool SameComponents(IReadOnlyList<float> first, IReadOnlyList<float> second)
         {
             const float tolerance = 0.0001f;
@@ -2804,6 +2971,78 @@ public static class PdfLayoutExtractor
             }
 
             return true;
+        }
+
+        private static bool SameClosedPolygonGeometry(
+            IReadOnlyList<PdfLayoutPathCommand> first,
+            IReadOnlyList<PdfLayoutPathCommand> second,
+            float tolerance)
+        {
+            static List<(float X, float Y)> PolygonPoints(
+                IReadOnlyList<PdfLayoutPathCommand> commands,
+                float tolerance)
+            {
+                if (commands.Any(command => command.Kind is not (
+                    PdfLayoutPathCommandKind.MoveTo or
+                    PdfLayoutPathCommandKind.LineTo or
+                    PdfLayoutPathCommandKind.ClosePath)))
+                {
+                    return [];
+                }
+
+                List<(float X, float Y)> points = commands
+                    .Where(command => command.Kind is PdfLayoutPathCommandKind.MoveTo or PdfLayoutPathCommandKind.LineTo)
+                    .Select(command => (command.X1, command.Y1))
+                    .ToList();
+                if (points.Count > 1 &&
+                    MathF.Abs(points[0].X - points[^1].X) <= tolerance &&
+                    MathF.Abs(points[0].Y - points[^1].Y) <= tolerance)
+                {
+                    points.RemoveAt(points.Count - 1);
+                }
+
+                return points;
+            }
+
+            static bool SamePoint((float X, float Y) first, (float X, float Y) second, float tolerance) =>
+                MathF.Abs(first.X - second.X) <= tolerance &&
+                MathF.Abs(first.Y - second.Y) <= tolerance;
+
+            List<(float X, float Y)> firstPoints = PolygonPoints(first, tolerance);
+            List<(float X, float Y)> secondPoints = PolygonPoints(second, tolerance);
+            if (firstPoints.Count == 0 || firstPoints.Count != secondPoints.Count)
+            {
+                return false;
+            }
+
+            for (int offset = 0; offset < secondPoints.Count; offset++)
+            {
+                if (!SamePoint(firstPoints[0], secondPoints[offset], tolerance))
+                {
+                    continue;
+                }
+
+                bool forward = true;
+                bool reverse = true;
+                for (int index = 1; index < firstPoints.Count; index++)
+                {
+                    forward &= SamePoint(
+                        firstPoints[index],
+                        secondPoints[(offset + index) % secondPoints.Count],
+                        tolerance);
+                    reverse &= SamePoint(
+                        firstPoints[index],
+                        secondPoints[(offset - index + secondPoints.Count) % secondPoints.Count],
+                        tolerance);
+                }
+
+                if (forward || reverse)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static bool SameClipPaths(
@@ -3587,11 +3826,18 @@ public static class PdfLayoutExtractor
             Matrix ctm = GetGraphicsState().GetCurrentTransformationMatrix();
             (PdfLayoutRectangle bounds, PdfLayoutTransform transform) = NormalizeImageGeometry(ctm);
             int index = _images.Count;
+            IReadOnlyList<PdfLayoutClipPath> clipPaths = CurrentClipPaths(GetGraphicsState(), skipCount: 1);
             string assetId = $"page-{_pageNumber.ToString(CultureInfo.InvariantCulture)}-image-{index.ToString(CultureInfo.InvariantCulture)}";
             if (_includeImageAssets)
             {
                 assetId = ExportXObjectImageAsset(image, assetId, index);
             }
+
+            PdfLayoutColor? overprintCompositeColor = ResolveUniformIndexedDeviceNOverprint(
+                image,
+                GetGraphicsState(),
+                clipPaths,
+                index);
 
             _images.Add(new PdfLayoutImage(
                 index,
@@ -3607,8 +3853,147 @@ public static class PdfLayoutExtractor
                 sourceName,
                 GetGraphicsState().IsNonStrokingOverprint() || GetGraphicsState().IsOverprint(),
                 ExplicitColorants(image.GetColorSpace()),
-                CurrentClipPaths(GetGraphicsState(), skipCount: 1)));
+                clipPaths,
+                overprintCompositeColor));
             _paintOperations.Add(new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Image, index));
+        }
+
+        private PdfLayoutColor? ResolveUniformIndexedDeviceNOverprint(
+            PDImageXObject image,
+            PDGraphicsState graphicsState,
+            IReadOnlyList<PdfLayoutClipPath> clipPaths,
+            int imageIndex)
+        {
+            if (!graphicsState.IsNonStrokingOverprint() ||
+                graphicsState.GetOverprintMode() != 1 ||
+                graphicsState.GetNonStrokeAlphaConstant() < 0.999f ||
+                graphicsState.GetAlphaSource() ||
+                graphicsState.GetSoftMask() is not null ||
+                !TryGetUniformIndexedDeviceNProcessComponents(image, out float[] sourceComponents))
+            {
+                return null;
+            }
+
+            DeviceCmykBackdrop? backdrop = FindImageClipProcessBackdrop(clipPaths);
+            if (backdrop is null)
+            {
+                return null;
+            }
+
+            float[] composed = ComposeProcessComponents(backdrop.Value.Components, sourceComponents);
+            PdfLayoutColor resolved = ResolveColor(
+                new PDColor(composed, PDDeviceCMYK.Instance),
+                1f,
+                imageIndex,
+                "DeviceN image overprint");
+            ReplacePathFill(backdrop.Value.PathIndex, resolved, composed);
+            return resolved;
+        }
+
+        private DeviceCmykBackdrop? FindImageClipProcessBackdrop(IReadOnlyList<PdfLayoutClipPath> clipPaths)
+        {
+            const int searchLimit = 12;
+            foreach (PdfLayoutClipPath clipPath in clipPaths.Reverse())
+            {
+                int firstCandidate = Math.Max(0, _paths.Count - searchLimit);
+                for (int index = _paths.Count - 1; index >= firstCandidate; index--)
+                {
+                    PdfLayoutPath path = _paths[index];
+                    if (!BoundsOverlap(path.Bounds, clipPath.Bounds))
+                    {
+                        continue;
+                    }
+
+                    float[]? pathComponents = _effectiveDeviceCmykFills[index];
+                    if (pathComponents is { Length: >= 4 } &&
+                        path.FillColor is PdfLayoutColor fill &&
+                        fill.Alpha >= 0.999f &&
+                        !path.IsStroked &&
+                        !path.UsesShapeAlpha &&
+                        !path.UsesSoftMask &&
+                        path.FillRule == clipPath.WindingRule &&
+                        NearlySameRectangle(path.Bounds, clipPath.Bounds) &&
+                        SameClosedPolygonGeometry(path.Commands, clipPath.Commands, 0.01f))
+                    {
+                        return new DeviceCmykBackdrop(index, pathComponents);
+                    }
+
+                    return null;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool TryGetUniformIndexedDeviceNProcessComponents(
+            PDImageXObject image,
+            out float[] processComponents)
+        {
+            processComponents = [];
+            if (image.GetBitsPerComponent() != 8 ||
+                image.GetColorSpace() is not PDIndexed indexed ||
+                indexed.GetBaseColorSpace() is not PDDeviceN deviceN ||
+                image.GetCOSObject()?.GetDictionaryObject(COSName.DECODE) is not null)
+            {
+                return false;
+            }
+
+            byte[] samples = image.GetImageData();
+            int expectedSamples = image.GetWidth() * image.GetHeight();
+            if (samples.Length != expectedSamples ||
+                samples.Length == 0 ||
+                samples.Any(sample => sample != samples[0]) ||
+                !TryGetIndexedLookupBytes(indexed, out byte[]? lookup))
+            {
+                return false;
+            }
+
+            int componentCount = deviceN.GetColorantNames().Count;
+            int offset = samples[0] * componentCount;
+            if (componentCount == 0 || offset < 0 || offset + componentCount > lookup.Length)
+            {
+                return false;
+            }
+
+            float[] components = lookup
+                .Skip(offset)
+                .Take(componentCount)
+                .Select(static value => value / 255f)
+                .ToArray();
+            float[]? mappedComponents = DeviceNProcessComponents(deviceN, components);
+            if (mappedComponents is null)
+            {
+                return false;
+            }
+
+            processComponents = mappedComponents;
+            return true;
+        }
+
+        private static bool TryGetIndexedLookupBytes(PDIndexed indexed, out byte[] data)
+        {
+            data = [];
+            if (indexed.GetCOSObject() is not COSArray array || array.GetObject(3) is not COSBase lookup)
+            {
+                return false;
+            }
+
+            switch (lookup)
+            {
+                case COSString text:
+                    data = text.GetBytes();
+                    return true;
+                case COSStream stream:
+                    using (Stream input = stream.CreateInputStream())
+                    using (MemoryStream output = new())
+                    {
+                        input.CopyTo(output);
+                        data = output.ToArray();
+                    }
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private void CollectInlineImage(PDImage image)
