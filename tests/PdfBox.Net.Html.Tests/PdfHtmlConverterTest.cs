@@ -203,6 +203,74 @@ public class PdfHtmlConverterTest
         Assert.InRange(MathF.Abs(overprinted.Blue - expectedRgb[2]), 0f, tolerance);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Convert_SeparationAndDeviceCmykOverprint_NoOpUsesContainingBackdrop(bool spotOnTop)
+    {
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDSeparation spot = new(
+            "GWG Green",
+            PDDeviceCMYK.Instance,
+            CreateType4Function(
+                spotOnTop ? "{ pop 0.005 0 0.01 0 }" : "{ pop 0.5 0 1 0 }",
+                1,
+                4));
+        PDExtendedGraphicsState overprint = new();
+        overprint.SetNonStrokingOverprintControl(true);
+        overprint.SetOverprintMode(1);
+
+        PDColor spotColor = new([1f], spot);
+        PDColor processColor = new(
+            spotOnTop ? [0.5f, 0f, 1f, 0f] : [0.005f, 0f, 0.01f, 0f],
+            PDDeviceCMYK.Instance);
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.SetNonStrokingColor(spotOnTop ? processColor : spotColor);
+            content.AddRect(10, 10, 20, 20);
+            content.Fill();
+            content.SetGraphicsStateParameters(overprint);
+            content.SetNonStrokingColor(spotOnTop ? spotColor : processColor);
+            content.AddRect(12, 12, 16, 16);
+            content.Fill();
+        }
+
+        PdfLayoutPath[] paths = Assert.Single(PdfLayoutExtractor.Extract(document).Pages).Paths.ToArray();
+        Assert.Equal(2, paths.Length);
+        Assert.Equal(paths[0].FillColor, paths[1].FillColor);
+        Assert.Contains("GWG Green", paths[spotOnTop ? 1 : 0].ColorantNames);
+
+        XElement[] vectorPaths = ParseHtml(PdfHtmlConverter.Convert(PdfLayoutExtractor.Extract(document)).Html)
+            .Descendants()
+            .Where(element => element.Name.LocalName == "path" && element.Attribute("data-path-index") is not null)
+            .ToArray();
+        Assert.Equal(vectorPaths[0].Attribute("fill")?.Value, vectorPaths[1].Attribute("fill")?.Value);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Convert_SeparationAndDeviceCmykStencilOverprint_NoOpUsesContainingBackdrop(bool spotOnTop)
+    {
+        using PDDocument document = CreateSeparationStencilOverprintDocument(spotOnTop);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        PdfLayoutPath backdrop = Assert.Single(page.Paths);
+        PdfLayoutImage image = Assert.Single(page.Images);
+        Assert.Equal(backdrop.FillColor, image.OverprintCompositeColor);
+
+        XElement convertedImage = Assert.Single(ParseHtml(PdfHtmlConverter.Convert(layout).Html)
+            .Descendants(), element => element.Name.LocalName == "img");
+        Assert.StartsWith("data:image/svg+xml;base64,", convertedImage.Attribute("src")?.Value, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Convert_UniformIndexedDeviceNOverprint_ComposesMatchingCmykClipBackdrop()
     {
@@ -8068,6 +8136,53 @@ public class PdfHtmlConverterTest
             content.SetGraphicsStateParameters(overprint);
             content.DrawImage(image, 10, 10, 20, 20);
             content.RestoreGraphicsState();
+        }
+
+        return document;
+    }
+
+    private static PDDocument CreateSeparationStencilOverprintDocument(bool spotOnTop)
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDSeparation spot = new(
+            "GWG Green",
+            PDDeviceCMYK.Instance,
+            CreateType4Function(
+                spotOnTop ? "{ pop 0.005 0 0.01 0 }" : "{ pop 0.5 0 1 0 }",
+                1,
+                4));
+        PDColor spotColor = new([1f], spot);
+        PDColor processColor = new(
+            spotOnTop ? [0.5f, 0f, 1f, 0f] : [0.005f, 0f, 0.01f, 0f],
+            PDDeviceCMYK.Instance);
+
+        PDStream imageStream = new(document);
+        using (Stream output = imageStream.CreateOutputStream())
+        {
+            output.WriteByte(0);
+        }
+
+        COSStream imageDictionary = imageStream.GetCOSObject();
+        imageDictionary.SetInt(COSName.WIDTH, 1);
+        imageDictionary.SetInt(COSName.HEIGHT, 1);
+        imageDictionary.SetInt(COSName.BITS_PER_COMPONENT, 1);
+        imageDictionary.SetBoolean(COSName.IMAGE_MASK, true);
+        PDImageXObject stencil = new(imageStream, null);
+
+        PDExtendedGraphicsState overprint = new();
+        overprint.SetNonStrokingOverprintControl(true);
+        overprint.SetOverprintMode(1);
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.SetNonStrokingColor(spotOnTop ? processColor : spotColor);
+            content.AddRect(10, 10, 20, 20);
+            content.Fill();
+            content.SetGraphicsStateParameters(overprint);
+            content.SetNonStrokingColor(spotOnTop ? spotColor : processColor);
+            content.DrawImage(stencil, 12, 12, 16, 16);
         }
 
         return document;

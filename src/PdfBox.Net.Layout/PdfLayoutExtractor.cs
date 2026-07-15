@@ -7,6 +7,7 @@ using PdfBox.Net.ContentStream;
 using PdfBox.Net.COS;
 using PdfBox.Net.PDModel;
 using PdfBox.Net.PDModel.Common;
+using PdfBox.Net.PDModel.Common.Function;
 using PdfBox.Net.PDModel.Graphics;
 using PdfBox.Net.PDModel.Graphics.Color;
 using PdfBox.Net.PDModel.Graphics.Form;
@@ -2541,7 +2542,9 @@ public static class PdfLayoutExtractor
             PDColor fillSource = graphicsState.GetNonStrokingColor();
             float fillAlpha = graphicsState.GetNonStrokeAlphaConstant();
             int? precomposedBackdropPathIndex = null;
+            PdfLayoutColor? containingBackdropFill = null;
             bool composedDeviceN = false;
+            bool composedSeparation = false;
             float[]? effectiveDeviceCmykFill = includeFill && !suppressFill
                 ? EffectiveDeviceCmykFill(
                     fillSource,
@@ -2553,7 +2556,8 @@ public static class PdfLayoutExtractor
                     includeStroke,
                     clipBounds,
                     clipPaths,
-                    out precomposedBackdropPathIndex)
+                    out precomposedBackdropPathIndex,
+                    out containingBackdropFill)
                 : null;
             if (effectiveDeviceCmykFill is null && includeFill && !suppressFill)
             {
@@ -2570,8 +2574,18 @@ public static class PdfLayoutExtractor
                     out precomposedBackdropPathIndex);
                 composedDeviceN = effectiveDeviceCmykFill is not null;
             }
+            if (effectiveDeviceCmykFill is null && includeFill && !suppressFill)
+            {
+                effectiveDeviceCmykFill = EffectiveSeparationOverprintFill(
+                    fillSource,
+                    fillAlpha,
+                    graphicsState,
+                    bounds,
+                    includeStroke);
+                composedSeparation = effectiveDeviceCmykFill is not null;
+            }
             PdfLayoutColor? resolvedFill = includeFill && !suppressFill
-                ? ResolveColor(
+                ? containingBackdropFill ?? ResolveColor(
                     effectiveDeviceCmykFill is null
                         ? fillSource
                         : new PDColor(effectiveDeviceCmykFill, PDDeviceCMYK.Instance),
@@ -2579,7 +2593,10 @@ public static class PdfLayoutExtractor
                     index,
                     "fill")
                 : null;
-            IReadOnlyList<string> colorantNames = effectiveDeviceCmykFill is not null && !composedDeviceN && !includeStroke
+            IReadOnlyList<string> colorantNames = effectiveDeviceCmykFill is not null &&
+                !composedDeviceN &&
+                !composedSeparation &&
+                !includeStroke
                 ? DeviceCmykColorants(effectiveDeviceCmykFill)
                 : ExplicitColorants(
                     includeFill ? fillSource : null,
@@ -2603,7 +2620,8 @@ public static class PdfLayoutExtractor
                 clipBounds,
                 usesSoftMask: graphicsState.GetSoftMask() is not null,
                 clipPaths: clipPaths));
-            _effectiveDeviceCmykFills.Add(effectiveDeviceCmykFill);
+            _effectiveDeviceCmykFills.Add(
+                effectiveDeviceCmykFill ?? SeparationProcessComponents(fillSource));
             _paintOperations.Add(new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Path, index));
             bool requiresShapeAlphaFallback = usesShapeAlpha &&
                 ((includeFill && graphicsState.GetNonStrokeAlphaConstant() < 0.999f) ||
@@ -2645,9 +2663,11 @@ public static class PdfLayoutExtractor
             bool includeStroke,
             PdfLayoutRectangle? clipBounds,
             IReadOnlyList<PdfLayoutClipPath> clipPaths,
-            out int? precomposedBackdropPathIndex)
+            out int? precomposedBackdropPathIndex,
+            out PdfLayoutColor? containingBackdropFill)
         {
             precomposedBackdropPathIndex = null;
+            containingBackdropFill = null;
             if (color.GetColorSpace() is not PDDeviceCMYK || color.GetComponents().Length < 4)
             {
                 return null;
@@ -2669,7 +2689,7 @@ public static class PdfLayoutExtractor
             }
 
             // Repeated near-identical contours form one visual shape in some OPM1 content.
-            // Single overlaps need a full page backdrop compositor and remain unchanged here.
+            // A contained spot backdrop is also safe when this process paint is an exact no-op.
             DeviceCmykBackdrop? backdrop = FindDeviceCmykBackdrop(
                 components,
                 commands,
@@ -2679,6 +2699,17 @@ public static class PdfLayoutExtractor
                 clipPaths);
             if (backdrop is null)
             {
+                DeviceCmykBackdrop? spotBackdrop = FindContainingSpotBackdrop(bounds);
+                if (spotBackdrop is not null)
+                {
+                    float[] composed = AddProcessComponents(spotBackdrop.Value.Components, components);
+                    if (SameComponents(composed, spotBackdrop.Value.Components))
+                    {
+                        containingBackdropFill = _paths[spotBackdrop.Value.PathIndex].FillColor;
+                        return composed;
+                    }
+                }
+
                 return components;
             }
 
@@ -2693,6 +2724,112 @@ public static class PdfLayoutExtractor
 
             return components;
         }
+
+        private float[]? EffectiveSeparationOverprintFill(
+            PDColor color,
+            float alpha,
+            PDGraphicsState graphicsState,
+            PdfLayoutRectangle bounds,
+            bool includeStroke)
+        {
+            float[]? sourceComponents = SeparationProcessComponents(color);
+            if (sourceComponents is null ||
+                !graphicsState.IsNonStrokingOverprint() ||
+                graphicsState.GetOverprintMode() != 1 ||
+                alpha < 0.999f ||
+                includeStroke ||
+                graphicsState.GetAlphaSource() ||
+                graphicsState.GetSoftMask() is not null)
+            {
+                return null;
+            }
+
+            DeviceCmykBackdrop? backdrop = FindContainingProcessBackdrop(bounds, requireSpotColorant: false);
+            if (backdrop is null)
+            {
+                return null;
+            }
+
+            float[] composed = AddProcessComponents(backdrop.Value.Components, sourceComponents);
+            return SameComponents(composed, backdrop.Value.Components) ? composed : null;
+        }
+
+        private static float[]? SeparationProcessComponents(PDColor color)
+        {
+            if (color.GetColorSpace() is not PDSeparation separation ||
+                separation.GetAlternateColorSpace() is not PDDeviceCMYK)
+            {
+                return null;
+            }
+
+            try
+            {
+                if (separation.GetCOSObject() is not COSArray array)
+                {
+                    return null;
+                }
+
+                COSBase? functionObject = array.GetObject(3);
+                if (functionObject is null)
+                {
+                    return null;
+                }
+
+                PDFunction function = PDFunction.Create(functionObject);
+                float[] transformed = function.Eval(color.GetComponents());
+                return transformed.Length >= 4
+                    ? transformed.Take(4).Select(static component => Math.Clamp(component, 0f, 1f)).ToArray()
+                    : null;
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+        }
+
+        private DeviceCmykBackdrop? FindContainingSpotBackdrop(PdfLayoutRectangle bounds) =>
+            FindContainingProcessBackdrop(bounds, requireSpotColorant: true);
+
+        private DeviceCmykBackdrop? FindContainingProcessBackdrop(
+            PdfLayoutRectangle bounds,
+            bool requireSpotColorant)
+        {
+            const int searchLimit = 16;
+            int firstCandidate = Math.Max(0, _paths.Count - searchLimit);
+            for (int index = _paths.Count - 1; index >= firstCandidate; index--)
+            {
+                PdfLayoutPath path = _paths[index];
+                if (!BoundsOverlap(path.Bounds, bounds))
+                {
+                    continue;
+                }
+
+                float[]? pathComponents = _effectiveDeviceCmykFills[index];
+                bool hasSpotColorant = path.ColorantNames.Any(static name => ProcessColorantIndex(name) < 0);
+                if (pathComponents is { Length: >= 4 } &&
+                    path.FillColor is PdfLayoutColor fill &&
+                    fill.Alpha >= 0.999f &&
+                    !path.IsStroked &&
+                    !path.UsesShapeAlpha &&
+                    !path.UsesSoftMask &&
+                    hasSpotColorant == requireSpotColorant &&
+                    ContainsBounds(path.Bounds, bounds, 0.1f))
+                {
+                    return new DeviceCmykBackdrop(index, pathComponents);
+                }
+
+                return null;
+            }
+
+            return null;
+        }
+
+        private static float[] AddProcessComponents(
+            IReadOnlyList<float> backdrop,
+            IReadOnlyList<float> source) =>
+            Enumerable.Range(0, 4)
+                .Select(index => MathF.Max(backdrop[index], source[index]))
+                .ToArray();
 
         private float[]? EffectiveDeviceNOverprintFill(
             PDColor color,
@@ -2936,6 +3073,15 @@ public static class PdfLayoutExtractor
                 first.Y < second.Bottom &&
                 first.Bottom > second.Y;
         }
+
+        private static bool ContainsBounds(
+            PdfLayoutRectangle outer,
+            PdfLayoutRectangle inner,
+            float tolerance) =>
+            outer.X - tolerance <= inner.X &&
+            outer.Y - tolerance <= inner.Y &&
+            outer.Right + tolerance >= inner.Right &&
+            outer.Bottom + tolerance >= inner.Bottom;
 
         private static bool SameComponents(IReadOnlyList<float> first, IReadOnlyList<float> second)
         {
@@ -3837,7 +3983,11 @@ public static class PdfLayoutExtractor
                 image,
                 GetGraphicsState(),
                 clipPaths,
-                index);
+                index) ?? ResolveStencilOverprint(
+                    image,
+                    GetGraphicsState(),
+                    bounds,
+                    index);
 
             _images.Add(new PdfLayoutImage(
                 index,
@@ -3888,6 +4038,67 @@ public static class PdfLayoutExtractor
                 "DeviceN image overprint");
             ReplacePathFill(backdrop.Value.PathIndex, resolved, composed);
             return resolved;
+        }
+
+        private PdfLayoutColor? ResolveStencilOverprint(
+            PDImageXObject image,
+            PDGraphicsState graphicsState,
+            PdfLayoutRectangle bounds,
+            int imageIndex)
+        {
+            COSDictionary? dictionary = image.GetCOSObject();
+            if (dictionary is null ||
+                !dictionary.GetBoolean(COSName.GetPDFName("ImageMask"), false) ||
+                !graphicsState.IsNonStrokingOverprint() ||
+                graphicsState.GetOverprintMode() != 1 ||
+                graphicsState.GetNonStrokeAlphaConstant() < 0.999f ||
+                graphicsState.GetAlphaSource() ||
+                graphicsState.GetSoftMask() is not null)
+            {
+                return null;
+            }
+
+            PDColor source = graphicsState.GetNonStrokingColor();
+            float[]? sourceComponents;
+            bool requireSpotBackdrop;
+            if (source.GetColorSpace() is PDDeviceCMYK && source.GetComponents().Length >= 4)
+            {
+                sourceComponents = source.GetComponents().Take(4).ToArray();
+                requireSpotBackdrop = true;
+            }
+            else
+            {
+                sourceComponents = SeparationProcessComponents(source);
+                requireSpotBackdrop = false;
+            }
+
+            if (sourceComponents is null)
+            {
+                return null;
+            }
+
+            DeviceCmykBackdrop? backdrop = FindContainingProcessBackdrop(bounds, requireSpotBackdrop);
+            if (backdrop is null)
+            {
+                return null;
+            }
+
+            float[] composed = AddProcessComponents(backdrop.Value.Components, sourceComponents);
+            if (!SameComponents(composed, backdrop.Value.Components))
+            {
+                return null;
+            }
+
+            if (requireSpotBackdrop)
+            {
+                return _paths[backdrop.Value.PathIndex].FillColor;
+            }
+
+            return ResolveColor(
+                new PDColor(composed, PDDeviceCMYK.Instance),
+                1f,
+                imageIndex,
+                "stencil overprint");
         }
 
         private DeviceCmykBackdrop? FindImageClipProcessBackdrop(IReadOnlyList<PdfLayoutClipPath> clipPaths)
