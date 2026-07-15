@@ -26,6 +26,8 @@ jobs:
       - uses: actions/setup-dotnet@v5.4.0
         with:
           dotnet-version: 10.0.x
+      - name: Install WebAssembly native toolchain
+        run: dotnet workload install wasm-tools
       - run: dotnet restore Unpdf.slnx
       - run: dotnet build Unpdf.slnx --configuration Release --no-restore
       - name: Install Playwright browser
