@@ -1087,6 +1087,15 @@ public class PdfHtmlConverterTest
         Assert.Equal("cite.Lovelace2020", items[0].Attribute("id")?.Value);
         Assert.Equal("cite.Noether2022", items[1].Attribute("id")?.Value);
         Assert.Equal("5", items[1].Attribute("value")?.Value);
+        Assert.All(items, item =>
+        {
+            Assert.True(HasClass(item, "pdf-font-times-roman"));
+            Assert.True(HasClass(item, "pdf-font-size-10"));
+            Assert.True(HasClass(item, "pdf-color-000000-ff"));
+        });
+        Assert.Contains(".pdf-font-times-roman{font-family:'Times-Roman', serif}", html.Css, StringComparison.Ordinal);
+        Assert.Contains(".pdf-font-size-10{font-size:10pt}", html.Css, StringComparison.Ordinal);
+        Assert.Contains(".pdf-color-000000-ff{color:#000000}", html.Css, StringComparison.Ordinal);
         Assert.DoesNotContain("[3]", items[0].Value, StringComparison.Ordinal);
         Assert.Contains("continued on the next source page", items[0].Value, StringComparison.Ordinal);
         Assert.Single(items[0].Descendants(), element =>
@@ -1219,12 +1228,27 @@ public class PdfHtmlConverterTest
         XElement[] items = bibliography.Elements("li").ToArray();
         Assert.Equal(40, items.Length);
         Assert.DoesNotContain(items, item => item.Value.TrimStart().StartsWith("[", StringComparison.Ordinal));
+        Assert.All(items, item =>
+        {
+            string[] classes = item.Attribute("class")?.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
+            Assert.Single(classes, className =>
+                className.StartsWith("pdf-font-nimbusromno9l-", StringComparison.Ordinal));
+            Assert.Single(classes, className =>
+                className.StartsWith("pdf-font-size-", StringComparison.Ordinal));
+            Assert.True(HasClass(item, "pdf-color-000000-ff"));
+        });
+        Assert.Contains(items, item => HasClass(item, "pdf-font-size-9"));
+        Assert.Contains(items, item => HasClass(item, "pdf-font-size-10"));
 
         XElement[] pageBreaks = bibliography.Descendants()
             .Where(element => HasClass(element, "pdf-semantic-page-break"))
             .ToArray();
         Assert.Equal(["11", "12"], pageBreaks.Select(element => element.Attribute("data-page-number")?.Value));
-        Assert.All(pageBreaks, pageBreak => Assert.Contains(pageBreak.Ancestors(), ancestor => ancestor.Name == "li"));
+        Assert.All(pageBreaks, pageBreak => Assert.Single(pageBreak.Ancestors("li")));
+        XElement pageElevenItem = Assert.Single(pageBreaks[0].Ancestors("li"));
+        Assert.True(HasClass(pageElevenItem, "pdf-font-nimbusromno9l-regu"));
+        Assert.True(HasClass(pageElevenItem, "pdf-font-size-9"));
+        Assert.True(HasClass(pageElevenItem, "pdf-color-000000-ff"));
 
         HashSet<string> ids = dom.Descendants()
             .Select(element => element.Attribute("id")?.Value)
@@ -1240,6 +1264,71 @@ public class PdfHtmlConverterTest
         Assert.NotEmpty(citationTargets);
         Assert.All(citationTargets, target => Assert.Contains(target, ids));
         Assert.Empty(ElementsByClass(dom, "pdf-semantic-layout-fallback-page"));
+    }
+
+    [Fact]
+    public async Task Convert_SemanticContinuousFlow_ArxivReferencesPreserveSourceTypographyInBrowser()
+    {
+        using PDDocument document = Loader.LoadPDF(Path.Combine(AppContext.BaseDirectory, "Fixtures", "arxiv-sample.pdf"));
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImages = false,
+            IncludePaths = false
+        });
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+
+        using TempDirectory tempDirectory = new();
+        html.WriteToDirectory(tempDirectory.Path);
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage page = await browser.NewPageAsync();
+        await page.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+
+        string[] typography = await page.EvaluateAsync<string[]>(
+            """
+            () => {
+              const firstItem = document.querySelector('.pdf-semantic-bibliography > li');
+              const crossPageItem = document.querySelector('#page-11').closest('li');
+              const firstStyle = getComputedStyle(firstItem);
+              const firstMarkerStyle = getComputedStyle(firstItem, '::marker');
+              const crossPageStyle = getComputedStyle(crossPageItem);
+              const crossPageMarkerStyle = getComputedStyle(crossPageItem, '::marker');
+              return [
+                firstStyle.fontFamily,
+                firstStyle.fontSize,
+                firstStyle.color,
+                firstMarkerStyle.fontFamily,
+                firstMarkerStyle.fontSize,
+                firstMarkerStyle.color,
+                crossPageStyle.fontFamily,
+                crossPageStyle.fontSize,
+                crossPageStyle.color,
+                crossPageMarkerStyle.fontFamily,
+                crossPageMarkerStyle.fontSize,
+                crossPageMarkerStyle.color
+              ];
+            }
+            """);
+
+        Assert.Contains("NimbusRomNo9L-Regu", typography[0], StringComparison.Ordinal);
+        Assert.Equal("12px", typography[1]);
+        Assert.Equal("rgb(0, 0, 0)", typography[2]);
+        Assert.Contains("NimbusRomNo9L-Regu", typography[3], StringComparison.Ordinal);
+        Assert.Equal("12px", typography[4]);
+        Assert.Equal("rgb(0, 0, 0)", typography[5]);
+        Assert.Contains("NimbusRomNo9L-Regu", typography[6], StringComparison.Ordinal);
+        Assert.Equal("12px", typography[7]);
+        Assert.Equal("rgb(0, 0, 0)", typography[8]);
+        Assert.Contains("NimbusRomNo9L-Regu", typography[9], StringComparison.Ordinal);
+        Assert.Equal("12px", typography[10]);
+        Assert.Equal("rgb(0, 0, 0)", typography[11]);
     }
 
     [Fact]

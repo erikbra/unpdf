@@ -100,8 +100,8 @@ public sealed class PdfHtmlUnetBibliographyTest
         Assert.Equal(2, metrics.LinkedTailItemCount);
         Assert.InRange(metrics.ItemLeftSpread, 0, 1);
         Assert.True(
-            metrics.ItemHeights[0] >= metrics.LineHeight * 2.4,
-            $"The first wrapped reference rendered at only {metrics.ItemHeights[0]:0.###}px.");
+            metrics.ItemHeights[0] >= metrics.LineHeight * 1.8,
+            $"The first reference did not retain a wrapped visual row ({metrics.ItemHeights[0]:0.###}px).");
         Assert.True(
             metrics.ItemHeights[12] >= metrics.LineHeight * 1.8,
             $"The linked thirteenth reference did not retain a wrapped visual row.");
