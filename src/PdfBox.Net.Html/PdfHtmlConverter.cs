@@ -2726,9 +2726,10 @@ public static class PdfHtmlConverter
         PdfLayoutImageAsset asset,
         float scale)
     {
-        if (image.ClipPaths.Count > 0)
+        IReadOnlyList<PdfLayoutClipPath> clipPaths = EffectiveImageClipPaths(image);
+        if (clipPaths.Count > 0)
         {
-            WriteImageClipDefinitions(html, page, image);
+            WriteImageClipDefinitions(html, page, image, clipPaths);
         }
 
         html.Append("    <img class=\"pdf-image\" id=\"")
@@ -2752,33 +2753,58 @@ public static class PdfHtmlConverter
             .Append(CssPoints(image.Bounds.Width * scale))
             .Append(";height:")
             .Append(CssPoints(image.Bounds.Height * scale));
-        if (image.ClipPaths.Count > 0)
+        if (clipPaths.Count > 0)
         {
             html.Append(";clip-path:url(#")
                 .Append(ImageClipPathId(page, image))
                 .Append(')');
         }
 
-        html
-            .AppendLine("\" />");
+        html.AppendLine("\" />");
     }
 
     private static void WriteImageClipDefinitions(
         StringBuilder html,
         PdfLayoutPage page,
-        PdfLayoutImage image)
+        PdfLayoutImage image,
+        IReadOnlyList<PdfLayoutClipPath> clipPaths)
     {
         html.AppendLine("    <svg class=\"pdf-image-clip-definitions\" width=\"0\" height=\"0\" aria-hidden=\"true\" focusable=\"false\">");
         html.AppendLine("      <defs>");
         WriteExactClipPathDefinitions(
             html,
             ImageClipPathId(page, image),
-            image.ClipPaths,
+            clipPaths,
             "        ",
             " clipPathUnits=\"objectBoundingBox\"",
             clipPath => SvgObjectBoundingBoxPathData(clipPath.Commands, image.Bounds));
         html.AppendLine("      </defs>");
         html.AppendLine("    </svg>");
+    }
+
+    private static IReadOnlyList<PdfLayoutClipPath> EffectiveImageClipPaths(PdfLayoutImage image)
+    {
+        if (!image.ClipPaths.Any(static clipPath => !IsAxisAlignedRectangle(clipPath)))
+        {
+            return image.ClipPaths;
+        }
+
+        const float tolerance = 0.01f;
+        return image.ClipPaths
+            .Where(clipPath => !IsAxisAlignedRectangle(clipPath) ||
+                !RectangleContains(clipPath.Bounds, image.Bounds, tolerance))
+            .ToArray();
+    }
+
+    private static bool RectangleContains(
+        PdfLayoutRectangle outer,
+        PdfLayoutRectangle inner,
+        float tolerance)
+    {
+        return outer.X <= inner.X + tolerance &&
+            outer.Y <= inner.Y + tolerance &&
+            outer.Right >= inner.Right - tolerance &&
+            outer.Bottom >= inner.Bottom - tolerance;
     }
 
     private static string ImageClipPathId(PdfLayoutPage page, PdfLayoutImage image)
@@ -7170,7 +7196,7 @@ public static class PdfHtmlConverter
         IReadOnlyList<PdfLayoutImage> images)
     {
         PdfLayoutImage[] clippedImages = images
-            .Where(static image => image.ClipPaths.Count > 0)
+            .Where(image => EffectiveImageClipPaths(image).Count > 0)
             .ToArray();
         if (clippedImages.Length == 0)
         {
@@ -7183,7 +7209,7 @@ public static class PdfHtmlConverter
             WriteExactClipPathDefinitions(
                 html,
                 SemanticImageClipPathId(page, image),
-                image.ClipPaths,
+                EffectiveImageClipPaths(image),
                 string.Empty,
                 string.Empty,
                 static clipPath => SvgPathData(clipPath.Commands));
@@ -7215,7 +7241,7 @@ public static class PdfHtmlConverter
             .Append("\" height=\"")
             .Append(SvgNumber(image.Bounds.Height))
             .Append("\" preserveAspectRatio=\"none\"");
-        if (image.ClipPaths.Count > 0)
+        if (EffectiveImageClipPaths(image).Count > 0)
         {
             html.Append(" clip-path=\"url(#")
                 .Append(SemanticImageClipPathId(page, image))
