@@ -75,6 +75,96 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_DeviceCmykOverprintModeOne_ComposesRepeatedOpaquePathComponents()
+    {
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDExtendedGraphicsState overprintModeOne = new();
+        overprintModeOne.SetNonStrokingOverprintControl(true);
+        overprintModeOne.SetOverprintMode(1);
+        PDExtendedGraphicsState normalPaint = new();
+        normalPaint.SetNonStrokingOverprintControl(false);
+        normalPaint.SetOverprintMode(0);
+
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.SetNonStrokingColor(0.9f, 0.1f, 0.1f, 0.5f);
+            content.AddRect(10, 10, 30, 30);
+            content.Fill();
+
+            content.SetNonStrokingColor(0.9f, 0.1f, 0.9f, 0f);
+            content.AddRect(15, 15, 10, 10);
+            content.Fill();
+            content.AddRect(15.002f, 15.002f, 10, 10);
+            content.Fill();
+
+            content.SetGraphicsStateParameters(overprintModeOne);
+            content.SetNonStrokingColor(0f, 0f, 0.1f, 0.5f);
+            content.AddRect(15, 15, 10, 10);
+            content.Fill();
+            content.AddRect(15.002f, 15.002f, 10, 10);
+            content.Fill();
+
+            content.SetGraphicsStateParameters(normalPaint);
+            content.SetNonStrokingColor(0.9f, 0.1f, 0.9f, 0f);
+            content.AddRect(70, 15, 10, 10);
+            content.Fill();
+
+            content.SetGraphicsStateParameters(overprintModeOne);
+            content.SetNonStrokingColor(0f, 0f, 0.1f, 0.5f);
+            content.AddRect(70, 15, 10, 10);
+            content.Fill();
+
+            content.AddRect(50, 15, 10, 10);
+            content.Fill();
+        }
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document);
+        IReadOnlyList<PdfLayoutPath> paths = Assert.Single(layout.Pages).Paths;
+        Assert.Equal(8, paths.Count);
+
+        float[] expectedCompositeRgb = PDDeviceCMYK.Instance.ToRGB([0.9f, 0.1f, 0.1f, 0.5f]);
+        const float browserColorTolerance = (1f / 255f) + 0.0001f;
+        foreach (PdfLayoutPath path in paths.Skip(1).Take(4))
+        {
+            PdfLayoutColor composite = Assert.IsType<PdfLayoutColor>(path.FillColor);
+            Assert.InRange(MathF.Abs(composite.Red - expectedCompositeRgb[0]), 0f, browserColorTolerance);
+            Assert.InRange(MathF.Abs(composite.Green - expectedCompositeRgb[1]), 0f, browserColorTolerance);
+            Assert.InRange(MathF.Abs(composite.Blue - expectedCompositeRgb[2]), 0f, browserColorTolerance);
+            Assert.Equal(["Cyan", "Magenta", "Yellow", "Black"], path.ColorantNames);
+        }
+
+        float[] expectedUncomposedRgb = PDDeviceCMYK.Instance.ToRGB([0f, 0f, 0.1f, 0.5f]);
+        float[] expectedSimpleBackdropRgb = PDDeviceCMYK.Instance.ToRGB([0.9f, 0.1f, 0.9f, 0f]);
+        PdfLayoutColor simpleBackdrop = Assert.IsType<PdfLayoutColor>(paths[5].FillColor);
+        Assert.InRange(MathF.Abs(simpleBackdrop.Red - expectedSimpleBackdropRgb[0]), 0f, browserColorTolerance);
+        Assert.InRange(MathF.Abs(simpleBackdrop.Green - expectedSimpleBackdropRgb[1]), 0f, browserColorTolerance);
+        Assert.InRange(MathF.Abs(simpleBackdrop.Blue - expectedSimpleBackdropRgb[2]), 0f, browserColorTolerance);
+
+        PdfLayoutColor simpleOverprint = Assert.IsType<PdfLayoutColor>(paths[6].FillColor);
+        Assert.InRange(MathF.Abs(simpleOverprint.Red - expectedUncomposedRgb[0]), 0f, browserColorTolerance);
+        Assert.InRange(MathF.Abs(simpleOverprint.Green - expectedUncomposedRgb[1]), 0f, browserColorTolerance);
+        Assert.InRange(MathF.Abs(simpleOverprint.Blue - expectedUncomposedRgb[2]), 0f, browserColorTolerance);
+
+        PdfLayoutColor differentGeometry = Assert.IsType<PdfLayoutColor>(paths[7].FillColor);
+        Assert.Equal(simpleOverprint, differentGeometry);
+
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout);
+        XDocument dom = ParseHtml(html.Html);
+        XElement[] vectorPaths = dom.Descendants()
+            .Where(element => element.Name.LocalName == "path" && element.Attribute("data-path-index") is not null)
+            .ToArray();
+        foreach (XElement path in vectorPaths.Skip(1).Take(4))
+        {
+            Assert.Equal(vectorPaths[0].Attribute("fill")?.Value, path.Attribute("fill")?.Value);
+        }
+        Assert.NotEqual(vectorPaths[5].Attribute("fill")?.Value, vectorPaths[6].Attribute("fill")?.Value);
+        Assert.Equal(vectorPaths[6].Attribute("fill")?.Value, vectorPaths[7].Attribute("fill")?.Value);
+    }
+
+    [Fact]
     public void Convert_OverprintingIndexedDeviceNImage_PreservesUnderlyingAbsentProcessColorant()
     {
         using PDDocument document = CreateIndexedDeviceNOverprintDocument(
