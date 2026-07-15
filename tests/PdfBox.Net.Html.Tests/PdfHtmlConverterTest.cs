@@ -165,6 +165,85 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_DeviceNOverprint_ComposesDeclaredProcessComponentsWithMatchingCmykPath()
+    {
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDDeviceN deviceN = new(
+            ["Cyan", "None"],
+            PDDeviceCMYK.Instance,
+            CreateType4Function("{ pop pop 1 0 0 0 }", 2, 4));
+        PDExtendedGraphicsState overprint = new();
+        overprint.SetNonStrokingOverprintControl(true);
+        overprint.SetOverprintMode(1);
+
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.SetNonStrokingColor(0f, 0f, 0f, 1f);
+            content.AddRect(10, 10, 20, 20);
+            content.Fill();
+            content.SetGraphicsStateParameters(overprint);
+            content.SetNonStrokingColor(new PDColor([1f, 0f], deviceN));
+            content.AddRect(10, 10, 20, 20);
+            content.Fill();
+        }
+
+        PdfLayoutPath[] paths = Assert.Single(PdfLayoutExtractor.Extract(document).Pages).Paths.ToArray();
+        Assert.Equal(2, paths.Length);
+        PdfLayoutColor backdrop = Assert.IsType<PdfLayoutColor>(paths[0].FillColor);
+        PdfLayoutColor overprinted = Assert.IsType<PdfLayoutColor>(paths[1].FillColor);
+        Assert.Equal(backdrop, overprinted);
+
+        float[] expectedRgb = PDDeviceCMYK.Instance.ToRGB([1f, 0f, 0f, 1f]);
+        const float tolerance = (1f / 255f) + 0.0001f;
+        Assert.InRange(MathF.Abs(overprinted.Red - expectedRgb[0]), 0f, tolerance);
+        Assert.InRange(MathF.Abs(overprinted.Green - expectedRgb[1]), 0f, tolerance);
+        Assert.InRange(MathF.Abs(overprinted.Blue - expectedRgb[2]), 0f, tolerance);
+    }
+
+    [Fact]
+    public void Convert_UniformIndexedDeviceNOverprint_ComposesMatchingCmykClipBackdrop()
+    {
+        using PDDocument document = CreateUniformIndexedDeviceNClipOverprintDocument();
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        PdfLayoutPath backdrop = Assert.Single(page.Paths);
+        PdfLayoutImage image = Assert.Single(page.Images);
+        PdfLayoutColor composite = Assert.IsType<PdfLayoutColor>(image.OverprintCompositeColor);
+        Assert.Equal(composite, backdrop.FillColor);
+
+        XElement convertedImage = Assert.Single(ParseHtml(PdfHtmlConverter.Convert(layout).Html)
+            .Descendants(), element => element.Name.LocalName == "img");
+        Assert.StartsWith("data:image/svg+xml;base64,", convertedImage.Attribute("src")?.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Convert_UniformIndexedDeviceNOverprint_KnocksOutDeclaredZeroProcessComponents()
+    {
+        using PDDocument document = CreateUniformIndexedDeviceNClipOverprintDocument(
+            ["Cyan", "Yellow", "Black", "None"],
+            [255, 0, 0, 0]);
+
+        PdfLayoutPage page = Assert.Single(PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        }).Pages);
+        PdfLayoutColor composite = Assert.IsType<PdfLayoutColor>(Assert.Single(page.Images).OverprintCompositeColor);
+
+        float[] expectedRgb = PDDeviceCMYK.Instance.ToRGB([1f, 0f, 0f, 0f]);
+        const float tolerance = (1f / 255f) + 0.0001f;
+        Assert.InRange(MathF.Abs(composite.Red - expectedRgb[0]), 0f, tolerance);
+        Assert.InRange(MathF.Abs(composite.Green - expectedRgb[1]), 0f, tolerance);
+        Assert.InRange(MathF.Abs(composite.Blue - expectedRgb[2]), 0f, tolerance);
+    }
+
+    [Fact]
     public void Convert_OverprintingIndexedDeviceNImage_PreservesUnderlyingAbsentProcessColorant()
     {
         using PDDocument document = CreateIndexedDeviceNOverprintDocument(
@@ -7942,6 +8021,53 @@ public class PdfHtmlConverterTest
             {
                 content.DrawImage(image, 10 + index * 30, 10, 20, 20);
             }
+        }
+
+        return document;
+    }
+
+    private static PDDocument CreateUniformIndexedDeviceNClipOverprintDocument(
+        List<string>? colorants = null,
+        byte[]? lookup = null)
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        colorants ??= ["Cyan", "None", "None", "None"];
+        lookup ??= [255, 0, 0, 0];
+        PDDeviceN deviceN = new(
+            colorants,
+            PDDeviceCMYK.Instance,
+            CreateType4Function("{ pop pop pop pop 1 0 0 0 }", 4, 4));
+        PDIndexed indexed = PDIndexed.Create(deviceN, 0, lookup);
+        PDStream imageStream = new(document);
+        using (Stream output = imageStream.CreateOutputStream())
+        {
+            output.WriteByte(0);
+        }
+
+        COSStream imageDictionary = imageStream.GetCOSObject();
+        imageDictionary.SetInt(COSName.WIDTH, 1);
+        imageDictionary.SetInt(COSName.HEIGHT, 1);
+        imageDictionary.SetInt(COSName.BITS_PER_COMPONENT, 8);
+        imageDictionary.SetItem(COSName.COLORSPACE, indexed.GetCOSObject());
+        PDImageXObject image = new(imageStream, null);
+
+        PDExtendedGraphicsState overprint = new();
+        overprint.SetNonStrokingOverprintControl(true);
+        overprint.SetOverprintMode(1);
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.SetNonStrokingColor(0f, 0f, 0f, 1f);
+            content.AddRect(10, 10, 20, 20);
+            content.Fill();
+            content.SaveGraphicsState();
+            content.AddRect(10, 10, 20, 20);
+            content.Clip();
+            content.SetGraphicsStateParameters(overprint);
+            content.DrawImage(image, 10, 10, 20, 20);
+            content.RestoreGraphicsState();
         }
 
         return document;

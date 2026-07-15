@@ -19,7 +19,8 @@ public sealed class PdfLayoutImage
         string? sourceName,
         bool overprint = false,
         IReadOnlyList<string>? colorantNames = null,
-        IReadOnlyList<PdfLayoutClipPath>? clipPaths = null)
+        IReadOnlyList<PdfLayoutClipPath>? clipPaths = null,
+        PdfLayoutColor? overprintCompositeColor = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(assetId);
 
@@ -37,6 +38,7 @@ public sealed class PdfLayoutImage
         Overprint = overprint;
         ColorantNames = colorantNames?.ToArray() ?? [];
         ClipPaths = clipPaths?.ToArray() ?? [];
+        OverprintCompositeColor = overprintCompositeColor;
     }
 
     /// <summary>
@@ -103,6 +105,11 @@ public sealed class PdfLayoutImage
     /// Gets explicit Separation or DeviceN colorants painted by the image.
     /// </summary>
     public IReadOnlyList<string> ColorantNames { get; }
+
+    /// <summary>
+    /// Gets the exact opaque process-color result for a uniform DeviceN image composed over a matching path.
+    /// </summary>
+    public PdfLayoutColor? OverprintCompositeColor { get; }
 
     /// <summary>
     /// Gets the exact clipping paths applied to this image placement.
