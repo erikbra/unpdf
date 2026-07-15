@@ -75,6 +75,50 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_ZeroTintSeparationOverprintModeOne_DoesNotPaintFill()
+    {
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDSeparation spotWhite = new(
+            "Spot White",
+            PDDeviceCMYK.Instance,
+            CreateType4Function("{ pop 0 0 0 0 }", 1, 4));
+        PDExtendedGraphicsState overprintModeZero = new();
+        overprintModeZero.SetNonStrokingOverprintControl(true);
+        overprintModeZero.SetOverprintMode(0);
+        PDExtendedGraphicsState overprintModeOne = new();
+        overprintModeOne.SetNonStrokingOverprintControl(true);
+        overprintModeOne.SetOverprintMode(1);
+
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.SetNonStrokingColor(new PDColor([0f], spotWhite));
+            content.AddRect(10, 10, 10, 10);
+            content.Fill();
+            content.SetGraphicsStateParameters(overprintModeZero);
+            content.AddRect(30, 10, 10, 10);
+            content.Fill();
+            content.SetGraphicsStateParameters(overprintModeOne);
+            content.AddRect(50, 10, 10, 10);
+            content.Fill();
+        }
+
+        PdfLayoutPath[] paths = Assert.Single(PdfLayoutExtractor.Extract(document).Pages).Paths.ToArray();
+        Assert.Equal(3, paths.Length);
+        Assert.True(paths[0].IsFilled);
+        Assert.True(paths[1].IsFilled);
+        Assert.False(paths[2].IsFilled);
+
+        XElement[] vectorPaths = ParseHtml(PdfHtmlConverter.Convert(PdfLayoutExtractor.Extract(document)).Html)
+            .Descendants()
+            .Where(element => element.Name.LocalName == "path" && element.Attribute("data-path-index") is not null)
+            .ToArray();
+        Assert.Equal("none", vectorPaths[2].Attribute("fill")?.Value);
+    }
+
+    [Fact]
     public void Convert_DeviceCmykOverprintModeOne_ComposesRepeatedOpaquePathComponents()
     {
         using PDDocument document = new();
