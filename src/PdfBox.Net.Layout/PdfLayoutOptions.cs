@@ -37,6 +37,11 @@ public sealed class PdfLayoutOptions
     public bool IncludeImageAssets { get; init; }
 
     /// <summary>
+    /// Gets or sets how unavailable browser image assets are handled.
+    /// </summary>
+    public PdfImageExportPolicy ImageExportPolicy { get; init; } = PdfImageExportPolicy.Degraded;
+
+    /// <summary>
     /// Gets or sets whether embedded TrueType and OpenType font programs should be exported as browser-safe assets.
     /// Raw Type 1 and CFF programs remain text-outline fallbacks because browsers cannot load them directly.
     /// </summary>

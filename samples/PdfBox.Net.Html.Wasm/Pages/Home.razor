@@ -13,7 +13,7 @@
         <p class="product-name">unpdf</p>
         <h1>PDF to HTML</h1>
     </div>
-    <span class="mode-badge">Browser lite</span>
+    <span class="mode-badge">Browser adaptive</span>
 </header>
 
 <section class="workspace" aria-label="PDF conversion workspace">
@@ -28,6 +28,7 @@
         @if (_isConverting)
         {
             <p class="status" role="status">Converting @_fileName...</p>
+            <button type="button" class="sample-button" @onclick="CancelConversion">Cancel</button>
         }
         else if (_error is not null)
         {
@@ -44,11 +45,11 @@
         }
 
         <details class="capabilities">
-            <summary>Lite capabilities</summary>
+            <summary>Browser capabilities</summary>
             <ul>
-                <li><strong>Supported:</strong> text, links, vector paths, semantic forms, and browser-safe embedded fonts.</li>
-                <li><strong>Degraded:</strong> image placements remain structural when no browser-safe asset is available.</li>
-                <li><strong>Unavailable:</strong> raster fallbacks for annotations and transparency groups.</li>
+                <li><strong>Supported:</strong> text, links, vector paths, semantic forms, browser-safe embedded fonts, and browser-safe image assets.</li>
+                <li><strong>Degraded:</strong> images requiring color conversion or an unavailable codec remain structural and produce diagnostics.</li>
+                <li><strong>Adaptive:</strong> the SkiaSharp WebAssembly backend supplies image codecs and raster fallbacks when direct passthrough is insufficient.</li>
             </ul>
         </details>
 
@@ -92,70 +93,60 @@
     private int _pageCount;
     private long _elapsedMilliseconds;
     private long _inputBytes;
+    private CancellationTokenSource? _conversionCancellation;
 
     private async Task ConvertPdfAsync(InputFileChangeEventArgs args)
     {
+        _conversionCancellation?.Cancel();
+        _conversionCancellation?.Dispose();
+        _conversionCancellation = new CancellationTokenSource();
+        CancellationToken cancellationToken = _conversionCancellation.Token;
+        BeginConversion(args.File.Name, args.File.Size);
+
         try
         {
+            if (args.File.Size > MaxInputBytes)
+            {
+                throw new IOException($"The selected PDF exceeds {FormatBytes(MaxInputBytes)}.");
+            }
+
             await using Stream stream = args.File.OpenReadStream(MaxInputBytes);
-            using MemoryStream input = new();
-            await stream.CopyToAsync(input);
-            await ConvertBytesAsync(args.File.Name, input.ToArray());
+            byte[] input = GC.AllocateUninitializedArray<byte>(checked((int)args.File.Size));
+            await stream.ReadExactlyAsync(input, cancellationToken);
+            await ConvertBytesAsync(args.File.Name, input, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            _error = "Conversion cancelled.";
         }
         catch (Exception exception)
         {
             _error = exception is IOException && args.File.Size > MaxInputBytes
-                ? $"The browser-lite preview currently accepts PDFs up to {FormatBytes(MaxInputBytes)}."
+                ? $"The browser preview currently accepts PDFs up to {FormatBytes(MaxInputBytes)}."
                 : $"Conversion failed: {exception.Message}";
+        }
+        finally
+        {
+            _isConverting = false;
         }
     }
 
     private async Task ConvertSampleAsync()
     {
-        try
-        {
-            byte[] sample = await Http.GetByteArrayAsync("samples/hello.pdf");
-            await ConvertBytesAsync("hello.pdf", sample);
-        }
-        catch (Exception exception)
-        {
-            _error = $"Conversion failed: {exception.Message}";
-        }
-    }
-
-    private Task ConvertBytesAsync(string fileName, byte[] input)
-    {
-        _isConverting = true;
-        _error = null;
-        _previewHtml = null;
-        _diagnostics.Clear();
-        _fileName = fileName;
-        _inputBytes = input.LongLength;
+        _conversionCancellation?.Cancel();
+        _conversionCancellation?.Dispose();
+        _conversionCancellation = new CancellationTokenSource();
+        CancellationToken cancellationToken = _conversionCancellation.Token;
+        BeginConversion("hello.pdf", 0);
 
         try
         {
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            using PDDocument document = Loader.LoadPDF(input);
-            PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
-            {
-                IncludeAnnotationAppearances = false,
-                IncludeFontAssets = true,
-                IncludeImageAssets = false,
-                IncludeImages = false,
-                IncludeTransparencyGroupFallbacks = false
-            });
-            PdfHtmlDocument html = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
-            {
-                SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow,
-                TextMode = PdfHtmlTextMode.Semantic,
-                Title = Path.GetFileNameWithoutExtension(fileName)
-            });
-            stopwatch.Stop();
-
-            _diagnostics.AddRange(layout.Diagnostics);
-            _pageCount = layout.Pages.Count;
-            _elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
-            _previewHtml = BrowserHtmlDocument.InlineAssets(html);
+            byte[] sample = await Http.GetByteArrayAsync("samples/hello.pdf", cancellationToken);
+            await ConvertBytesAsync("hello.pdf", sample, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            _error = "Conversion cancelled.";
         }
         catch (Exception exception)
         {
@@ -165,8 +156,51 @@
         {
             _isConverting = false;
         }
+    }
 
-        return Task.CompletedTask;
+    private async Task ConvertBytesAsync(string fileName, byte[] input, CancellationToken cancellationToken)
+    {
+        _inputBytes = input.LongLength;
+
+        cancellationToken.ThrowIfCancellationRequested();
+        await Task.Yield();
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        using PDDocument document = Loader.LoadPDF(input);
+        cancellationToken.ThrowIfCancellationRequested();
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeAnnotationAppearances = true,
+            IncludeFontAssets = true,
+            IncludeImageAssets = true,
+            IncludeImages = true,
+            IncludeTransparencyGroupFallbacks = true,
+            ImageExportPolicy = PdfImageExportPolicy.Degraded
+        });
+        cancellationToken.ThrowIfCancellationRequested();
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow,
+            TextMode = PdfHtmlTextMode.Semantic,
+            Title = Path.GetFileNameWithoutExtension(fileName)
+        });
+        stopwatch.Stop();
+
+        _diagnostics.AddRange(layout.Diagnostics);
+        _pageCount = layout.Pages.Count;
+        _elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+        _previewHtml = BrowserHtmlDocument.InlineAssets(html);
+    }
+
+    private void CancelConversion() => _conversionCancellation?.Cancel();
+
+    private void BeginConversion(string fileName, long inputBytes)
+    {
+        _isConverting = true;
+        _error = null;
+        _previewHtml = null;
+        _diagnostics.Clear();
+        _fileName = fileName;
+        _inputBytes = inputBytes;
     }
 
     private static string FormatBytes(long bytes)

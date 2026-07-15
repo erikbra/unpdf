@@ -1190,6 +1190,7 @@ public static class PdfLayoutExtractor
                 _rotation,
                 options.IncludeImages,
                 options.IncludeImageAssets,
+                options.ImageExportPolicy,
                 options.IncludePaths,
                 _imageAssets,
                 _colorManagementContext);
@@ -2213,6 +2214,7 @@ public static class PdfLayoutExtractor
         private readonly int _rotation;
         private readonly bool _includeImages;
         private readonly bool _includeImageAssets;
+        private readonly PdfImageExportPolicy _imageExportPolicy;
         private readonly bool _includePaths;
         private readonly ImageAssetCollector _imageAssets;
         private readonly PDColorManagementContext? _colorManagementContext;
@@ -2239,6 +2241,7 @@ public static class PdfLayoutExtractor
             int rotation,
             bool includeImages,
             bool includeImageAssets,
+            PdfImageExportPolicy imageExportPolicy,
             bool includePaths,
             ImageAssetCollector imageAssets,
             PDColorManagementContext? colorManagementContext)
@@ -2249,6 +2252,7 @@ public static class PdfLayoutExtractor
             _rotation = rotation;
             _includeImages = includeImages;
             _includeImageAssets = includeImageAssets;
+            _imageExportPolicy = imageExportPolicy;
             _includePaths = includePaths;
             _imageAssets = imageAssets;
             _colorManagementContext = colorManagementContext;
@@ -3415,6 +3419,7 @@ public static class PdfLayoutExtractor
 
         private string ExportXObjectImageAsset(PDImageXObject image, string assetId, int index)
         {
+            EnsureImageExportBackendIfRequired(index);
             try
             {
                 PdfImageExportResult result = PdfImageExporter.ExportForBrowser(image, _colorManagementContext);
@@ -3426,17 +3431,13 @@ public static class PdfLayoutExtractor
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or NotSupportedException or ArgumentException)
             {
-                _diagnostics.Add(new PdfLayoutDiagnostic(
-                    PdfLayoutDiagnosticSeverity.Warning,
-                    "image-asset-export-failed",
-                    $"Image {index.ToString(CultureInfo.InvariantCulture)} asset export failed: {ex.Message}",
-                    _pageNumber));
-                return assetId;
+                return HandleImageExportFailure(assetId, index, ex);
             }
         }
 
         private string ExportInlineImageAsset(PDImage image, string assetId, int index)
         {
+            EnsureImageExportBackendIfRequired(index);
             try
             {
                 PdfImageExportResult result = PdfImageExporter.ExportPng(image, _colorManagementContext);
@@ -3448,14 +3449,68 @@ public static class PdfLayoutExtractor
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or NotSupportedException or ArgumentException)
             {
-                _diagnostics.Add(new PdfLayoutDiagnostic(
-                    PdfLayoutDiagnosticSeverity.Warning,
-                    "image-asset-export-failed",
-                    $"Image {index.ToString(CultureInfo.InvariantCulture)} asset export failed: {ex.Message}",
-                    _pageNumber));
-                return assetId;
+                return HandleImageExportFailure(assetId, index, ex);
             }
         }
+
+        private void EnsureImageExportBackendIfRequired(int index)
+        {
+            if (_imageExportPolicy == PdfImageExportPolicy.BackendRequired && !RenderingBackend.IsRegistered)
+            {
+                throw new InvalidOperationException(
+                    $"Image {index.ToString(CultureInfo.InvariantCulture)} export requires a registered rendering backend.");
+            }
+        }
+
+        private string HandleImageExportFailure(string assetId, int index, Exception exception)
+        {
+            if (_imageExportPolicy == PdfImageExportPolicy.Strict)
+            {
+                throw new InvalidOperationException(
+                    $"Image {index.ToString(CultureInfo.InvariantCulture)} asset export failed in strict mode: {exception.Message}",
+                    exception);
+            }
+
+            string code = ImageExportDiagnosticCode(exception.Message);
+            _diagnostics.Add(new PdfLayoutDiagnostic(
+                PdfLayoutDiagnosticSeverity.Warning,
+                code,
+                $"Image {index.ToString(CultureInfo.InvariantCulture)} asset export degraded: {exception.Message}",
+                _pageNumber));
+            return assetId;
+        }
+
+        private static string ImageExportDiagnosticCode(string message)
+        {
+            if (message.Contains("JPX", StringComparison.OrdinalIgnoreCase) ||
+                message.Contains("JPEG 2000", StringComparison.OrdinalIgnoreCase))
+            {
+                return "image-asset-jpx-backend-required";
+            }
+            if (message.Contains("TIFF", StringComparison.OrdinalIgnoreCase))
+            {
+                return "image-asset-tiff-backend-required";
+            }
+            if (message.Contains("CMYK", StringComparison.OrdinalIgnoreCase) ||
+                message.Contains("YCCK", StringComparison.OrdinalIgnoreCase))
+            {
+                return "image-asset-cmyk-backend-required";
+            }
+            if (message.Contains("ICC", StringComparison.OrdinalIgnoreCase))
+            {
+                return "image-asset-icc-backend-required";
+            }
+            if (ExceptionNeedsBackend(message))
+            {
+                return "image-asset-backend-required";
+            }
+            return "image-asset-export-failed";
+        }
+
+        private static bool ExceptionNeedsBackend(string message) =>
+            message.Contains("backend", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("decoder", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("codec", StringComparison.OrdinalIgnoreCase);
 
         private static string[] ExplicitColorants(params PDColorSpace?[] colorSpaces)
         {

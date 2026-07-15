@@ -3,6 +3,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.Playwright;
+using PdfBox.Net.PDModel;
+using PdfBox.Net.PDModel.Graphics.Image;
 
 namespace PdfBox.Net.Html.Tests;
 
@@ -88,8 +90,52 @@ public sealed class WasmBrowserSmokeTest
         }
     }
 
+    [Fact(Timeout = 120_000)]
+    public async Task BrowserAdaptive_BrowserSafeImagesAreExportedWithoutNetworkRequests()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        int port = ReservePort();
+        string fixture = CreateTinyLosslessImagePdf();
+        using Process server = StartServer(repositoryRoot, port);
+
+        try
+        {
+            Uri appUri = new($"http://127.0.0.1:{port}");
+            await WaitForServerAsync(appUri, server);
+
+            using IPlaywright playwright = await Playwright.CreateAsync();
+            await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
+            IPage page = await browser.NewPageAsync();
+            List<string> conversionRequests = [];
+            page.Request += (_, request) => conversionRequests.Add($"{request.Method} {request.Url}");
+            await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            conversionRequests.Clear();
+
+            await page.Locator("input[type=file]").SetInputFilesAsync(fixture);
+
+            await page.GetByText("wasm-skia-image.pdf", new PageGetByTextOptions { Exact = true }).WaitForAsync();
+            IFrameLocator preview = page.FrameLocator("iframe[title='Converted HTML preview']");
+            await preview.Locator("img.pdf-image").First.WaitForAsync(new LocatorWaitForOptions
+            {
+                Timeout = 90_000
+            });
+
+            Assert.Empty(conversionRequests);
+            Assert.True(await preview.Locator("img.pdf-image").CountAsync() > 0);
+            Assert.Equal(0, await page.Locator(".status.error").CountAsync());
+        }
+        finally
+        {
+            StopServer(server);
+            File.Delete(fixture);
+        }
+    }
+
     [Fact]
-    public void BrowserLite_DependencyGraph_ExcludesRenderingPackages()
+    public void BrowserAdaptive_DependencyGraph_IncludesSkiaButExcludesImageMagick()
     {
         string repositoryRoot = FindRepositoryRoot();
         string assetsPath = Path.Combine(
@@ -105,10 +151,10 @@ public sealed class WasmBrowserSmokeTest
             .Select(property => property.Name)
             .ToArray();
 
-        Assert.DoesNotContain(libraries, name => name.StartsWith("SkiaSharp/", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(libraries, name => name.StartsWith("SkiaSharp/", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(libraries, name => name.StartsWith("SkiaSharp.NativeAssets.WebAssembly/", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(libraries, name => name.StartsWith("Magick.NET", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(libraries, name => name.StartsWith("PdfBox.Net.Rendering/", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(libraries, name => name.StartsWith("PdfBox.Net.SkiaSharp/", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(libraries, name => name.StartsWith("PdfBox.Net.SkiaSharp/", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(libraries, name => name.StartsWith("PdfBox.Net.ImageMagick/", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -127,6 +173,28 @@ public sealed class WasmBrowserSmokeTest
         process.BeginErrorReadLine();
         process.BeginOutputReadLine();
         return process;
+    }
+
+    private static string CreateTinyLosslessImagePdf()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}", "wasm-skia-image.pdf");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+        PDImageXObject image = LosslessFactory.CreateFromRawData(
+            document,
+            [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255],
+            2,
+            2,
+            8,
+            3);
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.DrawImage(image, 72, 600, 120, 60);
+        }
+        document.Save(path);
+        return path;
     }
 
     private static async Task WaitForServerAsync(Uri uri, Process server)
