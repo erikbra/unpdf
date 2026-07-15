@@ -8391,11 +8391,7 @@ public static class PdfHtmlConverter
         FootnoteContext footnotes,
         PdfLayoutPage? page)
     {
-        PdfSemanticElement itemElement = new(
-            PdfSemanticElementKind.Paragraph,
-            fragment.Text,
-            fragment.Bounds,
-            fragment.Lines);
+        PdfSemanticElement itemElement = SemanticBibliographyItemElement(fragment);
         string previousLineText = "";
         bool wroteLine = false;
         foreach (PdfSemanticLine line in fragment.Lines)
@@ -8417,10 +8413,20 @@ public static class PdfHtmlConverter
                 html.Append(' ');
             }
 
-            WriteInlineTextSegments(html, line, segments, lineText, footnotes);
+            WriteInlineTextSegments(html, line, segments, lineText, footnotes, SemanticColor(itemElement));
             previousLineText = lineText;
             wroteLine = true;
         }
+    }
+
+    private static PdfSemanticElement SemanticBibliographyItemElement(
+        PdfSemanticBibliographyItemFragment fragment)
+    {
+        return new PdfSemanticElement(
+            PdfSemanticElementKind.Paragraph,
+            fragment.Text,
+            fragment.Bounds,
+            fragment.Lines);
     }
 
     private static void WriteSemanticDocumentIndex(
@@ -14707,7 +14713,7 @@ public static class PdfHtmlConverter
             {
                 PdfSemanticBibliographyItemFragment firstFragment = continuation.Items[0];
                 PdfSemanticBibliographyItem firstItem = continuation.Bibliography.Items[firstFragment.ItemIndex];
-                OpenItem(continuation.Bibliography, firstItem, firstFragment.IsFirstPart);
+                OpenItem(continuation.Bibliography, firstItem, firstFragment);
             }
         }
 
@@ -14745,7 +14751,7 @@ public static class PdfHtmlConverter
                 if (_activeItemIndex != itemFragment.ItemIndex)
                 {
                     CloseItem();
-                    OpenItem(fragment.Bibliography, item, itemFragment.IsFirstPart);
+                    OpenItem(fragment.Bibliography, item, itemFragment);
                 }
 
                 WriteSemanticBibliographyText(_html, item, itemFragment, footnotes, page);
@@ -14803,11 +14809,18 @@ public static class PdfHtmlConverter
         private void OpenItem(
             PdfSemanticBibliography bibliography,
             PdfSemanticBibliographyItem item,
-            bool isFirstPart)
+            PdfSemanticBibliographyItemFragment fragment)
         {
             _activeItemIndex = item.Ordinal - 1;
-            _html.Append("        <li");
-            if (isFirstPart)
+            PdfSemanticElement itemElement = SemanticBibliographyItemElement(fragment);
+            _html.Append("        <li class=\"")
+                .Append(FontClass(SemanticFontName(itemElement)))
+                .Append(' ')
+                .Append(FontSizeClass(SemanticFontSize(itemElement)))
+                .Append(' ')
+                .Append(ColorClass(SemanticColor(itemElement)))
+                .Append('"');
+            if (fragment.IsFirstPart)
             {
                 _html.Append(" id=\"").Append(HtmlAttribute(item.Id)).Append('"');
             }
