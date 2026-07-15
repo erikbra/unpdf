@@ -180,11 +180,23 @@ public static class PdfLayoutExtractor
             string preferredAssetId,
             string fileExtension,
             string contentType,
-            byte[] data)
+            byte[] data,
+            PdfLayoutColor? uniformColor = null)
         {
             string hash = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
             if (_assetsByHash.TryGetValue(hash, out PdfLayoutImageAsset? existing))
             {
+                if (existing.UniformColor is null && uniformColor is not null)
+                {
+                    existing = new PdfLayoutImageAsset(
+                        existing.AssetId,
+                        existing.RelativePath,
+                        existing.ContentType,
+                        existing.Data,
+                        uniformColor);
+                    _assetsByHash[hash] = existing;
+                }
+
                 return existing;
             }
 
@@ -192,7 +204,8 @@ public static class PdfLayoutExtractor
                 preferredAssetId,
                 $"assets/images/{preferredAssetId}.{fileExtension}",
                 contentType,
-                data);
+                data,
+                uniformColor);
             _assetsByHash.Add(hash, asset);
             return asset;
         }
@@ -3424,9 +3437,9 @@ public static class PdfLayoutExtractor
             EnsureImageExportBackendIfRequired(index);
             try
             {
-                if (TryExportOneBitGrayscalePng(image, out byte[]? pngData))
+                if (TryExportOneBitGrayscalePng(image, out byte[]? pngData, out PdfLayoutColor? uniformColor))
                 {
-                    return _imageAssets.Add(assetId, "png", "image/png", pngData).AssetId;
+                    return _imageAssets.Add(assetId, "png", "image/png", pngData, uniformColor).AssetId;
                 }
 
                 PdfImageExportResult result = PdfImageExporter.ExportForBrowser(image, _colorManagementContext);
@@ -3442,11 +3455,16 @@ public static class PdfLayoutExtractor
             }
         }
 
-        private static bool TryExportOneBitGrayscalePng(PDImageXObject image, out byte[] data)
+        private bool TryExportOneBitGrayscalePng(
+            PDImageXObject image,
+            out byte[] data,
+            out PdfLayoutColor? uniformColor)
         {
             data = [];
+            uniformColor = null;
+            PDColorSpace colorSpace = image.GetColorSpace();
             if (image.GetBitsPerComponent() != 1 ||
-                image.GetColorSpace() is not PDDeviceGray ||
+                colorSpace is not PDDeviceGray ||
                 image.GetSoftMask() != null)
             {
                 return false;
@@ -3470,8 +3488,54 @@ public static class PdfLayoutExtractor
                 return false;
             }
 
-            data = EncodeOneBitGrayscalePng(samples, width, height, rowBytes, invert);
+            PDColorSpace outputColorSpace = _colorManagementContext?.ResolveDeviceColorSpace(colorSpace) ?? colorSpace;
+            if (TryGetUniformOneBitValue(samples, width, height, rowBytes, invert, out float uniformValue))
+            {
+                byte[] rgb = ToRgbBytes(outputColorSpace.ToRGB([uniformValue]));
+                uniformColor = new PdfLayoutColor(
+                    rgb[0] / 255f,
+                    rgb[1] / 255f,
+                    rgb[2] / 255f,
+                    1f,
+                    colorSpace.GetName());
+            }
+
+            data = ReferenceEquals(outputColorSpace, colorSpace)
+                ? EncodeOneBitGrayscalePng(samples, width, height, rowBytes, invert)
+                : EncodeOneBitRgbPng(samples, width, height, rowBytes, invert, outputColorSpace);
             return true;
+        }
+
+        private static bool TryGetUniformOneBitValue(
+            byte[] samples,
+            int width,
+            int height,
+            int rowBytes,
+            bool invert,
+            out float value)
+        {
+            int first = -1;
+            for (int row = 0; row < height; row++)
+            {
+                int rowOffset = row * rowBytes;
+                for (int x = 0; x < width; x++)
+                {
+                    int sample = (samples[rowOffset + (x / 8)] >> (7 - (x % 8))) & 1;
+                    sample = invert ? 1 - sample : sample;
+                    if (first < 0)
+                    {
+                        first = sample;
+                    }
+                    else if (sample != first)
+                    {
+                        value = 0f;
+                        return false;
+                    }
+                }
+            }
+
+            value = first == 1 ? 1f : 0f;
+            return first >= 0;
         }
 
         private static bool TryGetOneBitDecodeInversion(COSArray? decode, out bool invert)
@@ -3546,6 +3610,55 @@ public static class PdfLayoutExtractor
             WritePngChunk(png, "IEND"u8, []);
             return png.ToArray();
         }
+
+        private static byte[] EncodeOneBitRgbPng(
+            byte[] samples,
+            int width,
+            int height,
+            int rowBytes,
+            bool invert,
+            PDColorSpace colorSpace)
+        {
+            byte[][] colors =
+            [
+                ToRgbBytes(colorSpace.ToRGB([0f])),
+                ToRgbBytes(colorSpace.ToRGB([1f]))
+            ];
+            using MemoryStream compressed = new();
+            using (ZLibStream zlib = new(compressed, CompressionLevel.Optimal, leaveOpen: true))
+            {
+                for (int row = 0; row < height; row++)
+                {
+                    zlib.WriteByte(0);
+                    int rowOffset = row * rowBytes;
+                    for (int x = 0; x < width; x++)
+                    {
+                        int sample = (samples[rowOffset + (x / 8)] >> (7 - (x % 8))) & 1;
+                        byte[] color = colors[invert ? 1 - sample : sample];
+                        zlib.Write(color);
+                    }
+                }
+            }
+
+            using MemoryStream png = new();
+            png.Write([137, 80, 78, 71, 13, 10, 26, 10]);
+            Span<byte> header = stackalloc byte[13];
+            BinaryPrimitives.WriteInt32BigEndian(header, width);
+            BinaryPrimitives.WriteInt32BigEndian(header[4..], height);
+            header[8] = 8;
+            header[9] = 2;
+            WritePngChunk(png, "IHDR"u8, header);
+            WritePngChunk(png, "IDAT"u8, compressed.GetBuffer().AsSpan(0, checked((int)compressed.Length)));
+            WritePngChunk(png, "IEND"u8, []);
+            return png.ToArray();
+        }
+
+        private static byte[] ToRgbBytes(float[] rgb) =>
+        [
+            (byte)MathF.Round(Math.Clamp(rgb[0], 0f, 1f) * byte.MaxValue),
+            (byte)MathF.Round(Math.Clamp(rgb[1], 0f, 1f) * byte.MaxValue),
+            (byte)MathF.Round(Math.Clamp(rgb[2], 0f, 1f) * byte.MaxValue)
+        ];
 
         private static void WritePngChunk(Stream output, ReadOnlySpan<byte> type, ReadOnlySpan<byte> payload)
         {

@@ -349,6 +349,99 @@ public class PdfHtmlConverterTest
         Assert.Equal("M 0 0 L 1 0 L 0.5 1 Z", Assert.Single(clip.Elements()).Attribute("d")?.Value);
     }
 
+    [Theory]
+    [InlineData(43, 43, 42, false)]
+    [InlineData(45, 43, 42, true)]
+    public void Convert_UniformClippedImage_OmitsClipOnlyWhenItMatchesContainingUnderpaint(
+        byte imageRed,
+        byte imageGreen,
+        byte imageBlue,
+        bool expectsClip)
+    {
+        PdfLayoutRectangle pageBounds = new(0f, 0f, 612f, 792f);
+        PdfLayoutRectangle imageBounds = new(100f, 100f, 100f, 100f);
+        PdfLayoutColor backdrop = new(43f / 255f, 43f / 255f, 42f / 255f, 1f, "DeviceCMYK");
+        PdfLayoutPathCommand[] rectangle =
+        [
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.MoveTo, 100f, 100f, 0f, 0f, 0f, 0f),
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, 200f, 100f, 0f, 0f, 0f, 0f),
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, 200f, 200f, 0f, 0f, 0f, 0f),
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, 100f, 200f, 0f, 0f, 0f, 0f),
+            new PdfLayoutPathCommand(PdfLayoutPathCommandKind.ClosePath, 0f, 0f, 0f, 0f, 0f, 0f)
+        ];
+        PdfLayoutClipPath containingClip = new(rectangle, imageBounds, 1);
+        PdfLayoutPath underpaint = new(
+            0,
+            rectangle,
+            imageBounds,
+            backdrop,
+            null,
+            1,
+            clipPaths: [containingClip]);
+        PdfLayoutClipPath triangle = new(
+            [
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.MoveTo, 100f, 100f, 0f, 0f, 0f, 0f),
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, 200f, 100f, 0f, 0f, 0f, 0f),
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, 150f, 200f, 0f, 0f, 0f, 0f),
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.ClosePath, 0f, 0f, 0f, 0f, 0f, 0f)
+            ],
+            imageBounds,
+            1);
+        PdfLayoutImage image = new(
+            0,
+            "image",
+            PdfLayoutImageKind.XObject,
+            imageBounds,
+            new PdfLayoutTransform(100f, 0f, 0f, 100f, 100f, 100f),
+            1,
+            1,
+            1,
+            "DeviceGray",
+            false,
+            "Im0",
+            clipPaths: [triangle]);
+        PdfLayoutPage page = new(
+            1,
+            pageBounds,
+            pageBounds,
+            pageBounds.Width,
+            pageBounds.Height,
+            0,
+            [],
+            [],
+            [],
+            [],
+            [image],
+            [underpaint],
+            [],
+            [],
+            [],
+            [],
+            paintOperations:
+            [
+                new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Path, underpaint.Index),
+                new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Image, image.Index)
+            ]);
+        PdfLayoutColor imageColor = new(
+            imageRed / 255f,
+            imageGreen / 255f,
+            imageBlue / 255f,
+            1f,
+            "DeviceCMYK");
+        PdfLayoutDocument layout = new(
+            [page],
+            [new PdfLayoutImageAsset("image", "assets/images/image.png", "image/png", [1, 2, 3], imageColor)],
+            []);
+
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(layout).Html);
+        XElement renderedImage = Assert.Single(ElementsByClass(dom, "pdf-image"));
+
+        Assert.Equal(expectsClip, renderedImage.Attribute("style")?.Value.Contains("clip-path", StringComparison.Ordinal) == true);
+        Assert.Equal(expectsClip, dom.Descendants().Any(element =>
+            element.Name.LocalName == "clipPath" &&
+            element.Attribute("id")?.Value == "pdf-image-page-1-clip-0"));
+    }
+
     [Fact]
     public void Convert_TransparencyGroup_EmitsInvokingBlendMode()
     {

@@ -829,6 +829,38 @@ public class PdfLayoutExtractorTest
     }
 
     [Fact]
+    public void Extract_OneBitGrayscaleAsset_WithCmykOutputIntent_UsesColorManagedRgbPixels()
+    {
+        using PDDocument document = CreateOneBitGrayscaleImageDocument();
+        AddCmykOutputIntent(document);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+
+        Assert.True(
+            layout.ImageAssets.Count == 1,
+            string.Join(Environment.NewLine, layout.Diagnostics.Select(diagnostic => $"{diagnostic.Code}: {diagnostic.Message}")));
+        PdfLayoutImageAsset asset = layout.ImageAssets[0];
+        Assert.Equal("image/png", asset.ContentType);
+        Assert.Equal(8, asset.Data[24]);
+        Assert.Equal(2, asset.Data[25]);
+
+        int compressedLength = BinaryPrimitives.ReadInt32BigEndian(asset.Data.AsSpan(33, 4));
+        using MemoryStream input = new(asset.Data, 41, compressedLength);
+        using ZLibStream zlib = new(input, CompressionMode.Decompress);
+        using MemoryStream pixels = new();
+        zlib.CopyTo(pixels);
+        byte[] rgb = pixels.ToArray();
+        Assert.Equal(10, rgb.Length);
+        Assert.Equal(0, rgb[0]);
+        Assert.All(rgb[1..4], component => Assert.InRange(component, 1, 254));
+        Assert.All(rgb[4..7], component => Assert.Equal(byte.MaxValue, component));
+        Assert.Equal(rgb[1..4], rgb[7..10]);
+    }
+
+    [Fact]
     public void Extract_TransparencyGroups_RetainsCompositingHierarchy()
     {
         using PDDocument document = Loader.LoadPDF(Path.Combine(AppContext.BaseDirectory, "Fixtures", "arxiv-sample.pdf"));

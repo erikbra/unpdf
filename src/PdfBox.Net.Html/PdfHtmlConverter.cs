@@ -2317,7 +2317,7 @@ public static class PdfHtmlConverter
             if (imagesByIndex.TryGetValue(operation.Index, out PdfLayoutImage? image) &&
                 imageAssets.TryGetValue(image.AssetId, out PdfLayoutImageAsset? asset))
             {
-                WriteImage(html, page, image, asset, scale);
+                WriteImage(html, page, image, asset, scale, precedingUnderpaint);
                 PdfLayoutPath[] preservedSpotUnderpaint = precedingUnderpaint
                     .Where(path => IsPreservedSpotUnderpaint(path, image))
                     .ToArray();
@@ -2724,9 +2724,15 @@ public static class PdfHtmlConverter
         PdfLayoutPage page,
         PdfLayoutImage image,
         PdfLayoutImageAsset asset,
-        float scale)
+        float scale,
+        IReadOnlyList<PdfLayoutPath>? precedingUnderpaint = null)
     {
-        IReadOnlyList<PdfLayoutClipPath> clipPaths = EffectiveImageClipPaths(image);
+        IReadOnlyList<PdfLayoutClipPath> clipPaths = CanPaintUniformImageWithoutClip(
+            image,
+            asset,
+            precedingUnderpaint)
+            ? []
+            : EffectiveImageClipPaths(image);
         if (clipPaths.Count > 0)
         {
             WriteImageClipDefinitions(html, page, image, clipPaths);
@@ -2761,6 +2767,34 @@ public static class PdfHtmlConverter
         }
 
         html.AppendLine("\" />");
+    }
+
+    private static bool CanPaintUniformImageWithoutClip(
+        PdfLayoutImage image,
+        PdfLayoutImageAsset asset,
+        IReadOnlyList<PdfLayoutPath>? precedingUnderpaint)
+    {
+        if (image.ClipPaths.Count == 0 ||
+            asset.UniformColor is not PdfLayoutColor imageColor ||
+            precedingUnderpaint is null)
+        {
+            return false;
+        }
+
+        const float colorTolerance = (1f / 255f) + 0.0001f;
+        return precedingUnderpaint.Any(path =>
+            path.FillColor is PdfLayoutColor backdrop &&
+            backdrop.Alpha >= 0.999f &&
+            path.FillRule is int windingRule &&
+            !path.UsesSoftMask &&
+            IsAxisAlignedRectangle(new PdfLayoutClipPath(path.Commands, path.Bounds, windingRule)) &&
+            path.ClipPaths.All(clipPath =>
+                IsAxisAlignedRectangle(clipPath) &&
+                ContainsWithTolerance(clipPath.Bounds, image.Bounds, 0.25f)) &&
+            ContainsWithTolerance(path.Bounds, image.Bounds, 0.25f) &&
+            MathF.Abs(backdrop.Red - imageColor.Red) <= colorTolerance &&
+            MathF.Abs(backdrop.Green - imageColor.Green) <= colorTolerance &&
+            MathF.Abs(backdrop.Blue - imageColor.Blue) <= colorTolerance);
     }
 
     private static void WriteImageClipDefinitions(
