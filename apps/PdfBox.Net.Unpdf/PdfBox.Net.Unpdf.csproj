@@ -11,6 +11,7 @@
     <ToolCommandName>unpdf</ToolCommandName>
     <PackageId>unpdf.tool</PackageId>
     <Description>Convert PDF documents to semantic or fixed-layout HTML from the command line.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>pdf;html;converter;cli;dotnet-tool</PackageTags>
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
@@ -20,6 +21,7 @@
     <ProjectReference Include="../../src/PdfBox.Net.Html/PdfBox.Net.Html.csproj" />
     <PackageReference Include="PdfBox.Net.ImageMagick" />
     <PackageReference Include="PdfBox.Net.SkiaSharp" />
+    <None Include="PACKAGE_README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 
   <!--

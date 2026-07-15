@@ -7,10 +7,12 @@
 
     <PackageId>PdfBox.Net.Html</PackageId>
     <Description>Fixed-layout HTML conversion for PdfBox.Net layout documents.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\PdfBox.Net.Layout\PdfBox.Net.Layout.csproj" />
+    <None Include="PACKAGE_README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 
   <ItemGroup>
