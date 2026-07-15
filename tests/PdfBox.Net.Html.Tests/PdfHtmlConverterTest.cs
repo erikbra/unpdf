@@ -294,6 +294,49 @@ public class PdfHtmlConverterTest
         Assert.Equal(vectorPaths[0].Attribute("fill")?.Value, vectorPaths[1].Attribute("fill")?.Value);
     }
 
+    [Fact]
+    public void Convert_DeviceNBackdropWithProcessAndSeparationNoOps_PreservesRenderedFill()
+    {
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDDeviceN backdropSpace = new(
+            ["Black", "GWG Green"],
+            PDDeviceCMYK.Instance,
+            CreateType4Function("{ pop pop 0.5 0 1 0.5 }", 2, 4));
+        PDSeparation black = new(
+            "Black",
+            PDDeviceCMYK.Instance,
+            CreateType4Function("{ 0 0 0 4 -1 roll }", 1, 4));
+        PDColor backdropColor = new([0.5f, 1f], backdropSpace);
+        PDExtendedGraphicsState overprintModeZero = new();
+        overprintModeZero.SetNonStrokingOverprintControl(true);
+        overprintModeZero.SetOverprintMode(0);
+
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.SetNonStrokingColor(backdropColor);
+            content.AddRect(10, 10, 30, 30);
+            content.Fill();
+
+            content.SetGraphicsStateParameters(overprintModeZero);
+            content.SetNonStrokingColor(0f, 0f, 0f, 0.5f);
+            content.SetStrokingColor(backdropColor);
+            content.AddRect(12, 12, 26, 26);
+            content.FillAndStroke();
+
+            content.SetNonStrokingColor(new PDColor([0.5f], black));
+            content.SetStrokingColor(backdropColor);
+            content.AddRect(12, 12, 26, 26);
+            content.FillAndStroke();
+        }
+
+        PdfLayoutPath[] paths = Assert.Single(PdfLayoutExtractor.Extract(document).Pages).Paths.ToArray();
+        Assert.Equal(3, paths.Length);
+        Assert.All(paths.Skip(1), path => Assert.Equal(paths[0].FillColor, path.FillColor));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -495,7 +538,7 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
-    public void Convert_RectangularImageClipChain_EmitsItsSingleIntersection()
+    public void Convert_LineAndCubicRectangularImageClipChain_EmitsItsSingleIntersection()
     {
         static PdfLayoutClipPath Rectangle(float x, float y, float width, float height)
         {
@@ -507,6 +550,22 @@ public class PdfHtmlConverterTest
                     new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, bounds.Right, bounds.Bottom, 0f, 0f, 0f, 0f),
                     new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, bounds.X, bounds.Bottom, 0f, 0f, 0f, 0f),
                     new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, bounds.X, bounds.Y, 0f, 0f, 0f, 0f),
+                    new PdfLayoutPathCommand(PdfLayoutPathCommandKind.ClosePath, 0f, 0f, 0f, 0f, 0f, 0f)
+                ],
+                bounds,
+                1);
+        }
+
+        static PdfLayoutClipPath CubicRectangle(float x, float y, float width, float height)
+        {
+            PdfLayoutRectangle bounds = new(x, y, width, height);
+            return new PdfLayoutClipPath(
+                [
+                    new PdfLayoutPathCommand(PdfLayoutPathCommandKind.MoveTo, bounds.X, bounds.Y, 0f, 0f, 0f, 0f),
+                    new PdfLayoutPathCommand(PdfLayoutPathCommandKind.CurveTo, bounds.X, bounds.Y, bounds.X, bounds.Bottom, bounds.X, bounds.Bottom),
+                    new PdfLayoutPathCommand(PdfLayoutPathCommandKind.CurveTo, bounds.X, bounds.Bottom, bounds.Right, bounds.Bottom, bounds.Right, bounds.Bottom),
+                    new PdfLayoutPathCommand(PdfLayoutPathCommandKind.CurveTo, bounds.Right, bounds.Bottom, bounds.Right, bounds.Y, bounds.Right, bounds.Y),
+                    new PdfLayoutPathCommand(PdfLayoutPathCommandKind.CurveTo, bounds.Right, bounds.Y, bounds.X, bounds.Y, bounds.X, bounds.Y),
                     new PdfLayoutPathCommand(PdfLayoutPathCommandKind.ClosePath, 0f, 0f, 0f, 0f, 0f, 0f)
                 ],
                 bounds,
@@ -530,7 +589,7 @@ public class PdfHtmlConverterTest
             [
                 Rectangle(0f, 0f, 612f, 792f),
                 Rectangle(80f, 80f, 140f, 140f),
-                Rectangle(100f, 100f, 100f, 100f)
+                CubicRectangle(100f, 100f, 100f, 100f)
             ]);
         PdfLayoutPage page = new(
             1,
