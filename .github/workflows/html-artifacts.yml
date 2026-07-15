@@ -2,9 +2,6 @@ name: Full HTML artifacts
 
 on:
   workflow_dispatch:
-  # Temporary bootstrap trigger so the workflow runs once before it reaches main.
-  push:
-    branches: [codex/full-artifacts-workflow]
 
 permissions:
   contents: read
