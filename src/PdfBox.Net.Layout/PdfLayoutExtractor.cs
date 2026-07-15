@@ -2669,7 +2669,7 @@ public static class PdfLayoutExtractor
             int index = _paths.Count;
             PdfLayoutRectangle bounds = Bounds(commands);
             bool usesShapeAlpha = graphicsState.GetAlphaSource();
-            bool suppressFill = includeFill && IsProcessColorOverprintNoOp(graphicsState);
+            bool suppressFill = includeFill && IsOverprintNoOp(graphicsState);
             PdfLayoutRectangle? clipBounds = DistinctPathClipBounds(graphicsState);
             IReadOnlyList<PdfLayoutClipPath> clipPaths = AdditionalPathClipPaths(graphicsState);
             PDColor fillSource = graphicsState.GetNonStrokingColor();
@@ -2774,7 +2774,7 @@ public static class PdfLayoutExtractor
             }
         }
 
-        private static bool IsProcessColorOverprintNoOp(PDGraphicsState graphicsState)
+        private static bool IsOverprintNoOp(PDGraphicsState graphicsState)
         {
             if (!graphicsState.IsNonStrokingOverprint() || graphicsState.GetOverprintMode() != 1)
             {
@@ -2782,7 +2782,7 @@ public static class PdfLayoutExtractor
             }
 
             PDColor color = graphicsState.GetNonStrokingColor();
-            return color.GetColorSpace() is PDDeviceCMYK &&
+            return color.GetColorSpace() is PDDeviceCMYK or PDSeparation &&
                 color.GetComponents().All(static component => component == 0f);
         }
 
