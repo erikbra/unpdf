@@ -337,6 +337,54 @@ public class PdfHtmlConverterTest
         Assert.All(paths.Skip(1), path => Assert.Equal(paths[0].FillColor, path.FillColor));
     }
 
+    [Fact]
+    public void Convert_OpaqueOverprintCover_NeutralizesNearIdenticalPaintFringeOnly()
+    {
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDExtendedGraphicsState normalPaint = new();
+        normalPaint.SetNonStrokingOverprintControl(false);
+        normalPaint.SetOverprintMode(0);
+        PDExtendedGraphicsState overprint = new();
+        overprint.SetNonStrokingOverprintControl(true);
+        overprint.SetOverprintMode(0);
+
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.SetGraphicsStateParameters(normalPaint);
+            content.SetNonStrokingColor(0.5f, 0f, 1f, 0f);
+            content.SetStrokingColor(1f);
+            content.AddRect(10f, 10f, 20f, 20f);
+            content.FillAndStroke();
+
+            content.SetGraphicsStateParameters(overprint);
+            content.SetNonStrokingColor(1f);
+            content.SetStrokingColor(1f);
+            content.AddRect(10.05f, 10.04f, 20f, 20f);
+            content.FillAndStroke();
+
+            content.SetGraphicsStateParameters(normalPaint);
+            content.SetNonStrokingColor(0.5f, 0f, 1f, 0f);
+            content.SetStrokingColor(1f);
+            content.AddRect(50f, 10f, 20f, 20f);
+            content.FillAndStroke();
+
+            content.SetGraphicsStateParameters(overprint);
+            content.SetNonStrokingColor(1f);
+            content.SetStrokingColor(1f);
+            content.AddRect(50.2f, 10f, 20f, 20f);
+            content.FillAndStroke();
+        }
+
+        PdfLayoutPath[] paths = Assert.Single(PdfLayoutExtractor.Extract(document).Pages).Paths.ToArray();
+        Assert.Equal(4, paths.Length);
+        Assert.Equal(paths[1].FillColor, paths[0].FillColor);
+        Assert.Equal(paths[1].Stroke?.Color, paths[0].Stroke?.Color);
+        Assert.NotEqual(paths[3].FillColor, paths[2].FillColor);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
