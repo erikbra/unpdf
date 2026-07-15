@@ -516,6 +516,17 @@ public static class PdfLayoutExtractor
 
     private sealed class PageBuilder
     {
+        private sealed record TransparencyGroupRenderBatch(
+            PdfLayoutRectangle Bounds,
+            IReadOnlyList<int> FallbackIndexes);
+
+        private readonly record struct ScaledImageRegion(int Left, int Top, int Right, int Bottom)
+        {
+            public int Width => Right - Left;
+
+            public int Height => Bottom - Top;
+        }
+
         private readonly int _pageNumber;
         private readonly int _pageIndex;
         private readonly PDDocument _document;
@@ -543,6 +554,9 @@ public static class PdfLayoutExtractor
 
         private const float AnnotationAppearanceScale = 2f;
         private const float TransparencyGroupRasterScale = 3f;
+        // Model one page-content replay as 10% of a full-page raster. Nearby regions are batched
+        // only when the saved replay is likely to cost more than rendering the union's empty pixels.
+        private const float TransparencyGroupRenderReplayCostRatio = 0.1f;
 
         public PageBuilder(
             int pageNumber,
@@ -1298,31 +1312,29 @@ public static class PdfLayoutExtractor
             try
             {
                 PDFRenderer renderer = new(_document);
-                using BufferedImage pageImage = renderer.RenderImage(
-                    _pageIndex,
-                    TransparencyGroupRasterScale,
-                    ImageType.RGB);
-                for (int fallbackIndex = 0; fallbackIndex < fallbackBounds.Length; fallbackIndex++)
+                foreach (TransparencyGroupRenderBatch batch in CreateTransparencyGroupRenderBatches(fallbackBounds))
                 {
-                    PdfLayoutRectangle bounds = fallbackBounds[fallbackIndex];
-                    using BufferedImage image = CropPageImage(pageImage, bounds, TransparencyGroupRasterScale);
-                    string preferredAssetId = $"page-{_pageNumber.ToString(CultureInfo.InvariantCulture)}-transparency-group-{fallbackIndex.ToString(CultureInfo.InvariantCulture)}";
-                    byte[] data = RenderingBackend.Current.ImageCodec.Encode(image, EncodedImageFormat.Png, 100);
-                    PdfLayoutImageAsset asset = _imageAssets.Add(preferredAssetId, "png", "image/png", data);
-                    int index = _images.Count;
-                    _images.Add(new PdfLayoutImage(
-                        index,
-                        asset.AssetId,
-                        PdfLayoutImageKind.TransparencyGroupFallback,
-                        bounds,
-                        new PdfLayoutTransform(1, 0, 0, 1, bounds.X, bounds.Y),
-                        image.Width,
-                        image.Height,
-                        8,
-                        "DeviceRGB",
-                        true,
-                        "transparency-group"));
-                    _paintOperations.Add(new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Image, index));
+                    using BufferedImage renderedRegion = RenderPageRegion(
+                        renderer,
+                        batch.Bounds,
+                        TransparencyGroupRasterScale);
+                    if (batch.FallbackIndexes.Count == 1)
+                    {
+                        int fallbackIndex = batch.FallbackIndexes[0];
+                        AddTransparencyGroupFallback(renderedRegion, fallbackBounds[fallbackIndex], fallbackIndex);
+                        continue;
+                    }
+
+                    foreach (int fallbackIndex in batch.FallbackIndexes)
+                    {
+                        PdfLayoutRectangle bounds = fallbackBounds[fallbackIndex];
+                        using BufferedImage image = CropRenderedRegion(
+                            renderedRegion,
+                            batch.Bounds,
+                            bounds,
+                            TransparencyGroupRasterScale);
+                        AddTransparencyGroupFallback(image, bounds, fallbackIndex);
+                    }
                 }
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException or NotSupportedException)
@@ -1393,22 +1405,143 @@ public static class PdfLayoutExtractor
                 bounds.Width * bounds.Height <= _width * _height * 0.65f;
         }
 
-        private static BufferedImage CropPageImage(BufferedImage pageImage, PdfLayoutRectangle bounds, float scale)
+        private IReadOnlyList<TransparencyGroupRenderBatch> CreateTransparencyGroupRenderBatches(
+            IReadOnlyList<PdfLayoutRectangle> fallbackBounds)
         {
-            int left = Math.Clamp((int)MathF.Floor(bounds.X * scale), 0, pageImage.Width - 1);
-            int top = Math.Clamp((int)MathF.Floor(bounds.Y * scale), 0, pageImage.Height - 1);
-            int right = Math.Clamp((int)MathF.Ceiling(bounds.Right * scale), left + 1, pageImage.Width);
-            int bottom = Math.Clamp((int)MathF.Ceiling(bounds.Bottom * scale), top + 1, pageImage.Height);
+            List<TransparencyGroupRenderBatch> batches = fallbackBounds
+                .Select(static (bounds, index) => new TransparencyGroupRenderBatch(bounds, [index]))
+                .ToList();
+            float replayCost = _width * _height * TransparencyGroupRenderReplayCostRatio;
+            while (batches.Count > 1)
+            {
+                int firstIndex = -1;
+                int secondIndex = -1;
+                float bestSavings = 0f;
+                PdfLayoutRectangle bestUnion = default;
+                for (int first = 0; first < batches.Count - 1; first++)
+                {
+                    for (int second = first + 1; second < batches.Count; second++)
+                    {
+                        PdfLayoutRectangle union = PdfLayoutRectangle.Union(
+                            [batches[first].Bounds, batches[second].Bounds]);
+                        float separateArea = RectangleArea(batches[first].Bounds) +
+                            RectangleArea(batches[second].Bounds);
+                        float savings = separateArea + replayCost - RectangleArea(union);
+                        if (savings <= bestSavings)
+                        {
+                            continue;
+                        }
+
+                        firstIndex = first;
+                        secondIndex = second;
+                        bestSavings = savings;
+                        bestUnion = union;
+                    }
+                }
+
+                if (firstIndex < 0)
+                {
+                    break;
+                }
+
+                TransparencyGroupRenderBatch firstBatch = batches[firstIndex];
+                TransparencyGroupRenderBatch secondBatch = batches[secondIndex];
+                batches[firstIndex] = new TransparencyGroupRenderBatch(
+                    bestUnion,
+                    firstBatch.FallbackIndexes.Concat(secondBatch.FallbackIndexes).Order().ToArray());
+                batches.RemoveAt(secondIndex);
+            }
+
+            return batches.OrderBy(static batch => batch.FallbackIndexes[0]).ToArray();
+        }
+
+        private static float RectangleArea(PdfLayoutRectangle bounds) => bounds.Width * bounds.Height;
+
+        private BufferedImage RenderPageRegion(
+            PDFRenderer renderer,
+            PdfLayoutRectangle bounds,
+            float scale)
+        {
+            ScaledImageRegion region = GetScaledImageRegion(bounds, scale);
+            BufferedImage image = new(region.Width, region.Height, BufferedImage.TYPE_INT_RGB);
+            try
+            {
+                using Graphics2D graphics = image.CreateGraphics();
+                graphics.SetBackground(Color.White);
+                graphics.ClearRect(0, 0, image.Width, image.Height);
+                graphics.Translate(-region.Left, -region.Top);
+                renderer.RenderPageToGraphics(
+                    _pageIndex,
+                    graphics,
+                    scale,
+                    scale,
+                    RenderDestination.EXPORT);
+                return image;
+            }
+            catch
+            {
+                image.Dispose();
+                throw;
+            }
+        }
+
+        private BufferedImage CropRenderedRegion(
+            BufferedImage renderedRegion,
+            PdfLayoutRectangle renderedBounds,
+            PdfLayoutRectangle fallbackBounds,
+            float scale)
+        {
+            ScaledImageRegion source = GetScaledImageRegion(renderedBounds, scale);
+            ScaledImageRegion target = GetScaledImageRegion(fallbackBounds, scale);
+            int left = Math.Clamp(target.Left - source.Left, 0, renderedRegion.Width - 1);
+            int top = Math.Clamp(target.Top - source.Top, 0, renderedRegion.Height - 1);
+            int right = Math.Clamp(target.Right - source.Left, left + 1, renderedRegion.Width);
+            int bottom = Math.Clamp(target.Bottom - source.Top, top + 1, renderedRegion.Height);
             BufferedImage crop = new(right - left, bottom - top, BufferedImage.TYPE_INT_RGB);
             for (int y = top; y < bottom; y++)
             {
                 for (int x = left; x < right; x++)
                 {
-                    crop.SetRgb(x - left, y - top, pageImage.GetRgb(x, y));
+                    crop.SetRgb(x - left, y - top, renderedRegion.GetRgb(x, y));
                 }
             }
 
             return crop;
+        }
+
+        private ScaledImageRegion GetScaledImageRegion(PdfLayoutRectangle bounds, float scale)
+        {
+            int pageWidth = Math.Max((int)MathF.Floor(_width * scale), 1);
+            int pageHeight = Math.Max((int)MathF.Floor(_height * scale), 1);
+            int left = Math.Clamp((int)MathF.Floor(bounds.X * scale), 0, pageWidth - 1);
+            int top = Math.Clamp((int)MathF.Floor(bounds.Y * scale), 0, pageHeight - 1);
+            int right = Math.Clamp((int)MathF.Ceiling(bounds.Right * scale), left + 1, pageWidth);
+            int bottom = Math.Clamp((int)MathF.Ceiling(bounds.Bottom * scale), top + 1, pageHeight);
+            return new ScaledImageRegion(left, top, right, bottom);
+        }
+
+        private void AddTransparencyGroupFallback(
+            BufferedImage image,
+            PdfLayoutRectangle bounds,
+            int fallbackIndex)
+        {
+            string preferredAssetId = $"page-{_pageNumber.ToString(CultureInfo.InvariantCulture)}-transparency-group-{fallbackIndex.ToString(CultureInfo.InvariantCulture)}";
+            byte[] data = RenderingBackend.Current.ImageCodec.Encode(image, EncodedImageFormat.Png, 100);
+            PdfLayoutImageAsset asset = _imageAssets.Add(preferredAssetId, "png", "image/png", data);
+            int index = _images.Count;
+            _images.Add(new PdfLayoutImage(
+                index,
+                asset.AssetId,
+                PdfLayoutImageKind.TransparencyGroupFallback,
+                bounds,
+                new PdfLayoutTransform(1, 0, 0, 1, bounds.X, bounds.Y),
+                image.Width,
+                image.Height,
+                8,
+                "DeviceRGB",
+                true,
+                "transparency-group"));
+            _paintOperations.Add(new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Image, index));
         }
 
         private void CollectAnnotationAppearances(PDDocument document, int pageIndex, PDPage page)
