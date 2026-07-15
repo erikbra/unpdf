@@ -5,7 +5,12 @@ namespace PdfBox.Net.Layout;
 /// </summary>
 public sealed class PdfLayoutImageAsset
 {
-    public PdfLayoutImageAsset(string assetId, string relativePath, string contentType, byte[] data)
+    public PdfLayoutImageAsset(
+        string assetId,
+        string relativePath,
+        string contentType,
+        byte[] data,
+        PdfLayoutColor? uniformColor = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(assetId);
         ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
@@ -16,6 +21,7 @@ public sealed class PdfLayoutImageAsset
         RelativePath = relativePath.Replace('\\', '/');
         ContentType = contentType;
         Data = data.ToArray();
+        UniformColor = uniformColor;
     }
 
     /// <summary>
@@ -37,4 +43,9 @@ public sealed class PdfLayoutImageAsset
     /// Gets the exported image bytes.
     /// </summary>
     public byte[] Data { get; }
+
+    /// <summary>
+    /// Gets the sole opaque color in the image when extraction established that every visible pixel is identical.
+    /// </summary>
+    public PdfLayoutColor? UniformColor { get; }
 }
