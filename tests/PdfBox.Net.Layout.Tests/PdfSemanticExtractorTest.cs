@@ -1881,6 +1881,67 @@ public sealed class PdfSemanticExtractorTest
     }
 
     [Fact]
+    public void Extract_AdjacentHorizontalRuleTables_StayInTheirColumnLanes()
+    {
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(
+            CreateAdjacentHorizontalRuleTablesFixture()).Pages);
+
+        PdfSemanticElement[] tables = page.Elements
+            .Where(static element => element.Kind == PdfSemanticElementKind.Table)
+            .OrderBy(static element => element.Bounds.X)
+            .ToArray();
+        Assert.Equal(2, tables.Length);
+
+        Assert.Equal("Table 1: Left metrics.", Assert.IsType<PdfSemanticTableCaption>(tables[0].TableCaption).Text);
+        Assert.Equal("Table 2: Right metrics.", Assert.IsType<PdfSemanticTableCaption>(tables[1].TableCaption).Text);
+        Assert.All(tables, static table => Assert.All(table.TableRows, row => Assert.Equal(3, row.Cells.Count)));
+        Assert.Equal(
+            ["Model", "Dev", "Test"],
+            tables[0].TableRows[0].Cells.Select(static cell => cell.Text).ToArray());
+        Assert.Equal(
+            ["System", "Score", "Rank"],
+            tables[1].TableRows[0].Cells.Select(static cell => cell.Text).ToArray());
+        Assert.DoesNotContain("System", tables[0].Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Model", tables[1].Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Table 1", tables[0].Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Table 2", tables[1].Text, StringComparison.Ordinal);
+        Assert.Equal(1, page.Elements.Count(static element =>
+            element.TableCaption?.Text == "Table 1: Left metrics."));
+        Assert.Equal(1, page.Elements.Count(static element =>
+            element.TableCaption?.Text == "Table 2: Right metrics."));
+        Assert.Contains(page.Elements, static element =>
+            element.Kind != PdfSemanticElementKind.Table &&
+            element.Text.Contains("Left-column prose resumes", StringComparison.Ordinal));
+        Assert.Contains(page.Elements, static element =>
+            element.Kind != PdfSemanticElementKind.Table &&
+            element.Text.Contains("Right-column prose resumes", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_HorizontalRuleTable_PreservesSingleCellSectionLabels()
+    {
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(
+            CreateHorizontalRuleTableWithSectionLabelsFixture()).Pages);
+
+        PdfSemanticElement table = Assert.Single(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Table);
+        Assert.Equal(8, table.TableRows.Count);
+        Assert.Equal("Fine-tuning approach", table.TableRows[3].Cells[0].Text);
+        Assert.Equal("Feature-based approach", table.TableRows[5].Cells[0].Text);
+        Assert.All(new[] { table.TableRows[3], table.TableRows[5] }, static row =>
+        {
+            Assert.Equal(3, row.Cells.Count);
+            Assert.All(row.Cells.Skip(1), static cell => Assert.Empty(cell.Text));
+        });
+        Assert.Equal(
+            "Table 7: Results grouped by evaluation approach.",
+            Assert.IsType<PdfSemanticTableCaption>(table.TableCaption).Text);
+        Assert.DoesNotContain(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Paragraph &&
+            element.Text.StartsWith("Table 7:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Extract_NumberedTableCaptionAboveTable_AttachesWithoutDuplicatingText()
     {
         PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(
@@ -2811,6 +2872,111 @@ public sealed class PdfSemanticExtractorTest
             [],
             []);
         return new PdfLayoutDocument([page], []);
+    }
+
+    private static PdfLayoutDocument CreateAdjacentHorizontalRuleTablesFixture()
+    {
+        List<PdfTextLine> lines =
+        [
+            CreateCompositeFixtureLine(
+                72f,
+                ("Opening prose establishes the left column.", 36f, 250f, "Times-Roman"),
+                ("Opening prose establishes the right column.", 326f, 250f, "Times-Roman")),
+            CreateCompositeFixtureLine(
+                104f,
+                ("Table 1: Left metrics.", 36f, 250f, "Times-Roman"),
+                ("Table 2: Right metrics.", 326f, 250f, "Times-Roman")),
+            CreateCompositeFixtureLine(
+                128f,
+                ("Model", 44f, 72f, "Times-Bold"),
+                ("Dev", 144f, 44f, "Times-Bold"),
+                ("Test", 224f, 44f, "Times-Bold"),
+                ("System", 334f, 72f, "Times-Bold"),
+                ("Score", 434f, 44f, "Times-Bold"),
+                ("Rank", 514f, 44f, "Times-Bold")),
+            CreateCompositeFixtureLine(
+                154f,
+                ("Alpha", 44f, 72f, "Times-Roman"),
+                ("91.2", 144f, 44f, "Times-Roman"),
+                ("90.5", 224f, 44f, "Times-Roman"),
+                ("Delta", 334f, 72f, "Times-Roman"),
+                ("88.4", 434f, 44f, "Times-Roman"),
+                ("1", 514f, 44f, "Times-Roman")),
+            CreateCompositeFixtureLine(
+                176f,
+                ("Beta", 44f, 72f, "Times-Roman"),
+                ("92.4", 144f, 44f, "Times-Roman"),
+                ("91.8", 224f, 44f, "Times-Roman"),
+                ("Echo", 334f, 72f, "Times-Roman"),
+                ("87.9", 434f, 44f, "Times-Roman"),
+                ("2", 514f, 44f, "Times-Roman")),
+            CreateCompositeFixtureLine(
+                220f,
+                ("Left-column prose resumes after its table and remains ordinary narrative content outside the detected rows.", 36f, 250f, "Times-Roman"),
+                ("Right-column prose resumes after its table and remains ordinary narrative content outside the detected rows.", 326f, 250f, "Times-Roman"))
+        ];
+
+        List<PdfLayoutPath> paths = [];
+        foreach (float y in new[] { 120f, 144f, 190f })
+        {
+            paths.Add(CreateRulePath(paths.Count, 36f, y, 286f, y));
+            paths.Add(CreateRulePath(paths.Count, 326f, y, 576f, y));
+        }
+
+        return CreateSemanticPassageFixture(lines, paths);
+    }
+
+    private static PdfLayoutDocument CreateHorizontalRuleTableWithSectionLabelsFixture()
+    {
+        List<PdfTextLine> lines =
+        [
+            CreateFixtureLine("Opening prose establishes the body font.", 36f, 56f, 250f),
+            CreateCompositeFixtureLine(
+                92f,
+                ("System", 44f, 110f, "Times-Bold"),
+                ("Dev", 184f, 42f, "Times-Bold"),
+                ("Test", 244f, 42f, "Times-Bold")),
+            CreateCompositeFixtureLine(
+                108f,
+                ("Baseline A", 44f, 110f, "Times-Roman"),
+                ("91.2", 184f, 42f, "Times-Roman"),
+                ("90.5", 244f, 42f, "Times-Roman")),
+            CreateCompositeFixtureLine(
+                122f,
+                ("Baseline B", 44f, 110f, "Times-Roman"),
+                ("92.4", 184f, 42f, "Times-Roman"),
+                ("91.8", 244f, 42f, "Times-Roman")),
+            CreateFixtureLine("Fine-tuning approach", 44f, 140f, 156f, 10f),
+            CreateCompositeFixtureLine(
+                154f,
+                ("Large", 44f, 110f, "Times-Roman"),
+                ("96.6", 184f, 42f, "Times-Roman"),
+                ("92.8", 244f, 42f, "Times-Roman")),
+            CreateFixtureLine("Feature-based approach", 44f, 170f, 164f, 10f),
+            CreateCompositeFixtureLine(
+                184f,
+                ("Last hidden", 44f, 110f, "Times-Roman"),
+                ("95.9", 184f, 42f, "Times-Roman"),
+                ("-", 244f, 42f, "Times-Roman")),
+            CreateCompositeFixtureLine(
+                198f,
+                ("All layers", 44f, 110f, "Times-Roman"),
+                ("95.5", 184f, 42f, "Times-Roman"),
+                ("-", 244f, 42f, "Times-Roman")),
+            CreateFixtureLine(
+                "Table 7: Results grouped by evaluation approach.",
+                44f,
+                222f,
+                242f),
+            CreateFixtureLine("Closing prose remains separate.", 36f, 254f, 250f)
+        ];
+        List<PdfLayoutPath> paths = [];
+        foreach (float y in new[] { 84f, 100f, 142f, 166f, 212f })
+        {
+            paths.Add(CreateRulePath(paths.Count, 36f, y, 296f, y));
+        }
+
+        return CreateSemanticPassageFixture(lines, paths);
     }
 
     private static PdfLayoutDocument CreateTableCaptionFixture(
