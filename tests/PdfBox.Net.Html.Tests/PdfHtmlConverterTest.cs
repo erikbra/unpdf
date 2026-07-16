@@ -3571,6 +3571,35 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_SemanticTableWithCellFills_UsesOneTableAndPreservesBackgrounds()
+    {
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(
+            CreateFilledSemanticTableLayoutFixture(),
+            new PdfHtmlOptions
+            {
+                TextMode = PdfHtmlTextMode.Semantic,
+                SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+            });
+        XDocument dom = ParseHtml(html.Html);
+
+        XElement table = Assert.Single(dom.Descendants("table"), element =>
+            element.Value.Contains("Access Control", StringComparison.Ordinal));
+        Assert.Empty(table.Elements("thead"));
+        XElement body = Assert.Single(table.Elements("tbody"));
+        Assert.Equal(4, body.Elements("tr").Count());
+        Assert.Equal(12, body.Descendants("td").Count());
+        Assert.Single(body.Descendants("td"), cell => cell.Value.Trim() == "Access Control");
+        Assert.All(body.Descendants("td"), cell =>
+            Assert.Contains("background-color:rgba(", cell.Attribute("style")?.Value, StringComparison.Ordinal));
+        XElement lastRowBlankCell = body.Elements("tr").Last().Elements("td").ElementAt(1);
+        Assert.True(string.IsNullOrWhiteSpace(lastRowBlankCell.Value));
+        Assert.Contains("background-color:rgba(217,217,217,1)", lastRowBlankCell.Attribute("style")?.Value);
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-figure"));
+        Assert.DoesNotContain(dom.Descendants(), element =>
+            element.Name.LocalName == "path" && element.Attribute("data-path-index") is not null);
+    }
+
+    [Fact]
     public void Convert_SemanticTextMode_ReservesGraphicRegionsAndPromotesFlowRulesToCss()
     {
         using PDDocument document = Loader.LoadPDF(Path.Combine(AppContext.BaseDirectory, "Fixtures", "arxiv-sample.pdf"));
@@ -7257,6 +7286,116 @@ public class PdfHtmlConverterTest
             string.Join(' ', cells.Select(static cell => cell.Text)),
             new PdfLayoutRectangle(left, top, right - left, bottom - top),
             runs);
+    }
+
+    private static PdfLayoutDocument CreateFilledSemanticTableLayoutFixture()
+    {
+        PdfTextLine[] lines =
+        [
+            CreateScientificFixtureLine("2 Results", 72f, 52f, 100f, 14f, "Times-Bold"),
+            CreateScientificFixtureLine("Opening prose establishes the ordinary body font.", 72f, 80f, 320f),
+            CreateScientificFixtureLine("A second line establishes normal source rhythm.", 72f, 94f, 310f),
+            CreateScientificFixtureLine("Table 1: Security Requirement Families", 184f, 124f, 220f, 10f, "Times-Bold"),
+            CreateSemanticBoldTableRowLine(152f,
+                ("Access Control", 78f, 120f),
+                ("Maintenance", 238f, 100f),
+                ("Assessment", 378f, 110f)),
+            CreateSemanticBoldTableRowLine(166f,
+                ("Awareness", 78f, 120f),
+                ("Media Protection", 238f, 100f),
+                ("Communications", 378f, 110f)),
+            CreateSemanticBoldTableRowLine(180f,
+                ("Audit", 78f, 120f),
+                ("Risk Assessment", 238f, 100f),
+                ("Integrity", 378f, 110f)),
+            CreateSemanticBoldTableRowLine(194f,
+                ("Configuration", 78f, 120f),
+                ("", 238f, 100f),
+                ("Planning", 378f, 110f)),
+            CreateScientificFixtureLine("Closing prose follows the table in natural reading order.", 72f, 230f, 330f)
+        ];
+        List<PdfLayoutPath> paths = [];
+        PdfLayoutColor blue = new(0.85f, 0.89f, 0.95f, 1f, "DeviceRGB");
+        PdfLayoutColor gray = new(0.85f, 0.85f, 0.85f, 1f, "DeviceGray");
+        PdfLayoutColor black = new(0f, 0f, 0f, 1f, "DeviceGray");
+        float[] columns = [72f, 228f, 364f, 540f];
+        float[] rows = [148f, 162f, 176f, 190f, 204f];
+        int pathIndex = 0;
+        for (int row = 0; row < rows.Length - 1; row++)
+        {
+            for (int column = 0; column < columns.Length - 1; column++)
+            {
+                paths.Add(CreateFilledRectanglePath(
+                    pathIndex++,
+                    new PdfLayoutRectangle(
+                        columns[column],
+                        rows[row],
+                        columns[column + 1] - columns[column],
+                        rows[row + 1] - rows[row]),
+                    row == 3 && column == 1 ? gray : blue));
+            }
+
+            for (int column = 0; column < columns.Length; column++)
+            {
+                paths.Add(CreateFilledRectanglePath(
+                    pathIndex++,
+                    new PdfLayoutRectangle(columns[column] - 0.25f, rows[row], 0.5f, 14f),
+                    black));
+            }
+        }
+
+        foreach (float row in rows)
+        {
+            paths.Add(CreateFilledRectanglePath(
+                pathIndex++,
+                new PdfLayoutRectangle(columns[0], row - 0.25f, columns[^1] - columns[0], 0.5f),
+                black));
+        }
+
+        return CreateSemanticHtmlFixture(lines, paths);
+    }
+
+    private static PdfTextLine CreateSemanticBoldTableRowLine(
+        float y,
+        params (string Text, float X, float Width)[] cells)
+    {
+        PdfTextRun[] runs = cells
+            .Select(cell => CreateScientificFixtureLine(
+                cell.Text,
+                cell.X,
+                y,
+                cell.Width,
+                10f,
+                "Times-Bold").Runs.Single())
+            .ToArray();
+        return new PdfTextLine(
+            string.Join(' ', cells.Select(static cell => cell.Text)),
+            new PdfLayoutRectangle(
+                runs.Min(static run => run.Bounds.X),
+                runs.Min(static run => run.Bounds.Y),
+                runs.Max(static run => run.Bounds.Right) - runs.Min(static run => run.Bounds.X),
+                runs.Max(static run => run.Bounds.Bottom) - runs.Min(static run => run.Bounds.Y)),
+            runs);
+    }
+
+    private static PdfLayoutPath CreateFilledRectanglePath(
+        int index,
+        PdfLayoutRectangle bounds,
+        PdfLayoutColor color)
+    {
+        return new PdfLayoutPath(
+            index,
+            [
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.MoveTo, bounds.X, bounds.Y, 0f, 0f, 0f, 0f),
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, bounds.Right, bounds.Y, 0f, 0f, 0f, 0f),
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, bounds.Right, bounds.Bottom, 0f, 0f, 0f, 0f),
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, bounds.X, bounds.Bottom, 0f, 0f, 0f, 0f),
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.ClosePath, 0f, 0f, 0f, 0f, 0f, 0f)
+            ],
+            bounds,
+            color,
+            null,
+            1);
     }
 
     private static PdfLayoutDocument CreateInlineSemanticLayoutFixture()

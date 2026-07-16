@@ -3493,6 +3493,14 @@ public static class PdfHtmlConverter
         return topLeft && topRight && bottomRight && bottomLeft;
     }
 
+    private static bool IsAxisAlignedRectangle(PdfLayoutPath path)
+    {
+        return IsAxisAlignedRectangle(new PdfLayoutClipPath(
+            path.Commands,
+            path.Bounds,
+            path.FillRule ?? 1));
+    }
+
     private static bool Near(float first, float second, float tolerance) =>
         MathF.Abs(first - second) <= tolerance;
 
@@ -8724,6 +8732,16 @@ public static class PdfHtmlConverter
         PdfSemanticTableRow[] bodyRows = element.TableRows
             .Skip(headerRows.Length)
             .ToArray();
+        bool hasCellBackgroundMatrix = HasSemanticTableCellBackgroundMatrix(element, page);
+        bool allRowsAreBodyRows = hasCellBackgroundMatrix &&
+            headerRows.Length == element.TableRows.Count &&
+            headerRows.Length > 1;
+        if (allRowsAreBodyRows)
+        {
+            headerRows = [];
+            bodyRows = element.TableRows.ToArray();
+        }
+
         TableCellAlignment[] columnAlignments = TableColumnAlignments(element.TableRows, headerRows.Length);
         if (headerRows.Length > 0)
         {
@@ -8735,7 +8753,10 @@ public static class PdfHtmlConverter
                     row,
                     footnotes,
                     page,
+                    element,
                     header: true,
+                    useCellBackgrounds: hasCellBackgroundMatrix,
+                    suppressSpans: false,
                     columnAlignments,
                     claimedFormulaGlyphs);
             }
@@ -8743,20 +8764,27 @@ public static class PdfHtmlConverter
             html.AppendLine("        </thead>");
         }
 
-        html.AppendLine("        <tbody>");
-        foreach (PdfSemanticTableRow row in bodyRows.Length == 0 ? headerRows : bodyRows)
+        if (bodyRows.Length > 0)
         {
-            WriteSemanticTableRow(
-                html,
-                row,
-                footnotes,
-                page,
-                header: false,
-                columnAlignments,
-                claimedFormulaGlyphs);
+            html.AppendLine("        <tbody>");
+            foreach (PdfSemanticTableRow row in bodyRows)
+            {
+                WriteSemanticTableRow(
+                    html,
+                    row,
+                    footnotes,
+                    page,
+                    element,
+                    header: false,
+                    useCellBackgrounds: hasCellBackgroundMatrix,
+                    suppressSpans: allRowsAreBodyRows,
+                    columnAlignments,
+                    claimedFormulaGlyphs);
+            }
+
+            html.AppendLine("        </tbody>");
         }
 
-        html.AppendLine("        </tbody>");
         html.AppendLine("      </table>");
     }
 
@@ -8941,7 +8969,10 @@ public static class PdfHtmlConverter
         PdfSemanticTableRow row,
         FootnoteContext footnotes,
         PdfLayoutPage? page,
+        PdfSemanticElement table,
         bool header,
+        bool useCellBackgrounds,
+        bool suppressSpans,
         IReadOnlyList<TableCellAlignment> columnAlignments,
         ISet<FormulaGlyphKey>? claimedFormulaGlyphs)
     {
@@ -8949,7 +8980,7 @@ public static class PdfHtmlConverter
         for (int columnIndex = 0; columnIndex < row.Cells.Count; columnIndex++)
         {
             PdfSemanticTableCell cell = row.Cells[columnIndex];
-            if (cell.IsPlaceholder)
+            if (cell.IsPlaceholder && !suppressSpans)
             {
                 continue;
             }
@@ -8967,14 +8998,14 @@ public static class PdfHtmlConverter
                 html.Append(" scope=\"rowgroup\"");
             }
 
-            if (cell.RowSpan > 1)
+            if (!suppressSpans && cell.RowSpan > 1)
             {
                 html.Append(" rowspan=\"")
                     .Append(cell.RowSpan.ToString(CultureInfo.InvariantCulture))
                     .Append('"');
             }
 
-            if (cell.ColumnSpan > 1)
+            if (!suppressSpans && cell.ColumnSpan > 1)
             {
                 html.Append(" colspan=\"")
                     .Append(cell.ColumnSpan.ToString(CultureInfo.InvariantCulture))
@@ -8989,6 +9020,16 @@ public static class PdfHtmlConverter
             {
                 html.Append(" class=\"")
                     .Append(cellClass)
+                    .Append('"');
+            }
+
+            string cellStyle = useCellBackgrounds
+                ? SemanticTableCellStyle(table, cell, page)
+                : "";
+            if (cellStyle.Length > 0)
+            {
+                html.Append(" style=\"")
+                    .Append(HtmlAttribute(cellStyle))
                     .Append('"');
             }
 
@@ -9042,6 +9083,39 @@ public static class PdfHtmlConverter
         }
 
         return string.Join(" ", classes);
+    }
+
+    private static string SemanticTableCellStyle(
+        PdfSemanticElement table,
+        PdfSemanticTableCell cell,
+        PdfLayoutPage? page)
+    {
+        if (page == null)
+        {
+            return "";
+        }
+
+        PdfLayoutColor? background = page.Paths
+            .Where(path => IsSemanticTableCellBackgroundPath(table, cell, path))
+            .OrderBy(static path => path.Bounds.Width * path.Bounds.Height)
+            .Select(static path => path.FillColor)
+            .FirstOrDefault();
+        return background is PdfLayoutColor color
+            ? "background-color:" + CssRgba(color)
+            : "";
+    }
+
+    private static bool IsSemanticTableCellBackgroundPath(
+        PdfSemanticElement table,
+        PdfSemanticTableCell cell,
+        PdfLayoutPath path)
+    {
+        return path.FillColor is PdfLayoutColor { Alpha: > 0.01f } &&
+            IsAxisAlignedRectangle(path) &&
+            path.Bounds.Width >= MathF.Max(4f, cell.Bounds.Width) &&
+            path.Bounds.Height >= MathF.Max(4f, cell.Bounds.Height) &&
+            RectangleContainsWithTolerance(table.Bounds, path.Bounds, 1.5f) &&
+            RectangleContainsWithTolerance(path.Bounds, cell.Bounds, 0.75f);
     }
 
     private static TableCellAlignment[] TableColumnAlignments(
@@ -13813,7 +13887,114 @@ public static class PdfHtmlConverter
             IsDecorativeTitleRulePath(page, semanticPage, path) ||
             IsDecorativeFootnoteRulePath(page, semanticPage, path) ||
             IsSemanticAlgorithmRulePath(semanticPage, path) ||
-            IsSemanticAsideRegionPath(page, semanticPage, path);
+            IsSemanticAsideRegionPath(page, semanticPage, path) ||
+            IsSemanticTableDecorationPath(page, semanticPage, path);
+    }
+
+    private static bool IsSemanticTableDecorationPath(
+        PdfLayoutPage page,
+        PdfSemanticPage semanticPage,
+        PdfLayoutPath path)
+    {
+        if (path.FillColor is not PdfLayoutColor color ||
+            !IsAxisAlignedRectangle(path))
+        {
+            return false;
+        }
+
+        return semanticPage.Elements
+            .Where(static element => element.Kind == PdfSemanticElementKind.Table)
+            .Any(table => IsCellSizedSemanticTableBackgroundPath(table, path) ||
+                (IsSemanticTableRulePath(table, path, color) &&
+                    HasSemanticTableCellBackgroundMatrix(table, page)));
+    }
+
+    private static bool HasSemanticTableCellBackgroundMatrix(
+        PdfSemanticElement table,
+        PdfLayoutPage? page)
+    {
+        if (page == null)
+        {
+            return false;
+        }
+
+        PdfSemanticTableCell[] cells = table.TableRows
+            .SelectMany(static row => row.Cells)
+            .Where(static cell => !cell.IsPlaceholder && !string.IsNullOrWhiteSpace(cell.Text))
+            .ToArray();
+        if (cells.Length < 4)
+        {
+            return false;
+        }
+
+        int requiredMatches = Math.Max(4, (int)MathF.Ceiling(cells.Length * 0.65f));
+        int matches = 0;
+        foreach (PdfSemanticTableCell cell in cells)
+        {
+            if (page.Paths.Any(path => IsCellSizedSemanticTableBackgroundPath(table, cell, path)))
+            {
+                matches++;
+                if (matches >= requiredMatches)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsCellSizedSemanticTableBackgroundPath(
+        PdfSemanticElement table,
+        PdfLayoutPath path)
+    {
+        return table.TableRows
+            .SelectMany(static row => row.Cells)
+            .Where(static cell => !cell.IsPlaceholder && !string.IsNullOrWhiteSpace(cell.Text))
+            .Any(cell => IsCellSizedSemanticTableBackgroundPath(table, cell, path));
+    }
+
+    private static bool IsCellSizedSemanticTableBackgroundPath(
+        PdfSemanticElement table,
+        PdfSemanticTableCell cell,
+        PdfLayoutPath path)
+    {
+        return IsSemanticTableCellBackgroundPath(table, cell, path) &&
+            path.Bounds.Width <= MathF.Max(12f, cell.Bounds.Width * 6f) &&
+            path.Bounds.Height <= MathF.Max(12f, cell.Bounds.Height * 6f);
+    }
+
+    private static bool IsSemanticTableCellBackgroundPath(
+        PdfSemanticElement table,
+        PdfLayoutPath path)
+    {
+        if (path.Bounds.Width < 4f ||
+            path.Bounds.Height < 4f ||
+            !RectangleContainsWithTolerance(table.Bounds, path.Bounds, 1.5f))
+        {
+            return false;
+        }
+
+        return table.TableRows
+            .SelectMany(static row => row.Cells)
+            .Where(static cell => !cell.IsPlaceholder)
+            .Any(cell => RectangleContainsWithTolerance(path.Bounds, cell.Bounds, 0.75f));
+    }
+
+    private static bool IsSemanticTableRulePath(
+        PdfSemanticElement table,
+        PdfLayoutPath path,
+        PdfLayoutColor color)
+    {
+        float channelRange = MathF.Max(color.Red, MathF.Max(color.Green, color.Blue)) -
+            MathF.Min(color.Red, MathF.Min(color.Green, color.Blue));
+        bool thin = MathF.Min(path.Bounds.Width, path.Bounds.Height) <= 1.5f;
+        bool spansTableCells = path.Bounds.Width >= table.Bounds.Width * 0.15f ||
+            path.Bounds.Height >= table.Bounds.Height * 0.12f;
+        return channelRange <= 0.05f &&
+            thin &&
+            spansTableCells &&
+            RectangleContainsWithTolerance(table.Bounds, path.Bounds, 1.5f);
     }
 
     private static bool IsThematicBreakPath(PdfSemanticPage semanticPage, PdfLayoutPath path)
