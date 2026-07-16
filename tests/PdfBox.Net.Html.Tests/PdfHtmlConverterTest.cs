@@ -594,6 +594,42 @@ public class PdfHtmlConverterTest
         Assert.Equal(["path", "img", "path"], orderedPaints.Select(element => element.Name.LocalName));
     }
 
+    [Fact]
+    public void Convert_OverprintingIndexedDeviceNImage_PreservesPartiallyAbsentProcessColorants()
+    {
+        using PDDocument document = CreateIndexedDeviceNOverprintDocument(
+            imageOverprint: true,
+            imageColorants: ["Cyan", "Black", "SpotGreen", "SpotRed"],
+            underpaintProcessComponents: [0f, 0f, 1f, 1f],
+            underpaintInset: 4f);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(layout).Html);
+        Assert.Equal(2, dom.Descendants().Count(element =>
+            element.Name.LocalName == "path" && element.Attribute("data-path-index")?.Value == "0"));
+    }
+
+    [Fact]
+    public void Convert_OverprintingIndexedDeviceNImage_DoesNotReplayMatchingSpotColorant()
+    {
+        using PDDocument document = CreateIndexedDeviceNOverprintDocument(
+            imageOverprint: true,
+            imageColorants: ["Cyan", "Black", "SpotGreen", "SpotRed"],
+            underpaintSpotColorant: "SpotGreen",
+            underpaintInset: 4f);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(layout).Html);
+        Assert.Single(dom.Descendants(), element =>
+            element.Name.LocalName == "path" && element.Attribute("data-path-index")?.Value == "0");
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, true)]
@@ -8680,7 +8716,10 @@ public class PdfHtmlConverterTest
     private static PDDocument CreateIndexedDeviceNOverprintDocument(
         bool imageOverprint,
         IReadOnlyList<string> imageColorants,
-        int placementCount = 1)
+        int placementCount = 1,
+        IReadOnlyList<float>? underpaintProcessComponents = null,
+        string? underpaintSpotColorant = null,
+        float underpaintInset = 0f)
     {
         PDDocument document = new();
         PDPage page = new();
@@ -8709,12 +8748,36 @@ public class PdfHtmlConverterTest
 
         PDExtendedGraphicsState graphicsState = new();
         graphicsState.SetNonStrokingOverprintControl(imageOverprint);
+        PDSeparation? underpaintSpot = underpaintSpotColorant is null
+            ? null
+            : new PDSeparation(
+                underpaintSpotColorant,
+                PDDeviceCMYK.Instance,
+                CreateType4Function("{ pop 0.5 0 1 0 }", 1, 4));
         using (PDPageContentStream content = new(document, page))
         {
             for (int index = 0; index < placementCount; index++)
             {
-                content.SetNonStrokingColor(0f, 0f, 1f, 0f);
-                content.AddRect(10 + index * 30, 10, 20, 20);
+                if (underpaintSpot is not null)
+                {
+                    content.SetNonStrokingColor(new PDColor([1f], underpaintSpot));
+                }
+                else if (underpaintProcessComponents is null)
+                {
+                    content.SetNonStrokingColor(0f, 0f, 1f, 0f);
+                }
+                else
+                {
+                    content.SetNonStrokingColor(new PDColor(
+                        underpaintProcessComponents.ToArray(),
+                        PDDeviceCMYK.Instance));
+                }
+
+                content.AddRect(
+                    10 + index * 30 + underpaintInset,
+                    10 + underpaintInset,
+                    20 - (2 * underpaintInset),
+                    20 - (2 * underpaintInset));
                 content.Fill();
             }
 
