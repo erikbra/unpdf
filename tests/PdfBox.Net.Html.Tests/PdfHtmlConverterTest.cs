@@ -1052,6 +1052,47 @@ public class PdfHtmlConverterTest
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Convert_NonKnockoutDeviceCmykBlend_PrecomposesInDeclaredBlendSpace(bool isolated)
+    {
+        using PDDocument document = CreateSimpleDeviceCmykBlendDocument(knockout: false, isolated);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document);
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        PdfLayoutVectorGroup blendedGroup = Assert.Single(
+            page.VectorGroups,
+            group => group.ParentIndex.HasValue && group.FirstPathIndex == group.LastPathIndex);
+        Assert.Equal(BlendMode.NORMAL, blendedGroup.BlendMode);
+        Assert.Equal(new PdfLayoutColor(0f, 1f, 0f, 1f, "DeviceCMYK"), page.Paths[1].FillColor);
+        Assert.Contains(
+            page.Diagnostics,
+            diagnostic => diagnostic.Code == "native-devicecmyk-blend-flattened");
+
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout);
+        Assert.DoesNotContain("mix-blend-mode:difference", html.Html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Convert_KnockoutDeviceCmykBlend_PreservesBlendMode()
+    {
+        using PDDocument document = CreateSimpleDeviceCmykBlendDocument(knockout: true, isolated: false);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document);
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        PdfLayoutVectorGroup blendedGroup = Assert.Single(
+            page.VectorGroups,
+            group => group.ParentIndex.HasValue && group.FirstPathIndex == group.LastPathIndex);
+        Assert.Equal(BlendMode.DIFFERENCE, blendedGroup.BlendMode);
+        Assert.DoesNotContain(
+            page.Diagnostics,
+            diagnostic => diagnostic.Code == "native-devicecmyk-blend-flattened");
+
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout);
+        Assert.Contains("mix-blend-mode:difference", html.Html, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData(true, false, 1)]
     [InlineData(true, true, 1)]
     [InlineData(false, false, 0)]
@@ -9071,6 +9112,49 @@ public class PdfHtmlConverterTest
         pageContent.Transform(new Matrix(1, 0, 0, 1, 100, 300));
         pageContent.DrawForm(outer);
         pageContent.RestoreGraphicsState();
+        return document;
+    }
+
+    private static PDDocument CreateSimpleDeviceCmykBlendDocument(bool knockout, bool isolated)
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDTransparencyGroup source = new(new PDStream(document));
+        source.SetBBox(new PDRectangle(0, 0, 100, 100));
+        source.SetGroup(new PDTransparencyGroupAttributes());
+        using (PDPageContentStream sourceContent = new(document, source))
+        {
+            sourceContent.SetNonStrokingColor(0f, 0f, 0f, 1f);
+            sourceContent.AddRect(25, 25, 50, 50);
+            sourceContent.Fill();
+        }
+
+        PDTransparencyGroup outer = new(new PDStream(document));
+        outer.SetBBox(new PDRectangle(0, 0, 100, 100));
+        PDTransparencyGroupAttributes attributes = new();
+        attributes.GetCOSObject().SetItem(COSName.CS, COSName.GetPDFName("DeviceCMYK"));
+        attributes.GetCOSObject().SetBoolean(COSName.K, knockout);
+        attributes.GetCOSObject().SetBoolean(COSName.GetPDFName("I"), isolated);
+        outer.SetGroup(attributes);
+        using (PDPageContentStream outerContent = new(document, outer))
+        {
+            outerContent.SetNonStrokingColor(0f, 1f, 0f, 0f);
+            outerContent.SetStrokingColor(0f);
+            outerContent.AddRect(0, 0, 100, 100);
+            outerContent.FillAndStroke();
+
+            PDExtendedGraphicsState blendState = new();
+            blendState.SetBlendMode(BlendMode.DIFFERENCE);
+            outerContent.SaveGraphicsState();
+            outerContent.SetGraphicsStateParameters(blendState);
+            outerContent.DrawForm(source);
+            outerContent.RestoreGraphicsState();
+        }
+
+        using PDPageContentStream pageContent = new(document, page);
+        pageContent.DrawForm(outer);
         return document;
     }
 
