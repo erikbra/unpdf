@@ -823,6 +823,11 @@ public static class PdfSemanticExtractor
 
         float bodyFontSize = EstimateBodyFontSize(lines);
         float lineStep = EstimateLineStep(lines, bodyFontSize);
+        PdfLayoutRectangle[] horizontalRuleTableRegions = DetectHorizontalRuleTableRegions(
+            page,
+            lines,
+            bodyFontSize,
+            options);
         AlgorithmCandidate[] algorithms = DetectAlgorithms(page, lines, lineStep);
         HashSet<int> algorithmLineIndexes = algorithms
             .SelectMany(static algorithm => algorithm.SourceLines)
@@ -848,6 +853,8 @@ public static class PdfSemanticExtractor
             .Where(line => !IsInsideRuledTableRegion(line, ruledTableRegions))
             .Where(line => line.Source.Runs.Count < 3 ||
                 !IsInsideTableLaneRegion(line, horizontalTableBodies))
+            .Where(line => line.Source.Runs.Count < 3 ||
+                !IsInsideHorizontalRuleTable(line.Bounds, horizontalRuleTableRegions))
             .Where(line => !algorithmLineIndexes.Contains(line.Index))
             .Where(line => !codeLineIndexes.Contains(line.Index))
             .Where(line => IsHeading(line, page, lines, bodyFontSize, lineStep, options))
@@ -998,7 +1005,14 @@ public static class PdfSemanticExtractor
             elements.Add(formula);
         }
 
-        foreach (PdfSemanticElement table in ExtractTextTables(page, lines, bodyFontSize, lineStep, consumed, options))
+        foreach (PdfSemanticElement table in ExtractTextTables(
+            page,
+            lines,
+            bodyFontSize,
+            lineStep,
+            consumed,
+            options,
+            horizontalRuleTableRegions))
         {
             elements.Add(table);
         }
@@ -5622,6 +5636,60 @@ public static class PdfSemanticExtractor
         return sequences.ToArray();
     }
 
+    private static PdfLayoutRectangle[] DetectHorizontalRuleTableRegions(
+        PdfLayoutPage page,
+        IReadOnlyList<LineCandidate> lines,
+        float bodyFontSize,
+        PdfSemanticExtractionOptions options)
+    {
+        TableRule[] rules = TableRules(
+            page,
+            new PdfLayoutRectangle(0, 0, page.Width, page.Height)).ToArray();
+        TableSourceRow[] sourceRows = BuildTableSourceRows(
+            lines,
+            bodyFontSize,
+            [],
+            options).ToArray();
+        return HorizontalRuleSequences(page, rules)
+            .Where(static sequence => sequence.Length >= 3)
+            .Select(static sequence =>
+            {
+                float left = sequence.Min(static rule => rule.X);
+                float right = sequence.Max(static rule => rule.Right);
+                float top = sequence.Min(static rule => rule.Y);
+                float bottom = sequence.Max(static rule => rule.Bottom);
+                return new PdfLayoutRectangle(left, top, right - left, bottom - top);
+            })
+            .Where(region =>
+                region.Width >= page.Width * 0.60f &&
+                region.Width <= page.Width * 0.90f &&
+                region.Height >= 16f &&
+                region.Height <= page.Height * 0.55f)
+            .Where(region => HasAlignedTableRows(region, sourceRows, page))
+            .Distinct()
+            .ToArray();
+    }
+
+    private static bool HasAlignedTableRows(
+        PdfLayoutRectangle region,
+        IReadOnlyList<TableSourceRow> sourceRows,
+        PdfLayoutPage page)
+    {
+        TableSourceRow[] rows = sourceRows
+            .Where(row => row.Cells.Count >= 3 && row.Cells.Count <= MaximumDetectedTableColumnCount)
+            .Where(row => IsInsideHorizontalRuleTable(row.Bounds, [region]))
+            .OrderBy(static row => row.Bounds.Y)
+            .ThenBy(static row => row.Bounds.X)
+            .ToArray();
+        if (rows.Length < 3)
+        {
+            return false;
+        }
+
+        float[] anchors = TableColumnAnchors(rows);
+        return rows.Count(row => IsCompatibleWithTableColumns(row, anchors, page)) >= 3;
+    }
+
     private static PdfLayoutRectangle[] MergeHorizontalRuleSegments(IEnumerable<PdfLayoutRectangle> source)
     {
         List<List<PdfLayoutRectangle>> baselines = [];
@@ -6118,7 +6186,8 @@ public static class PdfSemanticExtractor
         float bodyFontSize,
         float lineStep,
         HashSet<int> consumed,
-        PdfSemanticExtractionOptions options)
+        PdfSemanticExtractionOptions options,
+        IReadOnlyList<PdfLayoutRectangle> horizontalRuleTableRegions)
     {
         TableSourceRow[] rows = BuildTableSourceRows(lines, bodyFontSize, consumed, options).ToArray();
         int index = 0;
@@ -6130,7 +6199,7 @@ public static class PdfSemanticExtractor
                 continue;
             }
 
-            if (!IsTableLikeRow(rows[index], page))
+            if (!IsTableLikeRow(rows[index], page, horizontalRuleTableRegions))
             {
                 index++;
                 continue;
@@ -6146,11 +6215,20 @@ public static class PdfSemanticExtractor
             int start = index;
             int tableLikeRowCount = 1;
             List<TableSourceRow> group = [rows[index]];
+            PdfLayoutRectangle? horizontalRuleTableRegion = FindHorizontalRuleTableRegion(
+                rows[index].Bounds,
+                horizontalRuleTableRegions);
             index++;
             while (index < rows.Length)
             {
                 TableSourceRow row = rows[index];
                 if (IsConsumed(row, consumed))
+                {
+                    break;
+                }
+
+                if (horizontalRuleTableRegion.HasValue &&
+                    !IsInsideHorizontalRuleTable(row.Bounds, [horizontalRuleTableRegion.Value]))
                 {
                     break;
                 }
@@ -6172,7 +6250,7 @@ public static class PdfSemanticExtractor
                     break;
                 }
 
-                if (IsTableLikeRow(row, page))
+                if (IsTableLikeRow(row, page, horizontalRuleTableRegions))
                 {
                     group.Add(row);
                     tableLikeRowCount++;
@@ -6180,7 +6258,7 @@ public static class PdfSemanticExtractor
                     continue;
                 }
 
-                if (IsTableContinuationRow(group, row, page))
+                if (IsTableContinuationRow(group, row, page, horizontalRuleTableRegions))
                 {
                     group.Add(row);
                     index++;
@@ -6381,28 +6459,61 @@ public static class PdfSemanticExtractor
             runs);
     }
 
-    private static bool IsTableLikeRow(TableSourceRow row, PdfLayoutPage page)
+    private static bool IsTableLikeRow(
+        TableSourceRow row,
+        PdfLayoutPage page,
+        IReadOnlyList<PdfLayoutRectangle> horizontalRuleTableRegions)
     {
         if (row.Cells.Count < 3 || row.Cells.Count > MaximumDetectedTableColumnCount)
         {
             return false;
         }
 
+        bool isInsideHorizontalRuleTable = IsInsideHorizontalRuleTable(
+            row.Bounds,
+            horizontalRuleTableRegions);
         float minimumRowWidth = row.TableLaneIndex.HasValue
             ? page.Width * 0.18f
             : page.Width * 0.34f;
-        if (row.Bounds.Width < minimumRowWidth)
+        if (row.Bounds.Width < minimumRowWidth && !isInsideHorizontalRuleTable)
         {
             return false;
         }
 
-        if (row.Cells.Count <= 3 && LooksLikeProse(row.Text))
+        if (row.Cells.Count <= 3 && LooksLikeProse(row.Text) && !isInsideHorizontalRuleTable)
         {
             return false;
         }
 
         int compactCellCount = row.Cells.Count(static cell => cell.Text.Length <= 48);
         return compactCellCount >= row.Cells.Count - 1;
+    }
+
+    private static bool IsInsideHorizontalRuleTable(
+        PdfLayoutRectangle rowBounds,
+        IReadOnlyList<PdfLayoutRectangle> regions)
+    {
+        float centerY = rowBounds.Y + rowBounds.Height / 2f;
+        return regions.Any(region =>
+            centerY >= region.Y - 1f &&
+            centerY <= region.Bottom + 1f &&
+            rowBounds.X >= region.X - 2f &&
+            rowBounds.Right <= region.Right + 2f);
+    }
+
+    private static PdfLayoutRectangle? FindHorizontalRuleTableRegion(
+        PdfLayoutRectangle rowBounds,
+        IReadOnlyList<PdfLayoutRectangle> regions)
+    {
+        foreach (PdfLayoutRectangle region in regions)
+        {
+            if (IsInsideHorizontalRuleTable(rowBounds, [region]))
+            {
+                return region;
+            }
+        }
+
+        return null;
     }
 
     private static bool IsLooseTableContinuation(
@@ -6433,14 +6544,15 @@ public static class PdfSemanticExtractor
     private static bool IsTableContinuationRow(
         IReadOnlyList<TableSourceRow> existingRows,
         TableSourceRow row,
-        PdfLayoutPage page)
+        PdfLayoutPage page,
+        IReadOnlyList<PdfLayoutRectangle> horizontalRuleTableRegions)
     {
         if (row.Cells.Count == 0 || row.Cells.Count > MaximumTableColumnCount(existingRows) + 1)
         {
             return false;
         }
 
-        if (IsTableLikeRow(row, page))
+        if (IsTableLikeRow(row, page, horizontalRuleTableRegions))
         {
             return true;
         }

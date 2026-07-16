@@ -1918,6 +1918,36 @@ public sealed class PdfSemanticExtractorTest
     }
 
     [Fact]
+    public void Extract_WideHorizontalRuleTable_PreservesLongDescriptionColumn()
+    {
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(
+            CreateWideHorizontalRuleTableFixture()).Pages);
+
+        PdfSemanticElement table = Assert.Single(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Table);
+        Assert.Equal(
+            [
+                ["Release", "Date", "Description"],
+                ["1", "21/06/2019", "First release"],
+                ["1.1", "12/03/2024", "Updated obsolescence statement and electrical specification"]
+            ],
+            table.TableRows.Select(row => row.Cells.Select(static cell => cell.Text).ToArray()).ToArray());
+        Assert.True(table.TableRows[0].IsHeader);
+        Assert.All(table.TableRows[0].Cells, static cell => Assert.True(cell.BorderTop));
+        Assert.All(table.TableRows.SelectMany(static row => row.Cells), static cell =>
+            Assert.True(cell.BorderBottom));
+        Assert.Equal(
+            "Table 1: Release History",
+            Assert.IsType<PdfSemanticTableCaption>(table.TableCaption).Text);
+        Assert.DoesNotContain(page.Elements, static element =>
+            element.Kind != PdfSemanticElementKind.Table &&
+            element.Text.Contains("Updated obsolescence", StringComparison.Ordinal));
+        Assert.Contains(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Paragraph &&
+            element.Text == "Closing prose remains outside the ruled table.");
+    }
+
+    [Fact]
     public void Extract_HorizontalRuleTable_PreservesSingleCellSectionLabels()
     {
         PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(
@@ -2921,6 +2951,38 @@ public sealed class PdfSemanticExtractorTest
         {
             paths.Add(CreateRulePath(paths.Count, 36f, y, 286f, y));
             paths.Add(CreateRulePath(paths.Count, 326f, y, 576f, y));
+        }
+
+        return CreateSemanticPassageFixture(lines, paths);
+    }
+
+    private static PdfLayoutDocument CreateWideHorizontalRuleTableFixture()
+    {
+        List<PdfTextLine> lines =
+        [
+            CreateFixtureLine("Opening prose establishes the ordinary body font.", 72f, 72f, 320f),
+            CreateFixtureLine("Table 1: Release History", 244f, 108f, 108f),
+            CreateCompositeFixtureLine(
+                136f,
+                ("Release", 112f, 36f, "Times-Bold"),
+                ("Date", 158f, 24f, "Times-Bold"),
+                ("Description", 220f, 56f, "Times-Bold")),
+            CreateCompositeFixtureLine(
+                156f,
+                ("1", 112f, 8f, "Times-Roman"),
+                ("21/06/2019", 158f, 52f, "Times-Roman"),
+                ("First release", 220f, 56f, "Times-Roman")),
+            CreateCompositeFixtureLine(
+                176f,
+                ("1.1", 112f, 16f, "Times-Roman"),
+                ("12/03/2024", 158f, 52f, "Times-Roman"),
+                ("Updated obsolescence statement and electrical specification", 220f, 262f, "Times-Roman")),
+            CreateFixtureLine("Closing prose remains outside the ruled table.", 72f, 216f, 320f)
+        ];
+        List<PdfLayoutPath> paths = [];
+        foreach (float y in new[] { 130f, 150f, 170f, 190f })
+        {
+            paths.Add(CreateRulePath(paths.Count, 106f, y, 487f, y));
         }
 
         return CreateSemanticPassageFixture(lines, paths);
