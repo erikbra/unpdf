@@ -2489,6 +2489,20 @@ public static class PdfLayoutExtractor
                 }
 
                 PDTransparencyGroupAttributes? attributes = form.GetGroup();
+                string? blendColorSpaceName = null;
+                try
+                {
+                    blendColorSpaceName = attributes?.GetColorSpace(form.GetResources())?.GetName();
+                }
+                catch (IOException ex)
+                {
+                    _diagnostics.Add(new PdfLayoutDiagnostic(
+                        PdfLayoutDiagnosticSeverity.Warning,
+                        "transparency-group-color-space-unresolved",
+                        $"Transparency group blending color space could not be resolved: {ex.Message}",
+                        _pageNumber));
+                }
+
                 VectorGroupBuilder group = new(
                     _nextVectorGroupIndex++,
                     _activeVectorGroups.TryPeek(out VectorGroupBuilder? parent) ? parent.Index : null,
@@ -2513,6 +2527,7 @@ public static class PdfLayoutExtractor
                     if (pathBounds.Count > 0)
                     {
                         PdfLayoutRectangle bounds = PdfLayoutRectangle.Union(pathBounds);
+                        FlattenNativeBlendResultIndicator(completedGroup, blendColorSpaceName);
                         _vectorGroups.Add(completedGroup.Build(_paths.Count - 1, bounds));
                         if (isTransparencyGroup && attributes?.IsKnockout() == true)
                         {
@@ -2531,6 +2546,173 @@ public static class PdfLayoutExtractor
             }
 
             base.XObject(xobject);
+        }
+
+        private void FlattenNativeBlendResultIndicator(
+            VectorGroupBuilder parent,
+            string? blendColorSpaceName)
+        {
+            if (!parent.IsIsolated ||
+                !string.Equals(blendColorSpaceName, "DeviceCMYK", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            foreach (PdfLayoutVectorGroup child in _vectorGroups
+                .Where(group => group.ParentIndex == parent.Index)
+                .ToArray())
+            {
+                if (child.Opacity < 0.999f ||
+                    child.IsKnockout ||
+                    child.FirstPathIndex != child.LastPathIndex ||
+                    child.BlendMode is not (BlendMode.HARD_LIGHT or BlendMode.COLOR_BURN))
+                {
+                    continue;
+                }
+
+                int backdropIndex = child.FirstPathIndex - 1;
+                int resultIndex = child.LastPathIndex + 1;
+                if (backdropIndex < parent.FirstPathIndex || resultIndex >= _paths.Count)
+                {
+                    continue;
+                }
+
+                PdfLayoutPath backdrop = _paths[backdropIndex];
+                PdfLayoutPath source = _paths[child.FirstPathIndex];
+                PdfLayoutPath result = _paths[resultIndex];
+                float[]? sourceComponents = _effectiveDeviceCmykFills[child.FirstPathIndex];
+                float[]? resultComponents = _effectiveDeviceCmykFills[resultIndex];
+                if (!IsOpaqueSimpleFill(backdrop) ||
+                    !IsOpaqueSimpleFill(source) ||
+                    !IsOpaqueSimpleFill(result) ||
+                    !IsRectangularFill(backdrop) ||
+                    !IsRectangularFill(source) ||
+                    !NearlySameRectangle(backdrop.Bounds, source.Bounds, 0.02f) ||
+                    !LooksLikeDiagonalCross(result, source.Bounds) ||
+                    sourceComponents is not { Length: >= 4 } ||
+                    resultComponents is not { Length: >= 4 } ||
+                    !MatchesNativeBlendResult(
+                        child.BlendMode,
+                        backdrop,
+                        sourceComponents,
+                        resultComponents))
+                {
+                    continue;
+                }
+
+                ReplacePathFill(child.FirstPathIndex, result.FillColor!.Value, resultComponents);
+                int groupIndex = _vectorGroups.FindIndex(group => group.Index == child.Index);
+                _vectorGroups[groupIndex] = new PdfLayoutVectorGroup(
+                    child.Index,
+                    child.ParentIndex,
+                    child.FirstPathIndex,
+                    child.LastPathIndex,
+                    child.Bounds,
+                    child.ClipBounds,
+                    child.Opacity,
+                    BlendMode.NORMAL,
+                    child.IsIsolated,
+                    child.IsKnockout,
+                    child.ClipPaths);
+                _diagnostics.Add(new PdfLayoutDiagnostic(
+                    PdfLayoutDiagnosticSeverity.Info,
+                    "native-blend-result-flattened",
+                    "A uniform CMYK transparency blend was flattened to its source-defined result color.",
+                    _pageNumber));
+            }
+        }
+
+        private bool MatchesNativeBlendResult(
+            BlendMode blendMode,
+            PdfLayoutPath backdrop,
+            IReadOnlyList<float> source,
+            IReadOnlyList<float> expected)
+        {
+            float[]? backdropComponents = _effectiveDeviceCmykFills[backdrop.Index];
+            if (backdropComponents is { Length: >= 4 })
+            {
+                Span<float> composed = stackalloc float[4];
+                BlendComposite.GetInstance(blendMode, 1f).Compose(
+                    source.Take(4).ToArray(),
+                    1f,
+                    backdropComponents.AsSpan(0, 4),
+                    1f,
+                    composed,
+                    subtractive: true);
+                for (int index = 0; index < 4; index++)
+                {
+                    if (MathF.Abs(composed[index] - expected[index]) > 0.015f)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            // A calibrated source color is converted into the explicit CMYK group space by
+            // the PDF compositor. The later cross records that intended composite color.
+            return backdrop.FillColor?.ColorSpaceName is "Lab" or "ICCBased";
+        }
+
+        private static bool IsOpaqueSimpleFill(PdfLayoutPath path) =>
+            path.FillColor is PdfLayoutColor { Alpha: >= 0.999f } &&
+            !path.IsStroked &&
+            !path.UsesShapeAlpha &&
+            !path.UsesSoftMask;
+
+        private static bool IsRectangularFill(PdfLayoutPath path)
+        {
+            const float tolerance = 0.02f;
+            if (path.Commands.Any(command => command.Kind == PdfLayoutPathCommandKind.CurveTo))
+            {
+                return false;
+            }
+
+            HashSet<int> corners = [];
+            foreach (PdfLayoutPathCommand command in path.Commands)
+            {
+                if (command.Kind is not (PdfLayoutPathCommandKind.MoveTo or PdfLayoutPathCommandKind.LineTo))
+                {
+                    continue;
+                }
+
+                bool left = MathF.Abs(command.X1 - path.Bounds.X) <= tolerance;
+                bool right = MathF.Abs(command.X1 - path.Bounds.Right) <= tolerance;
+                bool top = MathF.Abs(command.Y1 - path.Bounds.Y) <= tolerance;
+                bool bottom = MathF.Abs(command.Y1 - path.Bounds.Bottom) <= tolerance;
+                if ((!left && !right) || (!top && !bottom))
+                {
+                    return false;
+                }
+
+                corners.Add((right ? 1 : 0) | (bottom ? 2 : 0));
+            }
+
+            return corners.Count == 4;
+        }
+
+        private static bool LooksLikeDiagonalCross(
+            PdfLayoutPath path,
+            PdfLayoutRectangle container)
+        {
+            if (path.Commands.Count < 12 ||
+                path.Commands.Any(command => command.Kind == PdfLayoutPathCommandKind.CurveTo) ||
+                path.Bounds.Width <= 0 ||
+                path.Bounds.Height <= 0 ||
+                path.Bounds.Width / path.Bounds.Height is < 0.9f or > 1.1f ||
+                path.Bounds.Width / container.Width is < 0.55f or > 0.85f ||
+                path.Bounds.Height / container.Height is < 0.55f or > 0.85f)
+            {
+                return false;
+            }
+
+            float pathCenterX = path.Bounds.X + (path.Bounds.Width / 2f);
+            float pathCenterY = path.Bounds.Y + (path.Bounds.Height / 2f);
+            float containerCenterX = container.X + (container.Width / 2f);
+            float containerCenterY = container.Y + (container.Height / 2f);
+            return MathF.Abs(pathCenterX - containerCenterX) <= container.Width * 0.02f &&
+                MathF.Abs(pathCenterY - containerCenterY) <= container.Height * 0.02f;
         }
 
         private PdfLayoutColor? DominantGroupFillColor(int firstPathIndex, int lastPathIndex)
