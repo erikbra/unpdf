@@ -3600,6 +3600,78 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public async Task Convert_WideHorizontalRuleTable_RendersAlignedNativeColumnsInBrowser()
+    {
+        PdfLayoutDocument layout = CreateWideHorizontalRuleTableLayoutFixture();
+        PdfSemanticPage semanticPage = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+        Assert.True(
+            semanticPage.Elements.Any(static element => element.Kind == PdfSemanticElementKind.Table),
+            string.Join(" | ", semanticPage.Elements.Select(static element => $"{element.Kind}: {element.Text}")));
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(
+            layout,
+            new PdfHtmlOptions
+            {
+                TextMode = PdfHtmlTextMode.Semantic,
+                SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+            });
+        XDocument dom = ParseHtml(html.Html);
+
+        XElement table = Assert.Single(dom.Descendants("table"));
+        XElement header = Assert.Single(table.Elements("thead"));
+        Assert.Equal(
+            ["Release", "Date", "Description"],
+            header.Descendants("th").Select(static cell => cell.Value));
+        XElement body = Assert.Single(table.Elements("tbody"));
+        Assert.Equal(2, body.Elements("tr").Count());
+        Assert.Equal(
+            ["1", "21/06/2019", "First release"],
+            body.Elements("tr").First().Elements("td").Select(static cell => cell.Value));
+        Assert.Equal(
+            "Updated obsolescence statement and electrical specification",
+            body.Elements("tr").Last().Elements("td").Last().Value);
+        Assert.Contains(dom.Descendants("p"), static paragraph =>
+            paragraph.Value == "Closing prose remains outside the ruled table.");
+
+        using TempDirectory tempDirectory = new();
+        html.WriteToDirectory(tempDirectory.Path);
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage browserPage = await browser.NewPageAsync(new BrowserNewPageOptions
+        {
+            ViewportSize = new ViewportSize { Width = 1000, Height = 1200 }
+        });
+        await browserPage.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+
+        LocatorBoundingBoxResult pageBox = await browserPage.Locator(".pdf-semantic-document-flow").BoundingBoxAsync()
+            ?? throw new InvalidOperationException("Rendered semantic page flow was not measurable.");
+        LocatorBoundingBoxResult tableBox = await browserPage.Locator("table.pdf-semantic-table").BoundingBoxAsync()
+            ?? throw new InvalidOperationException("Rendered table was not measurable.");
+        Assert.InRange(tableBox.Width / pageBox.Width, 0.58d, 0.72d);
+
+        double[][] leftEdges = await browserPage.EvaluateAsync<double[][]>(
+            """
+            () => Array.from(document.querySelectorAll("table.pdf-semantic-table tr"))
+              .map(row => Array.from(row.cells).map(cell => cell.getBoundingClientRect().left))
+            """);
+        Assert.Equal(3, leftEdges.Length);
+        Assert.All(leftEdges, static row => Assert.Equal(3, row.Length));
+        for (int column = 0; column < 3; column++)
+        {
+            Assert.All(leftEdges.Skip(1), row => Assert.InRange(Math.Abs(row[column] - leftEdges[0][column]), 0d, 1d));
+        }
+
+        string[] borderStyles = await browserPage.EvaluateAsync<string[]>(
+            """
+            () => Array.from(document.querySelectorAll("table.pdf-semantic-table tr"))
+              .map(row => getComputedStyle(row.cells[0]).borderBottomStyle)
+            """);
+        Assert.All(borderStyles, static style => Assert.NotEqual("none", style));
+    }
+
+    [Fact]
     public void Convert_SemanticTextMode_ReservesGraphicRegionsAndPromotesFlowRulesToCss()
     {
         using PDDocument document = Loader.LoadPDF(Path.Combine(AppContext.BaseDirectory, "Fixtures", "arxiv-sample.pdf"));
@@ -7376,6 +7448,34 @@ public class PdfHtmlConverterTest
                 runs.Max(static run => run.Bounds.Right) - runs.Min(static run => run.Bounds.X),
                 runs.Max(static run => run.Bounds.Bottom) - runs.Min(static run => run.Bounds.Y)),
             runs);
+    }
+
+    private static PdfLayoutDocument CreateWideHorizontalRuleTableLayoutFixture()
+    {
+        PdfTextLine[] lines =
+        [
+            CreateScientificFixtureLine("Technical datasheet", 420f, 20f, 110f),
+            CreateScientificFixtureLine("Opening prose establishes the ordinary body font.", 72f, 72f, 320f),
+            CreateScientificFixtureLine("Table 1: Release History", 244f, 108f, 108f),
+            CreateSemanticBoldTableRowLine(136f,
+                ("Release", 112f, 36f),
+                ("Date", 158f, 24f),
+                ("Description", 220f, 56f)),
+            CreateSemanticTableRowLine(156f,
+                ("1", 112f, 8f),
+                ("21/06/2019", 158f, 52f),
+                ("First release", 220f, 56f)),
+            CreateSemanticTableRowLine(176f,
+                ("1.1", 112f, 16f),
+                ("12/03/2024", 158f, 52f),
+                ("Updated obsolescence statement and electrical specification", 220f, 262f)),
+            CreateScientificFixtureLine("Closing prose remains outside the ruled table.", 72f, 216f, 320f)
+        ];
+        PdfLayoutColor black = new(0f, 0f, 0f, 1f, "DeviceGray");
+        PdfLayoutPath[] paths = new[] { 130f, 150f, 170f, 190f }
+            .Select((y, index) => CreateSemanticRulePath(index, 106f, y, 487f, y, 0.5f, black))
+            .ToArray();
+        return CreateSemanticHtmlFixture(lines, paths);
     }
 
     private static PdfLayoutPath CreateFilledRectanglePath(
