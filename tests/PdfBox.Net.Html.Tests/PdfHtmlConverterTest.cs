@@ -976,6 +976,45 @@ public class PdfHtmlConverterTest
         Assert.Contains("style=\"mix-blend-mode:multiply\"", html.Html, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Convert_CmykBlendResultIndicator_FlattensToRecordedResultColor()
+    {
+        using PDDocument document = CreateCmykBlendResultIndicatorDocument(matchingResult: true);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document);
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        PdfLayoutVectorGroup blendedGroup = Assert.Single(
+            page.VectorGroups,
+            group => group.ParentIndex.HasValue && group.FirstPathIndex == group.LastPathIndex);
+        Assert.Equal(BlendMode.NORMAL, blendedGroup.BlendMode);
+        Assert.Equal(page.Paths[2].FillColor, page.Paths[1].FillColor);
+        Assert.Contains(
+            page.Diagnostics,
+            diagnostic => diagnostic.Code == "native-blend-result-flattened");
+
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout);
+        Assert.DoesNotContain("mix-blend-mode:hard-light", html.Html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Convert_CmykBlendWithDifferentResult_PreservesBlendMode()
+    {
+        using PDDocument document = CreateCmykBlendResultIndicatorDocument(matchingResult: false);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document);
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        PdfLayoutVectorGroup blendedGroup = Assert.Single(
+            page.VectorGroups,
+            group => group.ParentIndex.HasValue && group.FirstPathIndex == group.LastPathIndex);
+        Assert.Equal(BlendMode.HARD_LIGHT, blendedGroup.BlendMode);
+        Assert.DoesNotContain(
+            page.Diagnostics,
+            diagnostic => diagnostic.Code == "native-blend-result-flattened");
+
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout);
+        Assert.Contains("mix-blend-mode:hard-light", html.Html, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(true, false, 1)]
     [InlineData(true, true, 1)]
@@ -8922,6 +8961,71 @@ public class PdfHtmlConverterTest
         pageContent.DrawForm(group);
         pageContent.RestoreGraphicsState();
         return document;
+    }
+
+    private static PDDocument CreateCmykBlendResultIndicatorDocument(bool matchingResult)
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDTransparencyGroup source = new(new PDStream(document));
+        source.SetBBox(new PDRectangle(0, 0, 100, 100));
+        source.SetGroup(new PDTransparencyGroupAttributes());
+        using (PDPageContentStream sourceContent = new(document, source))
+        {
+            sourceContent.SetNonStrokingColor(0f, 0f, 0f, 0.66f);
+            sourceContent.AddRect(0, 0, 100, 100);
+            sourceContent.Fill();
+        }
+
+        PDTransparencyGroup outer = new(new PDStream(document));
+        outer.SetBBox(new PDRectangle(0, 0, 100, 100));
+        PDTransparencyGroupAttributes outerAttributes = new();
+        outerAttributes.GetCOSObject().SetBoolean(COSName.GetPDFName("I"), true);
+        outerAttributes.GetCOSObject().SetItem(COSName.CS, COSName.GetPDFName("DeviceCMYK"));
+        outer.SetGroup(outerAttributes);
+        using (PDPageContentStream outerContent = new(document, outer))
+        {
+            outerContent.SetNonStrokingColor(0.8f, 0.67f, 0.67f, 0.1f);
+            outerContent.AddRect(0, 0, 100, 100);
+            outerContent.Fill();
+
+            PDExtendedGraphicsState blendState = new();
+            blendState.SetBlendMode(BlendMode.HARD_LIGHT);
+            outerContent.SaveGraphicsState();
+            outerContent.SetGraphicsStateParameters(blendState);
+            outerContent.DrawForm(source);
+            outerContent.RestoreGraphicsState();
+
+            outerContent.SetNonStrokingColor(0f, 0f, 0f, matchingResult ? 0.388f : 0.8f);
+            AddDiagonalCross(outerContent);
+            outerContent.Fill();
+        }
+
+        using PDPageContentStream pageContent = new(document, page);
+        pageContent.SaveGraphicsState();
+        pageContent.Transform(new Matrix(1, 0, 0, 1, 100, 300));
+        pageContent.DrawForm(outer);
+        pageContent.RestoreGraphicsState();
+        return document;
+    }
+
+    private static void AddDiagonalCross(PDPageContentStream content)
+    {
+        (float X, float Y)[] points =
+        [
+            (20, 30), (30, 20), (50, 40), (70, 20),
+            (80, 30), (60, 50), (80, 70), (70, 80),
+            (50, 60), (30, 80), (20, 70), (40, 50),
+        ];
+        content.MoveTo(points[0].X, points[0].Y);
+        foreach ((float x, float y) in points.Skip(1))
+        {
+            content.LineTo(x, y);
+        }
+
+        content.ClosePath();
     }
 
     private static PDDocument CreateMultipleCompactTransparencyGroupDocument()
