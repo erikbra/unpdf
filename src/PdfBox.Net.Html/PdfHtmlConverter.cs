@@ -2767,6 +2767,10 @@ public static class PdfHtmlConverter
                 .Append(ImageClipPathId(page, image))
                 .Append(')');
         }
+        if (image.MultiplyOverprint)
+        {
+            html.Append(";mix-blend-mode:multiply");
+        }
 
         html.AppendLine("\" />");
     }

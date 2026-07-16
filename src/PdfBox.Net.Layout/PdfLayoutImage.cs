@@ -20,7 +20,8 @@ public sealed class PdfLayoutImage
         bool overprint = false,
         IReadOnlyList<string>? colorantNames = null,
         IReadOnlyList<PdfLayoutClipPath>? clipPaths = null,
-        PdfLayoutColor? overprintCompositeColor = null)
+        PdfLayoutColor? overprintCompositeColor = null,
+        bool multiplyOverprint = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(assetId);
 
@@ -39,6 +40,7 @@ public sealed class PdfLayoutImage
         ColorantNames = colorantNames?.ToArray() ?? [];
         ClipPaths = clipPaths?.ToArray() ?? [];
         OverprintCompositeColor = overprintCompositeColor;
+        MultiplyOverprint = multiplyOverprint;
     }
 
     /// <summary>
@@ -110,6 +112,11 @@ public sealed class PdfLayoutImage
     /// Gets the exact opaque process-color result for a uniform DeviceN image composed over a matching path.
     /// </summary>
     public PdfLayoutColor? OverprintCompositeColor { get; }
+
+    /// <summary>
+    /// Gets whether a black-only process image should multiply with its HTML backdrop to preserve PDF overprint.
+    /// </summary>
+    public bool MultiplyOverprint { get; }
 
     /// <summary>
     /// Gets the exact clipping paths applied to this image placement.
