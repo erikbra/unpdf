@@ -4303,7 +4303,11 @@ public static class PdfLayoutExtractor
                 image,
                 GetGraphicsState(),
                 clipPaths,
-                index) ?? ResolveStencilOverprint(
+                index) ?? ResolveUniformSeparationImageBackdrop(
+                    image,
+                    GetGraphicsState(),
+                    bounds,
+                    CurrentClipBounds(GetGraphicsState())) ?? ResolveStencilOverprint(
                     image,
                     GetGraphicsState(),
                     bounds,
@@ -4324,7 +4328,13 @@ public static class PdfLayoutExtractor
                 GetGraphicsState().IsNonStrokingOverprint() || GetGraphicsState().IsOverprint(),
                 ExplicitColorants(image.GetColorSpace()),
                 clipPaths,
-                overprintCompositeColor));
+                overprintCompositeColor,
+                IsBlackOnlyProcessImageOverprint(
+                    image,
+                    GetGraphicsState(),
+                    bounds,
+                    CurrentClipBounds(GetGraphicsState()),
+                    clipPaths)));
             _paintOperations.Add(new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Image, index));
         }
 
@@ -4421,6 +4431,154 @@ public static class PdfLayoutExtractor
                 1f,
                 imageIndex,
                 "stencil overprint");
+        }
+
+        private PdfLayoutColor? ResolveUniformSeparationImageBackdrop(
+            PDImageXObject image,
+            PDGraphicsState graphicsState,
+            PdfLayoutRectangle bounds,
+            PdfLayoutRectangle? clipBounds)
+        {
+            if (graphicsState.GetNonStrokeAlphaConstant() < 0.999f ||
+                graphicsState.GetAlphaSource() ||
+                graphicsState.GetSoftMask() is not null ||
+                image.GetBitsPerComponent() != 8 ||
+                image.GetColorSpace() is not PDSeparation separation ||
+                image.GetCOSObject()?.GetDictionaryObject(COSName.DECODE) is not null)
+            {
+                return null;
+            }
+
+            byte[] samples = image.GetImageData();
+            int expectedSamples = image.GetWidth() * image.GetHeight();
+            if (samples.Length != expectedSamples ||
+                samples.Length == 0 ||
+                samples.Any(sample => sample != samples[0]) ||
+                AlternateDeviceCmykComponents(
+                    new PDColor([samples[0] / 255f], separation)) is not { } sourceComponents)
+            {
+                return null;
+            }
+
+            PdfLayoutRectangle visibleBounds = clipBounds is PdfLayoutRectangle clip
+                ? Intersect(bounds, clip)
+                : bounds;
+            if (visibleBounds.Width <= 0 || visibleBounds.Height <= 0)
+            {
+                return null;
+            }
+
+            DeviceCmykBackdrop? backdrop = FindContainingSpotBackdrop(visibleBounds);
+            if (backdrop is null ||
+                !_paths[backdrop.Value.PathIndex].ColorantNames.Contains(
+                    separation.GetColorantName(),
+                    StringComparer.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return SameComponents(sourceComponents, backdrop.Value.Components)
+                ? _paths[backdrop.Value.PathIndex].FillColor
+                : null;
+        }
+
+        private bool IsBlackOnlyProcessImageOverprint(
+            PDImageXObject image,
+            PDGraphicsState graphicsState,
+            PdfLayoutRectangle bounds,
+            PdfLayoutRectangle? clipBounds,
+            IReadOnlyList<PdfLayoutClipPath> clipPaths)
+        {
+            if (!graphicsState.IsNonStrokingOverprint() ||
+                graphicsState.GetOverprintMode() != 1 ||
+                graphicsState.GetNonStrokeAlphaConstant() < 0.999f ||
+                graphicsState.GetAlphaSource() ||
+                graphicsState.GetSoftMask() is not null ||
+                image.GetBitsPerComponent() != 8)
+            {
+                return false;
+            }
+
+            if (image.GetColorSpace() is PDDeviceGray)
+            {
+                return HasContainingSpotImageBackdrop(bounds, clipBounds, clipPaths);
+            }
+
+            if (image.GetColorSpace() is not PDIndexed indexed ||
+                indexed.GetBaseColorSpace() is not PDDeviceCMYK ||
+                !TryGetIndexedLookupBytes(indexed, out byte[] lookup))
+            {
+                return false;
+            }
+
+            byte[] samples = image.GetImageData();
+            if (samples.Length != image.GetWidth() * image.GetHeight() || samples.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (byte sample in samples.Distinct())
+            {
+                int offset = sample * 4;
+                if (offset < 0 || offset + 4 > lookup.Length ||
+                    lookup[offset] != 0 ||
+                    lookup[offset + 1] != 0 ||
+                    lookup[offset + 2] != 0)
+                {
+                    return false;
+                }
+            }
+
+            return HasContainingSpotImageBackdrop(bounds, clipBounds, clipPaths);
+        }
+
+        private bool HasContainingSpotImageBackdrop(
+            PdfLayoutRectangle bounds,
+            PdfLayoutRectangle? clipBounds,
+            IReadOnlyList<PdfLayoutClipPath> clipPaths)
+        {
+            if (clipPaths.Any(static clipPath => !IsRectangularClipPath(clipPath)))
+            {
+                return false;
+            }
+
+            PdfLayoutRectangle visibleBounds = clipBounds is PdfLayoutRectangle clip
+                ? Intersect(bounds, clip)
+                : bounds;
+            return visibleBounds.Width > 0 &&
+                visibleBounds.Height > 0 &&
+                FindContainingSpotBackdrop(visibleBounds) is not null;
+        }
+
+        private static bool IsRectangularClipPath(PdfLayoutClipPath clipPath)
+        {
+            const float tolerance = 0.1f;
+            HashSet<int> corners = [];
+            foreach (PdfLayoutPathCommand command in clipPath.Commands)
+            {
+                if (command.Kind == PdfLayoutPathCommandKind.CurveTo)
+                {
+                    return false;
+                }
+
+                if (command.Kind is not (PdfLayoutPathCommandKind.MoveTo or PdfLayoutPathCommandKind.LineTo))
+                {
+                    continue;
+                }
+
+                bool left = MathF.Abs(command.X1 - clipPath.Bounds.X) <= tolerance;
+                bool right = MathF.Abs(command.X1 - clipPath.Bounds.Right) <= tolerance;
+                bool top = MathF.Abs(command.Y1 - clipPath.Bounds.Y) <= tolerance;
+                bool bottom = MathF.Abs(command.Y1 - clipPath.Bounds.Bottom) <= tolerance;
+                if ((!left && !right) || (!top && !bottom))
+                {
+                    return false;
+                }
+
+                corners.Add((right ? 1 : 0) | (bottom ? 2 : 0));
+            }
+
+            return corners.Count == 4;
         }
 
         private DeviceCmykBackdrop? FindImageClipProcessBackdrop(IReadOnlyList<PdfLayoutClipPath> clipPaths)

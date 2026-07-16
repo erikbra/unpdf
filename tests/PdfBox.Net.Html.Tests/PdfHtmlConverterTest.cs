@@ -427,6 +427,122 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_UniformSeparationImage_ReusesMatchingClippedSpotBackdrop()
+    {
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDSeparation spot = new(
+            "GWG Green",
+            PDDeviceCMYK.Instance,
+            CreateType4Function("{ dup 0.5 mul exch 0 exch 0 }", 1, 4));
+        PDImageXObject image = CreateRawImage(document, 1, 1, 8, spot, [255]);
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.SetNonStrokingColor(new PDColor([1f], spot));
+            content.AddRect(10, 10, 30, 30);
+            content.Fill();
+            content.AddRect(10, 10, 30, 30);
+            content.Clip();
+            content.DrawImage(image, 9.88f, 9.88f, 30.24f, 30.24f);
+        }
+
+        PdfLayoutPage layoutPage = Assert.Single(PdfLayoutExtractor.Extract(document).Pages);
+        Assert.Equal(Assert.Single(layoutPage.Paths).FillColor, Assert.Single(layoutPage.Images).OverprintCompositeColor);
+    }
+
+    [Fact]
+    public void Convert_UniformSeparationImage_PreservesDifferentSpotTint()
+    {
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDSeparation spot = new(
+            "GWG Green",
+            PDDeviceCMYK.Instance,
+            CreateType4Function("{ dup 0.5 mul exch 0 exch 0 }", 1, 4));
+        PDImageXObject image = CreateRawImage(document, 1, 1, 8, spot, [128]);
+
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.SetNonStrokingColor(new PDColor([1f], spot));
+            content.AddRect(10, 10, 30, 30);
+            content.Fill();
+            content.DrawImage(image, 12, 12, 20, 20);
+        }
+
+        PdfLayoutImage layoutImage = Assert.Single(Assert.Single(PdfLayoutExtractor.Extract(document).Pages).Images);
+        Assert.Null(layoutImage.OverprintCompositeColor);
+    }
+
+    [Fact]
+    public void Convert_BlackOnlyIndexedCmykOverprint_UsesMultiplyBlendOnlyForBlackPalette()
+    {
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDIndexed blackPalette = PDIndexed.Create(
+            PDDeviceCMYK.Instance,
+            1,
+            [0, 0, 0, 0, 0, 0, 0, 255]);
+        PDIndexed cyanPalette = PDIndexed.Create(
+            PDDeviceCMYK.Instance,
+            1,
+            [0, 0, 0, 0, 255, 0, 0, 0]);
+        PDImageXObject blackImage = CreateRawImage(document, 2, 1, 8, blackPalette, [0, 1]);
+        PDImageXObject cyanImage = CreateRawImage(document, 2, 1, 8, cyanPalette, [0, 1]);
+        PDSeparation spot = new(
+            "Spot Green",
+            PDDeviceCMYK.Instance,
+            CreateType4Function("{ dup 0.5 mul exch 0 exch 0 }", 1, 4));
+        PDExtendedGraphicsState overprint = new();
+        overprint.SetNonStrokingOverprintControl(true);
+        overprint.SetOverprintMode(1);
+
+        using (PDPageContentStream content = new(document, page))
+        {
+            content.SetNonStrokingColor(new PDColor([1f], spot));
+            content.AddRect(10, 10, 20, 20);
+            content.Fill();
+            content.AddRect(40, 10, 20, 20);
+            content.Fill();
+            content.AddRect(70, 10, 20, 20);
+            content.Fill();
+            content.SetGraphicsStateParameters(overprint);
+            content.DrawImage(blackImage, 10, 10, 20, 20);
+            content.DrawImage(cyanImage, 40, 10, 20, 20);
+            content.SaveGraphicsState();
+            content.MoveTo(70, 10);
+            content.LineTo(90, 10);
+            content.LineTo(80, 30);
+            content.ClosePath();
+            content.Clip();
+            content.DrawImage(blackImage, 70, 10, 20, 20);
+            content.RestoreGraphicsState();
+        }
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+        PdfLayoutImage[] images = Assert.Single(layout.Pages).Images.ToArray();
+        Assert.True(images[0].MultiplyOverprint);
+        Assert.False(images[1].MultiplyOverprint);
+        Assert.False(images[2].MultiplyOverprint);
+
+        XElement[] convertedImages = ParseHtml(PdfHtmlConverter.Convert(layout).Html)
+            .Descendants()
+            .Where(element => element.Name.LocalName == "img")
+            .ToArray();
+        Assert.Contains("mix-blend-mode:multiply", convertedImages[0].Attribute("style")?.Value);
+        Assert.DoesNotContain("mix-blend-mode:multiply", convertedImages[1].Attribute("style")?.Value);
+        Assert.DoesNotContain("mix-blend-mode:multiply", convertedImages[2].Attribute("style")?.Value);
+    }
+
+    [Fact]
     public void Convert_UniformIndexedDeviceNOverprint_KnocksOutDeclaredZeroProcessComponents()
     {
         using PDDocument document = CreateUniformIndexedDeviceNClipOverprintDocument(
@@ -8332,6 +8448,28 @@ public class PdfHtmlConverterTest
         }
 
         return document;
+    }
+
+    private static PDImageXObject CreateRawImage(
+        PDDocument document,
+        int width,
+        int height,
+        int bitsPerComponent,
+        PDColorSpace colorSpace,
+        byte[] samples)
+    {
+        PDStream imageStream = new(document);
+        using (Stream output = imageStream.CreateOutputStream())
+        {
+            output.Write(samples);
+        }
+
+        COSStream imageDictionary = imageStream.GetCOSObject();
+        imageDictionary.SetInt(COSName.WIDTH, width);
+        imageDictionary.SetInt(COSName.HEIGHT, height);
+        imageDictionary.SetInt(COSName.BITS_PER_COMPONENT, bitsPerComponent);
+        imageDictionary.SetItem(COSName.COLORSPACE, colorSpace.GetCOSObject());
+        return new PDImageXObject(imageStream, null);
     }
 
     private static PDDocument CreateUniformIndexedDeviceNClipOverprintDocument(
