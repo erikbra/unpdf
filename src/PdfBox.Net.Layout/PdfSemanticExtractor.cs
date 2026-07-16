@@ -14,7 +14,7 @@ public static class PdfSemanticExtractor
     private static readonly Regex SymbolFootnoteMarkerPattern = new(@"^[*∗†‡]\s*$", RegexOptions.Compiled);
     private static readonly Regex NumericFootnoteMarkerPattern = new(@"^\d{1,2}\s*$", RegexOptions.Compiled);
     private static readonly Regex TableCaptionPattern = new(
-        @"^\s*Table\s+(?<number>\d{1,4}(?:\.\d+)*(?:[A-Za-z])?)(?<separator>\s*[:.\-–—])?(?=\s|$)",
+        @"^\s*Table\s*(?<number>\d{1,4}(?:\.\d+)*(?:[A-Za-z])?)(?:(?<separator>\s*[:.\-–—])\s*|(?=\s|$))",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex TableReferenceContinuationPattern = new(
         @"^(?:also\s+)?(?:can|contains?|compares?|describes?|gives?|has|illustrates?|is|lists?|presents?|provides?|reports?|shows?|summarizes?|was|were)\b",
@@ -797,7 +797,21 @@ public static class PdfSemanticExtractor
     private static PdfSemanticPage ExtractPage(PdfLayoutPage page, PdfSemanticExtractionOptions options)
     {
         RuledTableRegion[] ruledTableRegions = DetectRuledTableRegions(page);
-        LineCandidate[] lines = CreateLineCandidates(page, ruledTableRegions, options)
+        HorizontalTableLane[] horizontalTableLanes = DetectHorizontalTableLanes(page, ruledTableRegions);
+        PdfLayoutRectangle[] horizontalTableBodies = horizontalTableLanes
+            .Select(static lane => lane.RuleBounds)
+            .ToArray();
+        TableCandidateRegion[] tableCandidateRegions = ruledTableRegions
+            .Select(region => new TableCandidateRegion(
+                region.Bounds,
+                FindHorizontalTableLane(region.Bounds, horizontalTableLanes)))
+            .Concat(horizontalTableLanes.Select((lane, index) =>
+                new TableCandidateRegion(lane.ExpandedBounds, index)))
+            .ToArray();
+        LineCandidate[] lines = CreateLineCandidates(
+            page,
+            tableCandidateRegions,
+            options)
             .Where(static line => line.Text.Length > 0)
             .OrderBy(static line => line.Bounds.Y)
             .ThenBy(static line => line.Bounds.X)
@@ -832,6 +846,8 @@ public static class PdfSemanticExtractor
 
         LineCandidate[] headingLines = lines
             .Where(line => !IsInsideRuledTableRegion(line, ruledTableRegions))
+            .Where(line => line.Source.Runs.Count < 3 ||
+                !IsInsideTableLaneRegion(line, horizontalTableBodies))
             .Where(line => !algorithmLineIndexes.Contains(line.Index))
             .Where(line => !codeLineIndexes.Contains(line.Index))
             .Where(line => IsHeading(line, page, lines, bodyFontSize, lineStep, options))
@@ -1013,17 +1029,24 @@ public static class PdfSemanticExtractor
         PdfSemanticElement[] mergedElements = MergeAdjacentParagraphFragments(
             sortedElements,
             bodyFontSize,
-            lineStep);
+            lineStep,
+            page.Width,
+            horizontalTableLanes.Length > 0);
         IReadOnlyList<PdfSemanticElement> detectedElements = DetectQuotationsAndAsides(page, mergedElements);
         return new PdfSemanticPage(
             page.PageNumber,
-            AttachDetectedTableCaptions(detectedElements, bodyFontSize, lineStep));
+            AttachDetectedTableCaptions(
+                detectedElements,
+                bodyFontSize,
+                lineStep,
+                horizontalTableLanes));
     }
 
     private static IReadOnlyList<PdfSemanticElement> AttachDetectedTableCaptions(
         IReadOnlyList<PdfSemanticElement> elements,
         float bodyFontSize,
-        float lineStep)
+        float lineStep,
+        IReadOnlyList<HorizontalTableLane> horizontalTableLanes)
     {
         PdfSemanticElement[] tables = elements
             .Where(static element =>
@@ -1031,23 +1054,27 @@ public static class PdfSemanticExtractor
                 element.TableRows.Count > 0 &&
                 element.TableCaption == null)
             .ToArray();
-        TableCaptionCandidate[] captions = elements
-            .Select(TryCreateTableCaptionCandidate)
-            .Where(static candidate => candidate.HasValue)
-            .Select(static candidate => candidate!.Value)
-            .ToArray();
+        TableCaptionCandidate[] captions = DetectTableCaptionCandidates(
+            elements,
+            lineStep,
+            horizontalTableLanes);
         if (tables.Length == 0 || captions.Length == 0)
         {
             return elements;
         }
 
         TableCaptionAssociation[] associations = tables
-            .SelectMany(table => captions.Select(caption => TryCreateTableCaptionAssociation(
-                elements,
-                table,
-                caption,
-                bodyFontSize,
-                lineStep)))
+            .SelectMany(table =>
+            {
+                bool isHorizontalLaneTable = IsHorizontalTableLaneTable(table, horizontalTableLanes);
+                return captions.Select(caption => TryCreateTableCaptionAssociation(
+                    elements,
+                    table,
+                    caption,
+                    bodyFontSize,
+                    lineStep,
+                    isHorizontalLaneTable));
+            })
             .Where(static association => association.HasValue)
             .Select(static association => association!.Value)
             .OrderBy(static association => association.Score)
@@ -1061,9 +1088,14 @@ public static class PdfSemanticExtractor
         foreach (TableCaptionAssociation association in associations)
         {
             if (replacements.ContainsKey(association.Table) ||
-                !claimedCaptions.Add(association.Caption.Element))
+                association.Caption.SourceElements.Any(claimedCaptions.Contains))
             {
                 continue;
+            }
+
+            foreach (PdfSemanticElement sourceElement in association.Caption.SourceElements)
+            {
+                claimedCaptions.Add(sourceElement);
             }
 
             PdfSemanticElement source = association.Caption.Element;
@@ -1087,11 +1119,82 @@ public static class PdfSemanticExtractor
             .ToArray();
     }
 
+    private static TableCaptionCandidate[] DetectTableCaptionCandidates(
+        IReadOnlyList<PdfSemanticElement> elements,
+        float lineStep,
+        IReadOnlyList<HorizontalTableLane> horizontalTableLanes)
+    {
+        List<TableCaptionCandidate> captions = [];
+        for (int index = 0; index < elements.Count; index++)
+        {
+            TableCaptionCandidate? detected = TryCreateTableCaptionCandidate(elements[index]);
+            if (!detected.HasValue)
+            {
+                continue;
+            }
+
+            TableCaptionCandidate caption = detected.Value;
+            bool isHorizontalLaneCaption = horizontalTableLanes.Any(lane =>
+                IsInsideRectangleCenter(caption.Element.Bounds, lane.ExpandedBounds, 1f));
+            if (!isHorizontalLaneCaption)
+            {
+                if (caption.Element.Lines.Count <= 8)
+                {
+                    captions.Add(caption);
+                }
+
+                continue;
+            }
+
+            PdfSemanticElement merged = caption.Element;
+            List<PdfSemanticElement> sources = [.. caption.SourceElements];
+            for (int candidateIndex = index + 1;
+                candidateIndex < elements.Count &&
+                    sources.Count < 8 &&
+                    !EndsSentence(merged.Text);
+                candidateIndex++)
+            {
+                PdfSemanticElement candidate = elements[candidateIndex];
+                if (candidate.Kind != PdfSemanticElementKind.Paragraph ||
+                    candidate.Bounds.Y < sources[^1].Bounds.Y - 1f ||
+                    !SharesTableLane(candidate.Bounds, caption.Element.Bounds))
+                {
+                    continue;
+                }
+
+                float fontSize = MedianFontSize(merged.Lines);
+                float gap = MathF.Max(0f, candidate.Bounds.Y - sources[^1].Bounds.Bottom);
+                if (gap > MathF.Max(lineStep * 1.9f, fontSize * 2.2f))
+                {
+                    break;
+                }
+
+                merged = MergeParagraphElements(merged, candidate);
+                sources.Add(candidate);
+            }
+
+            captions.Add(new TableCaptionCandidate(merged, caption.Number, sources));
+        }
+
+        return captions.ToArray();
+    }
+
+    private static bool IsHorizontalTableLaneTable(
+        PdfSemanticElement table,
+        IReadOnlyList<HorizontalTableLane> horizontalTableLanes)
+    {
+        return horizontalTableLanes.Any(lane =>
+            HorizontalOverlap(table.Bounds, lane.RuleBounds) >=
+                MathF.Min(table.Bounds.Width, lane.RuleBounds.Width) * 0.80f &&
+            VerticalOverlap(table.Bounds, lane.RuleBounds) >=
+                MathF.Min(table.Bounds.Height, lane.RuleBounds.Height) * 0.50f);
+    }
+
     private static TableCaptionCandidate? TryCreateTableCaptionCandidate(PdfSemanticElement element)
     {
         if (element.Kind is not (PdfSemanticElementKind.Paragraph or PdfSemanticElementKind.Heading) ||
             element.Lines.Count == 0 ||
-            element.Lines.Count > 8 ||
+            element.Lines.Count > 12 ||
             element.Text.Length > 1200)
         {
             return null;
@@ -1112,7 +1215,7 @@ public static class PdfSemanticExtractor
             return null;
         }
 
-        return new TableCaptionCandidate(element, match.Groups["number"].Value);
+        return new TableCaptionCandidate(element, match.Groups["number"].Value, [element]);
     }
 
     private static TableCaptionAssociation? TryCreateTableCaptionAssociation(
@@ -1120,7 +1223,8 @@ public static class PdfSemanticExtractor
         PdfSemanticElement table,
         TableCaptionCandidate caption,
         float bodyFontSize,
-        float lineStep)
+        float lineStep,
+        bool isHorizontalLaneTable)
     {
         PdfSemanticTableCaptionPosition position;
         float gap;
@@ -1148,7 +1252,11 @@ public static class PdfSemanticExtractor
             captionFontSize < tableFontSize * 0.65f ||
             captionFontSize > MathF.Max(bodyFontSize * 1.35f, tableFontSize * 1.5f) ||
             !SharesTableLane(caption.Element.Bounds, table.Bounds) ||
-            !HasContinuousCaptionLines(caption.Element.Lines, captionFontSize, lineStep) ||
+            !HasContinuousCaptionLines(
+                caption.Element.Lines,
+                captionFontSize,
+                lineStep,
+                isHorizontalLaneTable) ||
             HasInterveningTableCaptionContent(elements, table, caption.Element, position))
         {
             return null;
@@ -1157,7 +1265,9 @@ public static class PdfSemanticExtractor
         float centerDistance = MathF.Abs(
             caption.Element.Bounds.X + caption.Element.Bounds.Width / 2f -
             (table.Bounds.X + table.Bounds.Width / 2f));
-        float positionPenalty = position == PdfSemanticTableCaptionPosition.Below ? 2f : 0f;
+        float positionPenalty = isHorizontalLaneTable
+            ? position == PdfSemanticTableCaptionPosition.Above ? 1f : 0f
+            : position == PdfSemanticTableCaptionPosition.Below ? 2f : 0f;
         return new TableCaptionAssociation(
             table,
             caption,
@@ -1168,7 +1278,8 @@ public static class PdfSemanticExtractor
     private static bool HasContinuousCaptionLines(
         IReadOnlyList<PdfSemanticLine> lines,
         float captionFontSize,
-        float lineStep)
+        float lineStep,
+        bool allowFontOutlier)
     {
         PdfSemanticLine[] ordered = lines
             .OrderBy(static line => line.Bounds.Y)
@@ -1176,9 +1287,20 @@ public static class PdfSemanticExtractor
             .ToArray();
         float minimumFontSize = ordered.Min(static line => line.DominantFontSize);
         float maximumFontSize = ordered.Max(static line => line.DominantFontSize);
-        if (maximumFontSize - minimumFontSize > MathF.Max(1.5f, captionFontSize * 0.2f))
+        float fontTolerance = MathF.Max(1.5f, captionFontSize * 0.2f);
+        if (!allowFontOutlier && maximumFontSize - minimumFontSize > fontTolerance)
         {
             return false;
+        }
+
+        if (allowFontOutlier)
+        {
+            int fontOutliers = ordered.Count(line =>
+                MathF.Abs(line.DominantFontSize - captionFontSize) > fontTolerance);
+            if (fontOutliers > Math.Max(1, ordered.Length / 5))
+            {
+                return false;
+            }
         }
 
         float maximumLineGap = MathF.Max(lineStep * 1.75f, captionFontSize * 1.8f);
@@ -1582,13 +1704,21 @@ public static class PdfSemanticExtractor
     private static PdfSemanticElement[] MergeAdjacentParagraphFragments(
         IReadOnlyList<PdfSemanticElement> elements,
         float bodyFontSize,
-        float lineStep)
+        float lineStep,
+        float pageWidth,
+        bool preserveColumnLanes)
     {
         List<PdfSemanticElement> merged = [];
         foreach (PdfSemanticElement element in elements)
         {
             if (merged.Count > 0 &&
-                ShouldMergeAdjacentParagraphFragments(merged[^1], element, bodyFontSize, lineStep))
+                ShouldMergeAdjacentParagraphFragments(
+                    merged[^1],
+                    element,
+                    bodyFontSize,
+                    lineStep,
+                    pageWidth,
+                    preserveColumnLanes))
             {
                 merged[^1] = MergeParagraphElements(merged[^1], element);
                 continue;
@@ -1604,7 +1734,9 @@ public static class PdfSemanticExtractor
         PdfSemanticElement previous,
         PdfSemanticElement current,
         float bodyFontSize,
-        float lineStep)
+        float lineStep,
+        float pageWidth,
+        bool preserveColumnLanes)
     {
         if (previous.Kind != PdfSemanticElementKind.Paragraph ||
             current.Kind != PdfSemanticElementKind.Paragraph)
@@ -1615,6 +1747,21 @@ public static class PdfSemanticExtractor
         if (HasNumberedFormulaLine(previous) || HasNumberedFormulaLine(current))
         {
             return false;
+        }
+
+        if (preserveColumnLanes)
+        {
+            float horizontalGap = HorizontalGap(previous.Bounds, current.Bounds);
+            bool crossesPageGutter =
+                previous.Bounds.Right <= pageWidth * 0.52f && current.Bounds.X >= pageWidth * 0.48f ||
+                current.Bounds.Right <= pageWidth * 0.52f && previous.Bounds.X >= pageWidth * 0.48f;
+            if (horizontalGap >= pageWidth * 0.01f &&
+                (crossesPageGutter ||
+                    previous.Bounds.Width >= pageWidth * 0.20f &&
+                    current.Bounds.Width >= pageWidth * 0.20f))
+            {
+                return false;
+            }
         }
 
         float verticalGap = MathF.Max(0f, current.Bounds.Y - previous.Bounds.Bottom);
@@ -1783,7 +1930,8 @@ public static class PdfSemanticExtractor
     private static LineCandidate CreateLineCandidate(
         int index,
         PdfTextLine source,
-        PdfSemanticExtractionOptions options)
+        PdfSemanticExtractionOptions options,
+        int? tableLaneIndex = null)
     {
         string text = ReconstructText(source.Runs.SelectMany(static run => run.Glyphs), options);
         (string fontName, float fontSize, float direction, PdfLayoutColor color) = DominantStyle(source.Runs);
@@ -1794,15 +1942,16 @@ public static class PdfSemanticExtractor
             fontName,
             fontSize,
             direction,
-            color);
+            color,
+            tableLaneIndex);
     }
 
     private static IEnumerable<LineCandidate> CreateLineCandidates(
         PdfLayoutPage page,
-        IReadOnlyList<RuledTableRegion> ruledTableRegions,
+        IReadOnlyList<TableCandidateRegion> tableCandidateRegions,
         PdfSemanticExtractionOptions options)
     {
-        if (ruledTableRegions.Count == 0)
+        if (tableCandidateRegions.Count == 0)
         {
             return page.Lines.Select((line, index) => CreateLineCandidate(index, line, options));
         }
@@ -1812,10 +1961,10 @@ public static class PdfSemanticExtractor
         foreach (PdfTextLine source in page.Lines)
         {
             List<PdfTextRun> remainingRuns = source.Runs.ToList();
-            foreach (RuledTableRegion region in ruledTableRegions)
+            foreach (TableCandidateRegion region in tableCandidateRegions)
             {
                 PdfTextRun[] regionRuns = remainingRuns
-                    .Where(run => IsInsideRuledTableRegion(run.Bounds, region))
+                    .Where(run => IsInsideRectangleCenter(run.Bounds, region.Bounds, 1f))
                     .ToArray();
                 if (regionRuns.Length == 0)
                 {
@@ -1825,7 +1974,8 @@ public static class PdfSemanticExtractor
                 candidates.Add(CreateLineCandidate(
                     candidateIndex++,
                     CreateTextLine(regionRuns),
-                    options));
+                    options,
+                    region.TableLaneIndex));
                 remainingRuns.RemoveAll(regionRuns.Contains);
             }
 
@@ -1839,6 +1989,25 @@ public static class PdfSemanticExtractor
         }
 
         return candidates;
+    }
+
+    private static int? FindHorizontalTableLane(
+        PdfLayoutRectangle bounds,
+        IReadOnlyList<HorizontalTableLane> lanes)
+    {
+        for (int index = 0; index < lanes.Count; index++)
+        {
+            PdfLayoutRectangle ruleBounds = lanes[index].RuleBounds;
+            if (HorizontalOverlap(bounds, ruleBounds) >=
+                    MathF.Min(bounds.Width, ruleBounds.Width) * 0.80f &&
+                VerticalOverlap(bounds, ruleBounds) >=
+                    MathF.Min(bounds.Height, ruleBounds.Height) * 0.80f)
+            {
+                return index;
+            }
+        }
+
+        return null;
     }
 
     private static PdfTextLine CreateTextLine(IReadOnlyList<PdfTextRun> runs)
@@ -4077,7 +4246,11 @@ public static class PdfSemanticExtractor
     {
         List<LineCandidate> current = [];
         LineCandidate? previous = null;
-        foreach (LineCandidate line in lines.OrderBy(static line => line.Bounds.Y).ThenBy(static line => line.Bounds.X))
+        foreach (LineCandidate line in lines
+            .OrderBy(static line => line.TableLaneIndex.HasValue ? 0 : 1)
+            .ThenBy(static line => line.TableLaneIndex)
+            .ThenBy(static line => line.Bounds.Y)
+            .ThenBy(static line => line.Bounds.X))
         {
             if (consumed.Contains(line.Index))
             {
@@ -5232,6 +5405,223 @@ public static class PdfSemanticExtractor
             .ToArray();
     }
 
+    private static HorizontalTableLane[] DetectHorizontalTableLanes(
+        PdfLayoutPage page,
+        IReadOnlyList<RuledTableRegion> ruledTableRegions)
+    {
+        TableRule[] rules = TableRules(page, new PdfLayoutRectangle(0, 0, page.Width, page.Height)).ToArray();
+        List<(PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds)> candidates = [];
+        foreach (PdfLayoutRectangle[] sequence in HorizontalRuleSequences(page, rules))
+        {
+            if (sequence.Length < 3)
+            {
+                continue;
+            }
+
+            float left = sequence.Min(static span => span.X);
+            float right = sequence.Max(static span => span.Right);
+            float top = sequence.Min(static span => span.Y);
+            float bottom = sequence.Max(static span => span.Bottom);
+            float width = right - left;
+            float height = bottom - top;
+            float pageMidpoint = page.Width / 2f;
+            bool isColumnLocal = right <= pageMidpoint || left >= pageMidpoint;
+            if (width < page.Width * 0.18f ||
+                width > page.Width * 0.45f ||
+                !isColumnLocal ||
+                height < 16f ||
+                height > page.Height * 0.55f)
+            {
+                continue;
+            }
+
+            // Narrow-column captions can wrap to many short lines. Keep enough
+            // vertical context to retain the full caption in its table lane;
+            // neighboring tables still clip this expansion at their midpoint.
+            float captionPadding = MathF.Min(108f, page.Height * 0.14f);
+            PdfLayoutRectangle ruleBounds = new(left, top, width, height);
+            if (!HasNearbyTableCaption(page, ruleBounds, captionPadding))
+            {
+                continue;
+            }
+
+            float horizontalPadding = MathF.Min(42f, page.Width * 0.07f);
+            float laneTop = MathF.Max(0f, top - captionPadding);
+            float laneLeft = MathF.Max(0f, left - horizontalPadding);
+            float laneRight = MathF.Min(page.Width, right + horizontalPadding);
+            float midpointTolerance = page.Width * 0.02f;
+            if (right <= pageMidpoint + midpointTolerance)
+            {
+                laneRight = MathF.Min(laneRight, pageMidpoint);
+            }
+            else if (left >= pageMidpoint - midpointTolerance)
+            {
+                laneLeft = MathF.Max(laneLeft, pageMidpoint);
+            }
+
+            PdfLayoutRectangle lane = new(
+                laneLeft,
+                laneTop,
+                laneRight - laneLeft,
+                MathF.Min(page.Height, bottom + captionPadding) - laneTop);
+            if (ruledTableRegions.Any(region =>
+                HorizontalOverlap(region.Bounds, lane) >= MathF.Min(region.Bounds.Width, lane.Width) * 0.8f &&
+                VerticalOverlap(region.Bounds, lane) >= MathF.Min(region.Bounds.Height, lane.Height) * 0.5f))
+            {
+                continue;
+            }
+
+            candidates.Add((ruleBounds, lane));
+        }
+
+        return candidates
+            .Select(candidate => new HorizontalTableLane(
+                candidate.RuleBounds,
+                ClipTableLaneBetweenNeighbors(candidate, candidates)))
+            .Distinct()
+            .OrderBy(static lane => lane.ExpandedBounds.Y)
+            .ThenBy(static lane => lane.ExpandedBounds.X)
+            .ToArray();
+    }
+
+    private static bool HasNearbyTableCaption(
+        PdfLayoutPage page,
+        PdfLayoutRectangle tableBounds,
+        float verticalPadding)
+    {
+        PdfLayoutRectangle searchBounds = new(
+            tableBounds.X,
+            MathF.Max(0f, tableBounds.Y - verticalPadding),
+            tableBounds.Width,
+            MathF.Min(page.Height, tableBounds.Bottom + verticalPadding) -
+                MathF.Max(0f, tableBounds.Y - verticalPadding));
+        return page.Lines
+            .Where(line => line.Bounds.Bottom >= searchBounds.Y && line.Bounds.Y <= searchBounds.Bottom)
+            .Where(line => HorizontalOverlap(line.Bounds, searchBounds) >=
+                MathF.Min(line.Bounds.Width, searchBounds.Width) * 0.30f)
+            .Any(line =>
+                TableCaptionPattern.IsMatch(line.Text.TrimStart()) ||
+                line.Runs.Any(run => TableCaptionPattern.IsMatch(run.Text.TrimStart())));
+    }
+
+    private static PdfLayoutRectangle ClipTableLaneBetweenNeighbors(
+        (PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds) candidate,
+        IReadOnlyList<(PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds)> candidates)
+    {
+        (PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds)[] sameColumn = candidates
+            .Where(other => !other.Equals(candidate) &&
+                HorizontalOverlap(other.RuleBounds, candidate.RuleBounds) >=
+                    MathF.Min(other.RuleBounds.Width, candidate.RuleBounds.Width) * 0.8f)
+            .ToArray();
+        float top = candidate.ExpandedBounds.Y;
+        float bottom = candidate.ExpandedBounds.Bottom;
+        float left = candidate.ExpandedBounds.X;
+        float right = candidate.ExpandedBounds.Right;
+        (PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds)? previous = sameColumn
+            .Where(other => other.RuleBounds.Bottom <= candidate.RuleBounds.Y)
+            .OrderByDescending(static other => other.RuleBounds.Bottom)
+            .Cast<(PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds)?>()
+            .FirstOrDefault();
+        if (previous.HasValue)
+        {
+            top = MathF.Max(top, (previous.Value.RuleBounds.Bottom + candidate.RuleBounds.Y) / 2f);
+        }
+
+        (PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds)? next = sameColumn
+            .Where(other => other.RuleBounds.Y >= candidate.RuleBounds.Bottom)
+            .OrderBy(static other => other.RuleBounds.Y)
+            .Cast<(PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds)?>()
+            .FirstOrDefault();
+        if (next.HasValue)
+        {
+            bottom = MathF.Min(bottom, (candidate.RuleBounds.Bottom + next.Value.RuleBounds.Y) / 2f);
+        }
+
+        (PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds)? leftNeighbor = candidates
+            .Where(other => !other.Equals(candidate) &&
+                other.RuleBounds.Right <= candidate.RuleBounds.X &&
+                VerticalOverlap(other.RuleBounds, candidate.RuleBounds) >=
+                    MathF.Min(other.RuleBounds.Height, candidate.RuleBounds.Height) * 0.25f)
+            .OrderByDescending(static other => other.RuleBounds.Right)
+            .Cast<(PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds)?>()
+            .FirstOrDefault();
+        if (leftNeighbor.HasValue)
+        {
+            left = MathF.Max(left, (leftNeighbor.Value.RuleBounds.Right + candidate.RuleBounds.X) / 2f);
+        }
+
+        (PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds)? rightNeighbor = candidates
+            .Where(other => !other.Equals(candidate) &&
+                other.RuleBounds.X >= candidate.RuleBounds.Right &&
+                VerticalOverlap(other.RuleBounds, candidate.RuleBounds) >=
+                    MathF.Min(other.RuleBounds.Height, candidate.RuleBounds.Height) * 0.25f)
+            .OrderBy(static other => other.RuleBounds.X)
+            .Cast<(PdfLayoutRectangle RuleBounds, PdfLayoutRectangle ExpandedBounds)?>()
+            .FirstOrDefault();
+        if (rightNeighbor.HasValue)
+        {
+            right = MathF.Min(right, (candidate.RuleBounds.Right + rightNeighbor.Value.RuleBounds.X) / 2f);
+        }
+
+        return new PdfLayoutRectangle(
+            left,
+            top,
+            MathF.Max(0f, right - left),
+            MathF.Max(0f, bottom - top));
+    }
+
+    private static PdfLayoutRectangle[][] HorizontalRuleSequences(
+        PdfLayoutPage page,
+        IReadOnlyList<TableRule> rules)
+    {
+        PdfLayoutRectangle[] horizontalSpans = MergeHorizontalRuleSegments(
+            rules.Where(static rule => rule.Orientation == TableRuleOrientation.Horizontal)
+                .Select(static rule => rule.Bounds));
+        List<List<PdfLayoutRectangle>> spanFamilies = [];
+        float edgeTolerance = MathF.Max(2f, page.Width * 0.005f);
+        foreach (PdfLayoutRectangle span in horizontalSpans
+            .OrderBy(static span => span.X)
+            .ThenBy(static span => span.Right)
+            .ThenBy(static span => span.Y))
+        {
+            List<PdfLayoutRectangle>? family = spanFamilies.FirstOrDefault(existing =>
+                MathF.Abs(existing.Average(static item => item.X) - span.X) <= edgeTolerance &&
+                MathF.Abs(existing.Average(static item => item.Right) - span.Right) <= edgeTolerance);
+            if (family == null)
+            {
+                spanFamilies.Add([span]);
+            }
+            else
+            {
+                family.Add(span);
+            }
+        }
+
+        List<PdfLayoutRectangle[]> sequences = [];
+        float maximumVerticalGap = page.Height * 0.30f;
+        foreach (List<PdfLayoutRectangle> family in spanFamilies)
+        {
+            List<PdfLayoutRectangle> sequence = [];
+            foreach (PdfLayoutRectangle span in family.OrderBy(static span => span.Y))
+            {
+                if (sequence.Count > 0 && span.Y - sequence[^1].Y > maximumVerticalGap)
+                {
+                    sequences.Add(sequence.ToArray());
+                    sequence.Clear();
+                }
+
+                sequence.Add(span);
+            }
+
+            if (sequence.Count > 0)
+            {
+                sequences.Add(sequence.ToArray());
+            }
+        }
+
+        return sequences.ToArray();
+    }
+
     private static PdfLayoutRectangle[] MergeHorizontalRuleSegments(IEnumerable<PdfLayoutRectangle> source)
     {
         List<List<PdfLayoutRectangle>> baselines = [];
@@ -5422,6 +5812,13 @@ public static class PdfSemanticExtractor
     private static bool IsInsideRuledTableRegion(PdfLayoutRectangle bounds, RuledTableRegion region)
     {
         return IsInsideRectangleCenter(bounds, region.Bounds, 1f);
+    }
+
+    private static bool IsInsideTableLaneRegion(
+        LineCandidate line,
+        IReadOnlyList<PdfLayoutRectangle> tableLaneRegions)
+    {
+        return tableLaneRegions.Any(region => IsInsideRectangleCenter(line.Bounds, region, 1f));
     }
 
     private static bool IsInsideRectangleCenter(
@@ -5739,6 +6136,13 @@ public static class PdfSemanticExtractor
                 continue;
             }
 
+            if (rows[index].TableLaneIndex.HasValue &&
+                TableCaptionPattern.IsMatch(rows[index].Text.TrimStart()))
+            {
+                index++;
+                continue;
+            }
+
             int start = index;
             int tableLikeRowCount = 1;
             List<TableSourceRow> group = [rows[index]];
@@ -5747,6 +6151,11 @@ public static class PdfSemanticExtractor
             {
                 TableSourceRow row = rows[index];
                 if (IsConsumed(row, consumed))
+                {
+                    break;
+                }
+
+                if (row.TableLaneIndex != group[0].TableLaneIndex)
                 {
                     break;
                 }
@@ -5813,6 +6222,12 @@ public static class PdfSemanticExtractor
                 break;
             }
 
+
+            if (row.TableLaneIndex != group[0].TableLaneIndex)
+            {
+                break;
+            }
+
             float gap = MathF.Max(0f, group[0].Bounds.Y - row.Bounds.Bottom);
             if (gap > MathF.Max(lineStep * 1.7f, bodyFontSize * 2.1f))
             {
@@ -5843,6 +6258,11 @@ public static class PdfSemanticExtractor
         for (int candidateIndex = index; candidateIndex >= 0 && index - candidateIndex < 8; candidateIndex--)
         {
             TableSourceRow candidate = rows[candidateIndex];
+            if (candidate.TableLaneIndex != firstTableRow.TableLaneIndex)
+            {
+                return false;
+            }
+
             float gap = MathF.Max(0f, nextBounds.Y - candidate.Bounds.Bottom);
             if (gap > maximumLineGap || candidate.Cells.Count > 1)
             {
@@ -5890,7 +6310,11 @@ public static class PdfSemanticExtractor
             }
         }
 
-        foreach (LineRow row in rows)
+        foreach (LineRow row in rows
+            .OrderBy(static row => row.Lines[0].TableLaneIndex.HasValue ? 0 : 1)
+            .ThenBy(static row => row.Lines[0].TableLaneIndex)
+            .ThenBy(static row => row.Bounds.Y)
+            .ThenBy(static row => row.Bounds.X))
         {
             TableSourceRow? sourceRow = CreateTableSourceRow(row, bodyFontSize, options);
             if (sourceRow != null)
@@ -5964,7 +6388,10 @@ public static class PdfSemanticExtractor
             return false;
         }
 
-        if (row.Bounds.Width < page.Width * 0.34f)
+        float minimumRowWidth = row.TableLaneIndex.HasValue
+            ? page.Width * 0.18f
+            : page.Width * 0.34f;
+        if (row.Bounds.Width < minimumRowWidth)
         {
             return false;
         }
@@ -6018,6 +6445,11 @@ public static class PdfSemanticExtractor
             return true;
         }
 
+        if (IsTableSectionLabel(existingRows, row, page))
+        {
+            return true;
+        }
+
         if (LooksLikeProse(row.Text))
         {
             return false;
@@ -6035,6 +6467,29 @@ public static class PdfSemanticExtractor
         }
 
         return IsTableRowWithinExistingBounds(existingRows, row, page);
+    }
+
+    private static bool IsTableSectionLabel(
+        IReadOnlyList<TableSourceRow> existingRows,
+        TableSourceRow row,
+        PdfLayoutPage page)
+    {
+        if (!row.TableLaneIndex.HasValue ||
+            row.Cells.Count != 1 ||
+            row.Text.Length > 80 ||
+            EndsSentence(row.Text) ||
+            LooksLikeProse(row.Text) ||
+            MaximumTableColumnCount(existingRows) < 3)
+        {
+            return false;
+        }
+
+        PdfLayoutRectangle existingBounds = PdfLayoutRectangle.Union(
+            existingRows.Select(static existing => existing.Bounds));
+        float overlap = HorizontalOverlap(existingBounds, row.Bounds);
+        return overlap >= MathF.Min(existingBounds.Width, row.Bounds.Width) * 0.65f &&
+            row.Bounds.X >= existingBounds.X - page.Width * 0.04f &&
+            row.Bounds.Right <= existingBounds.Right + page.Width * 0.04f;
     }
 
     private static bool IsTableRowWithinExistingBounds(
@@ -7358,6 +7813,12 @@ public static class PdfSemanticExtractor
         float lineStep,
         PdfSemanticExtractionOptions options)
     {
+        if (previous.TableLaneIndex != current.TableLaneIndex &&
+            (previous.TableLaneIndex.HasValue || current.TableLaneIndex.HasValue))
+        {
+            return true;
+        }
+
         float gap = current.Bounds.Y - previous.Bounds.Y;
         if (IsFormulaContinuationLine(previous) &&
             IsFormulaContinuationLine(current) &&
@@ -8061,6 +8522,11 @@ public static class PdfSemanticExtractor
 
         public bool Contains(LineCandidate line)
         {
+            if (_lines[0].TableLaneIndex != line.TableLaneIndex)
+            {
+                return false;
+            }
+
             float overlap = MathF.Min(Bounds.Bottom, line.Bounds.Bottom) - MathF.Max(Bounds.Y, line.Bounds.Y);
             if (overlap >= MathF.Min(Bounds.Height, line.Bounds.Height) * 0.35f)
             {
@@ -8122,7 +8588,8 @@ public static class PdfSemanticExtractor
             string fontName,
             float fontSize,
             float direction,
-            PdfLayoutColor color)
+            PdfLayoutColor color,
+            int? tableLaneIndex = null)
         {
             Index = index;
             Source = source;
@@ -8131,6 +8598,7 @@ public static class PdfSemanticExtractor
             FontSize = fontSize;
             Direction = direction;
             Color = color;
+            TableLaneIndex = tableLaneIndex;
         }
 
         public int Index { get; }
@@ -8146,6 +8614,8 @@ public static class PdfSemanticExtractor
         public float Direction { get; }
 
         public PdfLayoutColor Color { get; }
+
+        public int? TableLaneIndex { get; }
 
         public string Text => SemanticLine.Text;
 
@@ -8478,6 +8948,14 @@ public static class PdfSemanticExtractor
         public IReadOnlyList<TableRule> Rules { get; }
     }
 
+    private readonly record struct HorizontalTableLane(
+        PdfLayoutRectangle RuleBounds,
+        PdfLayoutRectangle ExpandedBounds);
+
+    private readonly record struct TableCandidateRegion(
+        PdfLayoutRectangle Bounds,
+        int? TableLaneIndex);
+
     private sealed class TableSourceRow
     {
         public TableSourceRow(IReadOnlyList<LineCandidate> lines, IReadOnlyList<TableSourceCell> cells)
@@ -8486,6 +8964,7 @@ public static class PdfSemanticExtractor
             Cells = cells.ToArray();
             Bounds = PdfLayoutRectangle.Union(Lines.Select(static line => line.Bounds));
             Text = string.Join(" ", Cells.Select(static cell => cell.Text));
+            TableLaneIndex = Lines.Select(static line => line.TableLaneIndex).Distinct().SingleOrDefault();
         }
 
         public IReadOnlyList<LineCandidate> Lines { get; }
@@ -8495,6 +8974,8 @@ public static class PdfSemanticExtractor
         public PdfLayoutRectangle Bounds { get; }
 
         public string Text { get; }
+
+        public int? TableLaneIndex { get; }
     }
 
     private sealed class TableSourceCell
@@ -8533,7 +9014,8 @@ public static class PdfSemanticExtractor
 
     private readonly record struct TableCaptionCandidate(
         PdfSemanticElement Element,
-        string Number);
+        string Number,
+        IReadOnlyList<PdfSemanticElement> SourceElements);
 
     private readonly record struct TableCaptionAssociation(
         PdfSemanticElement Table,
