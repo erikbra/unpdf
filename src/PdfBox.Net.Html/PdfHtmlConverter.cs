@@ -2347,7 +2347,16 @@ public static class PdfHtmlConverter
         }
 
         HashSet<string> imageColorants = new(image.ColorantNames, StringComparer.OrdinalIgnoreCase);
-        return path.ColorantNames.All(colorant => !imageColorants.Contains(colorant));
+        int absentColorants = path.ColorantNames.Count(colorant => !imageColorants.Contains(colorant));
+        if (absentColorants == path.ColorantNames.Count)
+        {
+            return true;
+        }
+
+        return absentColorants > 0 &&
+            path.Bounds.Width < image.Bounds.Width &&
+            path.Bounds.Height < image.Bounds.Height &&
+            RectangleContainsWithTolerance(image.Bounds, path.Bounds, 0.25f);
     }
 
     private static bool BoundsOverlap(PdfLayoutRectangle first, PdfLayoutRectangle second)
