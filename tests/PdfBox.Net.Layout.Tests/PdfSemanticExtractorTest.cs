@@ -684,6 +684,42 @@ public sealed class PdfSemanticExtractorTest
     }
 
     [Fact]
+    public void Extract_WideSparseBibliographyRows_RemainProse()
+    {
+        PdfLayoutDocument layout = CreateSemanticPassageFixture(
+        [
+            CreateFixtureLine("Opening body prose establishes the ordinary font.", 72f, 52f, 340f),
+            CreateFixtureLine("References", 72f, 82f, 72f, 14f, "Times-Bold"),
+            CreateCompositeFixtureLine(
+                116f,
+                ("Ryan Kiros,", 72f, 74f, "Times-Roman"),
+                ("Yukun Zhu,", 158f, 70f, "Times-Roman"),
+                ("Ruslan R Salakhutdinov,", 240f, 142f, "Times-Roman"),
+                ("1499-1509.", 430f, 72f, "Times-Roman")),
+            CreateCompositeFixtureLine(
+                130f,
+                ("and Sanja Fidler. 2015.", 72f, 132f, "Times-Roman"),
+                ("Skip-thought vectors.", 216f, 116f, "Times-Roman"),
+                ("Minjoon Seo,", 344f, 78f, "Times-Roman"),
+                ("Aniruddha Kembhavi,", 434f, 118f, "Times-Roman")),
+            CreateCompositeFixtureLine(
+                144f,
+                ("Quoc Le and Tomas Mikolov.", 72f, 148f, "Times-Roman"),
+                ("Distributed representations.", 232f, 140f, "Times-Roman"),
+                ("Richard Socher. 2013.", 384f, 116f, "Times-Roman"),
+                ("Recursive models.", 512f, 92f, "Times-Roman"))
+        ]);
+
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+
+        Assert.DoesNotContain(page.Elements, static element => element.Kind == PdfSemanticElementKind.Table);
+        string text = string.Join(" ", page.Elements.Select(static element => element.Text));
+        Assert.Contains("Ryan Kiros", text, StringComparison.Ordinal);
+        Assert.Contains("Minjoon Seo", text, StringComparison.Ordinal);
+        Assert.Contains("Richard Socher", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Extract_LineBreakHyphenation_UsesParagraphEdgesAndPreservesAuthoredCompounds()
     {
         PdfLayoutDocument layout = CreateSemanticPassageFixture(

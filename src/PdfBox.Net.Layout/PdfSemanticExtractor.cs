@@ -5782,7 +5782,10 @@ public static class PdfSemanticExtractor
             }
 
             PrependTableLeadRows(rows, start, group, page, lineStep, bodyFontSize, consumed);
-            if (!IsValidTableGroup(group, tableLikeRowCount, page))
+            int firstGroupIndex = Array.IndexOf(rows, group[0]);
+            bool hasCaptionLead = firstGroupIndex > 0 &&
+                IsTableCaptionLeadRow(rows, firstGroupIndex - 1, group[0], lineStep, bodyFontSize);
+            if (!IsValidTableGroup(group, tableLikeRowCount, page, hasCaptionLead))
             {
                 index = start + 1;
                 continue;
@@ -6057,11 +6060,22 @@ public static class PdfSemanticExtractor
     private static bool IsValidTableGroup(
         IReadOnlyList<TableSourceRow> rows,
         int tableLikeRowCount,
-        PdfLayoutPage page)
+        PdfLayoutPage page,
+        bool hasCaptionLead)
     {
-        if (rows.Count < 3 || tableLikeRowCount < 2 || MaximumTableColumnCount(rows) < 3)
+        int maximumColumnCount = MaximumTableColumnCount(rows);
+        if (rows.Count < 3 || tableLikeRowCount < 2 || maximumColumnCount < 3)
         {
             return false;
+        }
+
+        if (!hasCaptionLead && LooksLikeBibliographyTableGroup(rows))
+        {
+            PdfLayoutRectangle textBounds = PdfLayoutRectangle.Union(rows.Select(static row => row.Bounds));
+            if (!TableRules(page, textBounds).Any())
+            {
+                return false;
+            }
         }
 
         float[] anchors = TableColumnAnchors(rows);
@@ -6069,6 +6083,23 @@ public static class PdfSemanticExtractor
             .Where(row => row.Cells.Count >= 3)
             .Count(row => IsCompatibleWithTableColumns(row, anchors, page));
         return compatibleTableRows >= Math.Max(2, tableLikeRowCount - 1);
+    }
+
+    private static bool LooksLikeBibliographyTableGroup(IReadOnlyList<TableSourceRow> rows)
+    {
+        if (rows.Count < 3 || MaximumTableColumnCount(rows) < 4)
+        {
+            return false;
+        }
+
+        TableSourceCell[] commaCells = rows
+            .SelectMany(static row => row.Cells)
+            .Where(static cell => cell.Text.Contains(',', StringComparison.Ordinal))
+            .ToArray();
+        int letterWords = commaCells.Sum(static cell => WhitespacePattern
+            .Split(cell.Text.Trim())
+            .Count(static word => word.Count(char.IsLetter) >= 2));
+        return commaCells.Length >= 4 && letterWords >= 8;
     }
 
     private static bool IsCompatibleWithTableColumns(
