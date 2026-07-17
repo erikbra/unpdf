@@ -1,0 +1,254 @@
+{
+  "assets": {
+    "HarfBuzzSharp.wasm": {
+      "brotliBytes": 11176,
+      "rawBytes": 28949
+    },
+    "JBig2Decoder.NETStandard.wasm": {
+      "brotliBytes": 23603,
+      "rawBytes": 79637
+    },
+    "Microsoft.AspNetCore.Components.Web.wasm": {
+      "brotliBytes": 24190,
+      "rawBytes": 68885
+    },
+    "Microsoft.AspNetCore.Components.WebAssembly.wasm": {
+      "brotliBytes": 42485,
+      "rawBytes": 125205
+    },
+    "Microsoft.AspNetCore.Components.wasm": {
+      "brotliBytes": 92131,
+      "rawBytes": 256789
+    },
+    "Microsoft.Extensions.Configuration.Abstractions.wasm": {
+      "brotliBytes": 2339,
+      "rawBytes": 6933
+    },
+    "Microsoft.Extensions.Configuration.Json.wasm": {
+      "brotliBytes": 4193,
+      "rawBytes": 10517
+    },
+    "Microsoft.Extensions.Configuration.wasm": {
+      "brotliBytes": 3631,
+      "rawBytes": 8981
+    },
+    "Microsoft.Extensions.DependencyInjection.Abstractions.wasm": {
+      "brotliBytes": 10009,
+      "rawBytes": 26389
+    },
+    "Microsoft.Extensions.DependencyInjection.wasm": {
+      "brotliBytes": 19578,
+      "rawBytes": 46869
+    },
+    "Microsoft.Extensions.Logging.Abstractions.wasm": {
+      "brotliBytes": 10897,
+      "rawBytes": 27413
+    },
+    "Microsoft.Extensions.Logging.wasm": {
+      "brotliBytes": 7646,
+      "rawBytes": 17685
+    },
+    "Microsoft.Extensions.Options.wasm": {
+      "brotliBytes": 7167,
+      "rawBytes": 17173
+    },
+    "Microsoft.Extensions.Primitives.wasm": {
+      "brotliBytes": 4545,
+      "rawBytes": 11541
+    },
+    "Microsoft.JSInterop.WebAssembly.wasm": {
+      "brotliBytes": 4907,
+      "rawBytes": 12053
+    },
+    "Microsoft.JSInterop.wasm": {
+      "brotliBytes": 18871,
+      "rawBytes": 47893
+    },
+    "PdfBox.Net.FontBox.wasm": {
+      "brotliBytes": 139864,
+      "rawBytes": 497941
+    },
+    "PdfBox.Net.Html.Wasm.wasm": {
+      "brotliBytes": 9856,
+      "rawBytes": 24341
+    },
+    "PdfBox.Net.Html.wasm": {
+      "brotliBytes": 142077,
+      "rawBytes": 601877
+    },
+    "PdfBox.Net.IO.wasm": {
+      "brotliBytes": 14685,
+      "rawBytes": 36629
+    },
+    "PdfBox.Net.Layout.wasm": {
+      "brotliBytes": 174292,
+      "rawBytes": 572693
+    },
+    "PdfBox.Net.SkiaSharp.wasm": {
+      "brotliBytes": 41276,
+      "rawBytes": 103701
+    },
+    "PdfBox.Net.wasm": {
+      "brotliBytes": 403218,
+      "rawBytes": 1773845
+    },
+    "SkiaSharp.wasm": {
+      "brotliBytes": 30012,
+      "rawBytes": 83221
+    },
+    "System.Collections.Concurrent.wasm": {
+      "brotliBytes": 11806,
+      "rawBytes": 28949
+    },
+    "System.Collections.Immutable.wasm": {
+      "brotliBytes": 20756,
+      "rawBytes": 55573
+    },
+    "System.Collections.NonGeneric.wasm": {
+      "brotliBytes": 4369,
+      "rawBytes": 11541
+    },
+    "System.Collections.wasm": {
+      "brotliBytes": 20673,
+      "rawBytes": 56085
+    },
+    "System.ComponentModel.wasm": {
+      "brotliBytes": 1716,
+      "rawBytes": 4885
+    },
+    "System.Console.wasm": {
+      "brotliBytes": 6323,
+      "rawBytes": 15125
+    },
+    "System.Diagnostics.DiagnosticSource.wasm": {
+      "brotliBytes": 16763,
+      "rawBytes": 40213
+    },
+    "System.IO.Compression.wasm": {
+      "brotliBytes": 12018,
+      "rawBytes": 32021
+    },
+    "System.IO.MemoryMappedFiles.wasm": {
+      "brotliBytes": 10453,
+      "rawBytes": 25877
+    },
+    "System.IO.Pipelines.wasm": {
+      "brotliBytes": 2416,
+      "rawBytes": 5909
+    },
+    "System.Linq.wasm": {
+      "brotliBytes": 34074,
+      "rawBytes": 96021
+    },
+    "System.Memory.wasm": {
+      "brotliBytes": 6183,
+      "rawBytes": 14613
+    },
+    "System.Net.Http.wasm": {
+      "brotliBytes": 52781,
+      "rawBytes": 141589
+    },
+    "System.Net.Primitives.wasm": {
+      "brotliBytes": 2898,
+      "rawBytes": 7445
+    },
+    "System.Private.CoreLib.wasm": {
+      "brotliBytes": 571245,
+      "rawBytes": 1839381
+    },
+    "System.Private.Uri.wasm": {
+      "brotliBytes": 27445,
+      "rawBytes": 67861
+    },
+    "System.Private.Xml.wasm": {
+      "brotliBytes": 114988,
+      "rawBytes": 445717
+    },
+    "System.Runtime.InteropServices.JavaScript.wasm": {
+      "brotliBytes": 16921,
+      "rawBytes": 43797
+    },
+    "System.Runtime.InteropServices.wasm": {
+      "brotliBytes": 2920,
+      "rawBytes": 8981
+    },
+    "System.Runtime.wasm": {
+      "brotliBytes": 3356,
+      "rawBytes": 11029
+    },
+    "System.Security.Cryptography.wasm": {
+      "brotliBytes": 19500,
+      "rawBytes": 49429
+    },
+    "System.Text.Encoding.Extensions.wasm": {
+      "brotliBytes": 1688,
+      "rawBytes": 4885
+    },
+    "System.Text.Encodings.Web.wasm": {
+      "brotliBytes": 9924,
+      "rawBytes": 30485
+    },
+    "System.Text.Json.wasm": {
+      "brotliBytes": 125404,
+      "rawBytes": 374037
+    },
+    "System.Text.RegularExpressions.wasm": {
+      "brotliBytes": 101329,
+      "rawBytes": 259861
+    },
+    "System.Threading.wasm": {
+      "brotliBytes": 3729,
+      "rawBytes": 12053
+    },
+    "System.Xml.ReaderWriter.wasm": {
+      "brotliBytes": 1778,
+      "rawBytes": 5397
+    },
+    "Unicode.Bidi.wasm": {
+      "brotliBytes": 28521,
+      "rawBytes": 99605
+    },
+    "blazor.webassembly.js": {
+      "brotliBytes": 16723,
+      "rawBytes": 60576
+    },
+    "dotnet.js": {
+      "brotliBytes": 14305,
+      "rawBytes": 53840
+    },
+    "dotnet.native.js": {
+      "brotliBytes": 43175,
+      "rawBytes": 219338
+    },
+    "dotnet.native.wasm": {
+      "brotliBytes": 2015164,
+      "rawBytes": 7007722
+    },
+    "dotnet.runtime.js": {
+      "brotliBytes": 47864,
+      "rawBytes": 198480
+    },
+    "icudt_CJK.dat": {
+      "brotliBytes": 248840,
+      "rawBytes": 956416
+    },
+    "icudt_EFIGS.dat": {
+      "brotliBytes": 143983,
+      "rawBytes": 550832
+    },
+    "icudt_no_CJK.dat": {
+      "brotliBytes": 222250,
+      "rawBytes": 1107168
+    }
+  },
+  "description": "Ratcheted browser payload baseline. Update this file only when payload growth is understood and accepted; reduce it when durable savings land.",
+  "growthAllowance": {
+    "minimumBytes": 1024,
+    "percent": 1.0
+  },
+  "schemaVersion": 1,
+  "totals": {
+    "brotliBytes": 5226929,
+    "rawBytes": 18429896
+  }
+}

@@ -10,6 +10,13 @@ namespace PdfBox.Net.Html.Tests;
 
 public sealed class WasmBrowserSmokeTest
 {
+    private readonly ITestOutputHelper _output;
+
+    public WasmBrowserSmokeTest(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     [Fact(Timeout = 120_000)]
     public async Task BrowserLite_UsesBrowserCompatibilityNormalization()
     {
@@ -68,6 +75,9 @@ public sealed class WasmBrowserSmokeTest
                 Name = "Try the built-in sample",
                 Exact = true
             }).WaitForAsync();
+            await page.GetByText(
+                "Conversion runs locally in this browser. The PDF is not uploaded.",
+                new PageGetByTextOptions { Exact = true }).WaitForAsync();
             conversionRequests.Clear();
 
             string fixture = Path.Combine(
@@ -75,14 +85,24 @@ public sealed class WasmBrowserSmokeTest
                 "tests",
                 "SharedFixtures",
                 "classic-xref-fixture.pdf");
+            Stopwatch wallClock = Stopwatch.StartNew();
             await page.Locator("input[type=file]").SetInputFilesAsync(fixture);
 
             await page.GetByText("classic-xref-fixture.pdf", new PageGetByTextOptions { Exact = true }).WaitForAsync();
             IFrameLocator preview = page.FrameLocator("iframe[title='Converted HTML preview']");
             await preview.GetByText("Hello", new FrameLocatorGetByTextOptions { Exact = true }).WaitForAsync();
+            wallClock.Stop();
 
             Assert.Empty(conversionRequests);
             Assert.Equal("1", await page.Locator(".metrics dd").Nth(1).InnerTextAsync());
+            Assert.Equal(1, await preview.Locator("[data-page-number='1']").CountAsync());
+            string applicationDuration = await page.Locator(".metrics dd").Nth(2).InnerTextAsync();
+            _output.WriteLine(
+                $"Deterministic browser conversion duration: {applicationDuration} " +
+                $"({wallClock.ElapsedMilliseconds} ms wall clock).");
+            _output.WriteLine(
+                "Privacy assertion passed: PDF bytes stay in-browser; " +
+                "the PDF never leaves the browser during conversion.");
         }
         finally
         {

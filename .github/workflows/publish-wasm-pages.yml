@@ -9,6 +9,8 @@ on:
       - ".github/workflows/publish-wasm-pages.yml"
       - "Directory.Packages.props"
       - "eng/publish_wasm_pages_site.py"
+      - "eng/wasm-payload-baseline.json"
+      - "eng/wasm_payload_report.py"
       - "packaging/pages/**"
       - "samples/PdfBox.Net.Html.Wasm/**"
       - "src/PdfBox.Net/**"
@@ -56,6 +58,27 @@ jobs:
           samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj
           --configuration Release
           --output artifacts/wasm-publish
+
+      - name: Check browser payload budget
+        run: |
+          status=0
+          python3 eng/wasm_payload_report.py \
+            --publish-directory artifacts/wasm-publish/wwwroot \
+            --baseline eng/wasm-payload-baseline.json \
+            --json artifacts/wasm-payload/payload-report.json \
+            --markdown artifacts/wasm-payload/payload-report.md || status=$?
+          if test -f artifacts/wasm-payload/payload-report.md; then
+            cat artifacts/wasm-payload/payload-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+      - name: Upload browser payload report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: wasm-payload-report
+          path: artifacts/wasm-payload
+          if-no-files-found: warn
 
       - uses: ./.github/actions/restore-pages-site
         with:
