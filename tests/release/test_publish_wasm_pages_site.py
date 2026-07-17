@@ -23,6 +23,8 @@ def create_application(root: Path) -> Path:
     (application / "_framework/runtime.wasm").write_bytes(b"wasm")
     (application / "_framework/runtime.wasm.br").write_bytes(b"compressed wasm")
     (application / "samples/hello.pdf").write_bytes(b"%PDF-1.4")
+    (application / "_headers").write_text("/*\n  X-Frame-Options: DENY\n", encoding="utf-8")
+    (application / "staticwebapp.config.json").write_text("{}\n", encoding="utf-8")
     return application
 
 
@@ -69,6 +71,8 @@ class WasmPagesPublisherTest(unittest.TestCase):
             self.assertFalse((site / "wasm/index.html.br").exists())
             self.assertFalse((site / "wasm/index.html.gz").exists())
             self.assertTrue((site / "wasm/_framework/runtime.wasm.br").is_file())
+            self.assertTrue((site / "wasm/_headers").is_file())
+            self.assertTrue((site / "wasm/staticwebapp.config.json").is_file())
             self.assertEqual(landing.read_text(encoding="utf-8"), (site / "index.html").read_text(encoding="utf-8"))
             self.assertIn(
                 'const appBase = "/pdfbox-net/wasm/";',

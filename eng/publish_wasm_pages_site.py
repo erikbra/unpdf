@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish the browser-lite WASM app into the shared GitHub Pages tree."""
+"""Publish the adaptive browser WASM app into the shared GitHub Pages tree."""
 
 from __future__ import annotations
 

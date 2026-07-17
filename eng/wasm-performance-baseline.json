@@ -1,0 +1,12 @@
+{
+  "coldStartup": {
+    "maximumLoadMilliseconds": 60000
+  },
+  "description": "Gross browser performance ceilings for the deterministic local fixture. Tighten these after stable hosted measurements are available.",
+  "deterministicConversion": {
+    "maximumApplicationMilliseconds": 30000,
+    "maximumNetworkRequests": 0,
+    "maximumWallMilliseconds": 60000
+  },
+  "schemaVersion": 1
+}
