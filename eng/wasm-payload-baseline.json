@@ -81,8 +81,8 @@
       "rawBytes": 36629
     },
     "PdfBox.Net.Layout.wasm": {
-      "brotliBytes": 176643,
-      "rawBytes": 583957
+      "brotliBytes": 189266,
+      "rawBytes": 624405
     },
     "PdfBox.Net.SkiaSharp.wasm": {
       "brotliBytes": 41276,

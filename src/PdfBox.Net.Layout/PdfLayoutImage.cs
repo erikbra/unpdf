@@ -21,7 +21,9 @@ public sealed class PdfLayoutImage
         IReadOnlyList<string>? colorantNames = null,
         IReadOnlyList<PdfLayoutClipPath>? clipPaths = null,
         PdfLayoutColor? overprintCompositeColor = null,
-        bool multiplyOverprint = false)
+        bool multiplyOverprint = false,
+        int? markedContentId = null,
+        string? alternateDescription = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(assetId);
 
@@ -41,6 +43,8 @@ public sealed class PdfLayoutImage
         ClipPaths = clipPaths?.ToArray() ?? [];
         OverprintCompositeColor = overprintCompositeColor;
         MultiplyOverprint = multiplyOverprint;
+        MarkedContentId = markedContentId;
+        AlternateDescription = alternateDescription;
     }
 
     /// <summary>
@@ -122,4 +126,14 @@ public sealed class PdfLayoutImage
     /// Gets the exact clipping paths applied to this image placement.
     /// </summary>
     public IReadOnlyList<PdfLayoutClipPath> ClipPaths { get; }
+
+    /// <summary>
+    /// Gets the nearest enclosing page marked-content identifier, when present.
+    /// </summary>
+    public int? MarkedContentId { get; }
+
+    /// <summary>
+    /// Gets authored alternate text resolved from a tagged Figure structure element.
+    /// </summary>
+    public string? AlternateDescription { get; internal set; }
 }

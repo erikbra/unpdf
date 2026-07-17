@@ -31,6 +31,13 @@ foreach (PdfLayoutPage page in layout.Pages)
 }
 ```
 
+When the source PDF is tagged, `PdfLayoutDocument.TaggedStructure` exposes the
+authored structure tree in original child order. Standard roles, role maps,
+`ActualText`, figure alternative text, language, title, list/table attributes,
+and page/MCID correlations are retained for downstream HTML and Markdown
+converters. Tagged-content problems are reported through stable
+`tagged-structure-*` diagnostics rather than being silently discarded.
+
 Image placements can be collected without exporting image assets. When
 `IncludeImageAssets` is enabled, `ImageExportPolicy` controls whether an
 unsupported image degrades with a diagnostic, fails strictly, or requires a

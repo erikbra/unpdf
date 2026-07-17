@@ -25,6 +25,7 @@ using PdfBox.Net.Rendering;
 using PdfBox.Net.Text;
 using PdfBox.Net.Util;
 using PdfBox.Net.Util.Geometry;
+using ContentOperator = PdfBox.Net.ContentStream.Operator.Operator;
 
 namespace PdfBox.Net.Layout;
 
@@ -33,6 +34,34 @@ namespace PdfBox.Net.Layout;
 /// </summary>
 public static class PdfLayoutExtractor
 {
+    private readonly record struct MarkedContentCapture(int? MarkedContentId, bool IsArtifact);
+
+    private static MarkedContentCapture CreateMarkedContentCapture(
+        MarkedContentCapture parent,
+        string operatorName,
+        IList<COSBase> operands,
+        PDResources? resources)
+    {
+        COSName? tag = operands.FirstOrDefault() as COSName;
+        bool isArtifact = parent.IsArtifact ||
+            string.Equals(tag?.GetName(), "Artifact", StringComparison.Ordinal);
+        COSDictionary? properties = null;
+        if (string.Equals(operatorName, "BDC", StringComparison.Ordinal) && operands.Count > 1)
+        {
+            properties = operands[1] switch
+            {
+                COSDictionary dictionary => dictionary,
+                COSName propertyName => resources?.GetProperties(propertyName)?.GetCOSObject(),
+                _ => null
+            };
+        }
+
+        int markedContentId = properties?.GetInt(COSName.GetPDFName("MCID"), -1) ?? -1;
+        return new MarkedContentCapture(
+            isArtifact ? null : markedContentId >= 0 ? markedContentId : parent.MarkedContentId,
+            isArtifact);
+    }
+
     /// <summary>
     /// Extracts page geometry and positioned content from a PDF document.
     /// </summary>
@@ -57,10 +86,13 @@ public static class PdfLayoutExtractor
         private readonly List<PdfLayoutDiagnostic> _diagnostics = new();
         private readonly Dictionary<TextPosition, PdfLayoutColor> _textColors = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<TextPosition, bool> _textPaintStates = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<TextPosition, int?> _textMarkedContentIds = new(ReferenceEqualityComparer.Instance);
+        private readonly Stack<MarkedContentCapture> _markedContent = new();
         private readonly ImageAssetCollector _imageAssets = new();
         private readonly EmbeddedFontAssetCollector _fontAssets;
         private PDColorManagementContext? _colorManagementContext;
         private PageBuilder? _currentPage;
+        private PDDocument? _document;
 
         public LayoutTextStripper(PdfLayoutOptions options)
         {
@@ -77,10 +109,13 @@ public static class PdfLayoutExtractor
             _diagnostics.Clear();
             _textColors.Clear();
             _textPaintStates.Clear();
+            _textMarkedContentIds.Clear();
+            _markedContent.Clear();
             _imageAssets.Clear();
             _fontAssets.Clear();
             _colorManagementContext = PDColorManagementContext.Create(document);
             _currentPage = null;
+            _document = document;
 
             PDAcroForm? acroForm = document.GetDocumentCatalog().GetAcroForm(null);
             if (acroForm?.GetXFA() != null)
@@ -111,6 +146,7 @@ public static class PdfLayoutExtractor
 
         protected override void StartPage(PDPage page)
         {
+            _markedContent.Clear();
             int pageNumber = GetCurrentPageNo();
             _currentPage = pageNumber >= 1 && pageNumber <= _pages.Count
                 ? _pages[pageNumber - 1]
@@ -133,7 +169,34 @@ public static class PdfLayoutExtractor
                 textPositions.Sort(new TextPositionComparator());
             }
 
-            _currentPage.SetTextPositions(textPositions, _options, _textColors, _textPaintStates, _fontAssets);
+            _currentPage.SetTextPositions(
+                textPositions,
+                _options,
+                _textColors,
+                _textPaintStates,
+                _textMarkedContentIds,
+                _fontAssets);
+        }
+
+        protected override void ProcessOperator(ContentOperator op, IList<COSBase> operands)
+        {
+            bool isEnd = string.Equals(op.GetName(), "EMC", StringComparison.Ordinal);
+            if (string.Equals(op.GetName(), "BMC", StringComparison.Ordinal) ||
+                string.Equals(op.GetName(), "BDC", StringComparison.Ordinal))
+            {
+                _markedContent.Push(CreateMarkedContentCapture(
+                    _markedContent.TryPeek(out MarkedContentCapture parent) ? parent : default,
+                    op.GetName(),
+                    operands,
+                    GetResources()));
+            }
+
+            base.ProcessOperator(op, operands);
+
+            if (isEnd && _markedContent.Count > 0)
+            {
+                _markedContent.Pop();
+            }
         }
 
         protected override void ProcessTextPosition(TextPosition text)
@@ -147,11 +210,15 @@ public static class PdfLayoutExtractor
                 _diagnostics,
                 "text",
                 _colorManagementContext);
+            _textMarkedContentIds[text] = _markedContent.TryPeek(out MarkedContentCapture capture) && !capture.IsArtifact
+                ? capture.MarkedContentId
+                : null;
             base.ProcessTextPosition(text);
         }
 
         protected override void EndPage(PDPage page)
         {
+            _markedContent.Clear();
             _currentPage = null;
         }
 
@@ -160,10 +227,15 @@ public static class PdfLayoutExtractor
             PdfLayoutPage[] pages = _pages.Select(page => page.Build()).ToArray();
             PdfLayoutImageAsset[] imageAssets = _imageAssets.Assets.ToArray();
             PdfLayoutFontAsset[] fontAssets = _fontAssets.Assets.ToArray();
+            (PdfTaggedStructureDocument? taggedStructure, IReadOnlyList<PdfLayoutDiagnostic> taggedDiagnostics) =
+                _document == null
+                    ? (null, [])
+                    : PdfTaggedStructureExtractor.Extract(_document, pages);
             PdfLayoutDiagnostic[] diagnostics = _diagnostics
                 .Concat(pages.SelectMany(page => page.Diagnostics))
+                .Concat(taggedDiagnostics)
                 .ToArray();
-            return new PdfLayoutDocument(pages, imageAssets, fontAssets, diagnostics);
+            return new PdfLayoutDocument(pages, imageAssets, fontAssets, diagnostics, taggedStructure);
         }
     }
 
@@ -613,6 +685,7 @@ public static class PdfLayoutExtractor
             PdfLayoutOptions options,
             IReadOnlyDictionary<TextPosition, PdfLayoutColor> textColors,
             IReadOnlyDictionary<TextPosition, bool> textPaintStates,
+            IReadOnlyDictionary<TextPosition, int?> textMarkedContentIds,
             EmbeddedFontAssetCollector fontAssets)
         {
             _glyphs.Clear();
@@ -621,7 +694,12 @@ public static class PdfLayoutExtractor
             _blocks.Clear();
             _textHighlights.Clear();
 
-            _glyphs.AddRange(textPositions.Select(position => CreateGlyph(position, textColors, textPaintStates, fontAssets)));
+            _glyphs.AddRange(textPositions.Select(position => CreateGlyph(
+                position,
+                textColors,
+                textPaintStates,
+                textMarkedContentIds,
+                fontAssets)));
             _lines.AddRange(CreateLines(_glyphs, options));
             _runs.AddRange(_lines.SelectMany(line => line.Runs));
             _representedSoftMaskedTransparencyGroupBounds.Clear();
@@ -1919,6 +1997,7 @@ public static class PdfLayoutExtractor
             TextPosition position,
             IReadOnlyDictionary<TextPosition, PdfLayoutColor> textColors,
             IReadOnlyDictionary<TextPosition, bool> textPaintStates,
+            IReadOnlyDictionary<TextPosition, int?> textMarkedContentIds,
             EmbeddedFontAssetCollector fontAssets)
         {
             PDFont font = position.GetFont();
@@ -1948,7 +2027,8 @@ public static class PdfLayoutExtractor
                 PageBounds = pageBounds,
                 Outline = hasBrowserFontAsset ? null : TryCreateGlyphOutline(position, font),
                 UsesBrowserFontAsset = hasBrowserFontAsset,
-                IsPainted = textPaintStates.GetValueOrDefault(position, true)
+                IsPainted = textPaintStates.GetValueOrDefault(position, true),
+                MarkedContentId = textMarkedContentIds.GetValueOrDefault(position)
             };
         }
 
@@ -2326,6 +2406,11 @@ public static class PdfLayoutExtractor
 
         private static bool ShouldStartNewRun(PdfTextGlyph previous, PdfTextGlyph glyph, PdfLayoutOptions options)
         {
+            if (previous.MarkedContentId != glyph.MarkedContentId)
+            {
+                return true;
+            }
+
             if (!string.Equals(previous.FontName, glyph.FontName, StringComparison.Ordinal))
             {
                 return true;
@@ -2494,6 +2579,7 @@ public static class PdfLayoutExtractor
         private readonly List<PdfLayoutVectorGroup> _vectorGroups = new();
         private readonly List<PdfLayoutDiagnostic> _diagnostics = new();
         private readonly List<PdfLayoutPaintOperation> _paintOperations = new();
+        private readonly Stack<MarkedContentCapture> _markedContent = new();
         private readonly Stack<List<PdfLayoutRectangle>> _vectorGroupContentBounds = new();
         private readonly Stack<VectorGroupBuilder> _activeVectorGroups = new();
         private readonly List<PdfLayoutRectangle> _knockoutTransparencyGroupBounds = new();
@@ -2551,6 +2637,27 @@ public static class PdfLayoutExtractor
             _softMaskedTransparencyGroupFallbackBounds;
 
         public IReadOnlyList<SoftMaskedTransparencyGroup> SoftMaskedTransparencyGroups => _softMaskedTransparencyGroups;
+
+        protected override void ProcessOperator(ContentOperator op, IList<COSBase> operands)
+        {
+            bool isEnd = string.Equals(op.GetName(), "EMC", StringComparison.Ordinal);
+            if (string.Equals(op.GetName(), "BMC", StringComparison.Ordinal) ||
+                string.Equals(op.GetName(), "BDC", StringComparison.Ordinal))
+            {
+                _markedContent.Push(CreateMarkedContentCapture(
+                    _markedContent.TryPeek(out MarkedContentCapture parent) ? parent : default,
+                    op.GetName(),
+                    operands,
+                    GetResources()));
+            }
+
+            base.ProcessOperator(op, operands);
+
+            if (isEnd && _markedContent.Count > 0)
+            {
+                _markedContent.Pop();
+            }
+        }
 
         public override void XObject(PDXObject xobject)
         {
@@ -4852,7 +4959,8 @@ public static class PdfLayoutExtractor
                     GetGraphicsState(),
                     bounds,
                     CurrentClipBounds(GetGraphicsState()),
-                    clipPaths)));
+                    clipPaths),
+                CurrentMarkedContentId()));
             _paintOperations.Add(new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Image, index));
         }
 
@@ -5230,9 +5338,15 @@ public static class PdfLayoutExtractor
                 null,
                 GetGraphicsState().IsNonStrokingOverprint() || GetGraphicsState().IsOverprint(),
                 ExplicitColorants(image.GetColorSpace()),
-                CurrentClipPaths(GetGraphicsState(), skipCount: 1)));
+                CurrentClipPaths(GetGraphicsState(), skipCount: 1),
+                markedContentId: CurrentMarkedContentId()));
             _paintOperations.Add(new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Image, index));
         }
+
+        private int? CurrentMarkedContentId() =>
+            _markedContent.TryPeek(out MarkedContentCapture capture) && !capture.IsArtifact
+                ? capture.MarkedContentId
+                : null;
 
         private (PdfLayoutRectangle Bounds, PdfLayoutTransform Transform) NormalizeImageGeometry(Matrix ctm)
         {

@@ -76,4 +76,12 @@ public sealed class PdfTextRun
     /// Gets whether every glyph in the run uses an exported browser font asset.
     /// </summary>
     public bool UsesBrowserFontAsset => Glyphs.Count > 0 && Glyphs.All(static glyph => glyph.UsesBrowserFontAsset);
+
+    /// <summary>
+    /// Gets the page marked-content identifier shared by this run, when present.
+    /// </summary>
+    public int? MarkedContentId => Glyphs.Count > 0 &&
+        Glyphs.All(glyph => glyph.MarkedContentId == Glyphs[0].MarkedContentId)
+            ? Glyphs[0].MarkedContentId
+            : null;
 }
