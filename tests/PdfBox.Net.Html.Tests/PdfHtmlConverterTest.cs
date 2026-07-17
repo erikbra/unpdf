@@ -1118,6 +1118,37 @@ public class PdfHtmlConverterTest
             asset.AssetId.Contains("transparency-group", StringComparison.Ordinal)));
     }
 
+    [Theory]
+    [InlineData(true, true, 1)]
+    [InlineData(true, false, 0)]
+    [InlineData(false, true, 0)]
+    public void Extract_TransparencyGroupFallback_SelectsOnlyComplexIsolatedDeviceCmykBlends(
+        bool isolated,
+        bool complexSource,
+        int expectedFallbacks)
+    {
+        using PDDocument document = CreateSimpleDeviceCmykBlendDocument(
+            knockout: false,
+            isolated,
+            complexSource);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true,
+            IncludeTransparencyGroupFallbacks = true
+        });
+
+        PdfLayoutImage[] fallbacks = Assert.Single(layout.Pages).Images
+            .Where(image => image.Kind == PdfLayoutImageKind.TransparencyGroupFallback)
+            .ToArray();
+        Assert.Equal(expectedFallbacks, fallbacks.Length);
+        if (expectedFallbacks > 0)
+        {
+            Assert.InRange(fallbacks[0].Bounds.Width, 100.9f, 102.1f);
+            Assert.InRange(fallbacks[0].Bounds.Height, 100.9f, 102.1f);
+        }
+    }
+
     [Fact]
     public void Extract_TransparencyGroupFallback_MatchesFullPageRenderCrop()
     {
@@ -9115,7 +9146,10 @@ public class PdfHtmlConverterTest
         return document;
     }
 
-    private static PDDocument CreateSimpleDeviceCmykBlendDocument(bool knockout, bool isolated)
+    private static PDDocument CreateSimpleDeviceCmykBlendDocument(
+        bool knockout,
+        bool isolated,
+        bool complexSource = false)
     {
         PDDocument document = new();
         PDPage page = new();
@@ -9129,6 +9163,11 @@ public class PdfHtmlConverterTest
             sourceContent.SetNonStrokingColor(0f, 0f, 0f, 1f);
             sourceContent.AddRect(25, 25, 50, 50);
             sourceContent.Fill();
+            if (complexSource)
+            {
+                sourceContent.AddRect(20, 20, 5, 5);
+                sourceContent.Fill();
+            }
         }
 
         PDTransparencyGroup outer = new(new PDStream(document));
