@@ -1275,14 +1275,18 @@ public static class PdfLayoutExtractor
 
             if (options.IncludeImageAssets && options.IncludeTransparencyGroupFallbacks)
             {
-                CollectTransparencyGroupFallbacks(collector.KnockoutTransparencyGroupBounds);
+                CollectTransparencyGroupFallbacks(
+                    collector.KnockoutTransparencyGroupBounds
+                        .Select(ExpandKnockoutTransparencyGroupBounds)
+                        .Concat(collector.IsolatedDeviceCmykBlendGroupBounds.Select(
+                            ExpandIsolatedDeviceCmykBlendGroupBounds))
+                        .ToArray());
             }
         }
 
         private void CollectTransparencyGroupFallbacks(IReadOnlyList<PdfLayoutRectangle> groupBounds)
         {
-            PdfLayoutRectangle[] fallbackBounds = MergeTransparencyGroupBounds(groupBounds
-                .Select(ExpandTransparencyGroupBounds))
+            PdfLayoutRectangle[] fallbackBounds = MergeTransparencyGroupBounds(groupBounds)
                 .Where(IsCompactTransparencyGroup)
                 .ToArray();
             if (fallbackBounds.Length == 0)
@@ -1348,13 +1352,23 @@ public static class PdfLayoutExtractor
             }
         }
 
-        private PdfLayoutRectangle ExpandTransparencyGroupBounds(PdfLayoutRectangle bounds)
+        private PdfLayoutRectangle ExpandKnockoutTransparencyGroupBounds(PdfLayoutRectangle bounds)
         {
             const float padding = 18f;
             float left = MathF.Max(0, bounds.X - padding);
             float top = MathF.Max(0, bounds.Y - padding);
             float right = MathF.Min(_width, bounds.Right + padding);
             float bottom = MathF.Min(_height, bounds.Bottom + 3f);
+            return new PdfLayoutRectangle(left, top, right - left, bottom - top);
+        }
+
+        private PdfLayoutRectangle ExpandIsolatedDeviceCmykBlendGroupBounds(PdfLayoutRectangle bounds)
+        {
+            const float padding = 1f;
+            float left = MathF.Max(0, bounds.X - padding);
+            float top = MathF.Max(0, bounds.Y - padding);
+            float right = MathF.Min(_width, bounds.Right + padding);
+            float bottom = MathF.Min(_height, bounds.Bottom + padding);
             return new PdfLayoutRectangle(left, top, right - left, bottom - top);
         }
 
@@ -1401,8 +1415,8 @@ public static class PdfLayoutExtractor
 
         private bool IsCompactTransparencyGroup(PdfLayoutRectangle bounds)
         {
-            return bounds.Width >= 24f &&
-                bounds.Height >= 24f &&
+            return bounds.Width >= 12f &&
+                bounds.Height >= 12f &&
                 bounds.Width * bounds.Height <= _width * _height * 0.65f;
         }
 
@@ -2404,7 +2418,8 @@ public static class PdfLayoutExtractor
         private readonly List<PdfLayoutPaintOperation> _paintOperations = new();
         private readonly Stack<List<PdfLayoutRectangle>> _vectorGroupPathBounds = new();
         private readonly Stack<VectorGroupBuilder> _activeVectorGroups = new();
-        private readonly List<PdfLayoutRectangle> _transparencyGroupBounds = new();
+        private readonly List<PdfLayoutRectangle> _knockoutTransparencyGroupBounds = new();
+        private readonly List<PdfLayoutRectangle> _isolatedDeviceCmykBlendGroupBounds = new();
         private readonly List<SoftMaskedTransparencyGroup> _softMaskedTransparencyGroups = new();
         private bool _reportedShapeAlphaPath;
         private int _nextVectorGroupIndex;
@@ -2448,7 +2463,10 @@ public static class PdfLayoutExtractor
 
         public IReadOnlyList<PdfLayoutPaintOperation> PaintOperations => _paintOperations;
 
-        public IReadOnlyList<PdfLayoutRectangle> KnockoutTransparencyGroupBounds => _transparencyGroupBounds;
+        public IReadOnlyList<PdfLayoutRectangle> KnockoutTransparencyGroupBounds => _knockoutTransparencyGroupBounds;
+
+        public IReadOnlyList<PdfLayoutRectangle> IsolatedDeviceCmykBlendGroupBounds =>
+            _isolatedDeviceCmykBlendGroupBounds;
 
         public IReadOnlyList<SoftMaskedTransparencyGroup> SoftMaskedTransparencyGroups => _softMaskedTransparencyGroups;
 
@@ -2532,7 +2550,17 @@ public static class PdfLayoutExtractor
                         _vectorGroups.Add(completedGroup.Build(_paths.Count - 1, bounds));
                         if (isTransparencyGroup && attributes?.IsKnockout() == true)
                         {
-                            _transparencyGroupBounds.Add(bounds);
+                            _knockoutTransparencyGroupBounds.Add(bounds);
+                        }
+                        else if (isTransparencyGroup &&
+                            attributes?.IsIsolated() == true &&
+                            string.Equals(blendColorSpaceName, "DeviceCMYK", StringComparison.Ordinal) &&
+                            IsCompactIsolatedDeviceCmykBlendGroup(bounds) &&
+                            _vectorGroups.Any(group =>
+                                group.ParentIndex == completedGroup.Index &&
+                                group.BlendMode != BlendMode.NORMAL))
+                        {
+                            _isolatedDeviceCmykBlendGroupBounds.Add(bounds);
                         }
 
                         if (hasLuminositySoftMask &&
@@ -2548,6 +2576,9 @@ public static class PdfLayoutExtractor
 
             base.XObject(xobject);
         }
+
+        private bool IsCompactIsolatedDeviceCmykBlendGroup(PdfLayoutRectangle bounds) =>
+            bounds.Width * bounds.Height <= _cropBox.Width * _cropBox.Height * 0.025f;
 
         private void FlattenSimpleNonKnockoutDeviceCmykBlends(
             VectorGroupBuilder parent,
