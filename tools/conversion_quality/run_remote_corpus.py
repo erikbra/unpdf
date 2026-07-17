@@ -236,6 +236,22 @@ def _validate_expectations(expectations: dict[str, Any], prefix: str) -> None:
                     f"{prefix} expectations.semanticOrderedListItemCountsByPage values must be non-empty positive integer arrays"
                 )
 
+    semantic_mixed_regions_by_page = expectations.get("semanticMixedRegionCountsByPage")
+    if semantic_mixed_regions_by_page is not None:
+        if not isinstance(semantic_mixed_regions_by_page, dict) or not semantic_mixed_regions_by_page:
+            raise ValueError(
+                f"{prefix} expectations.semanticMixedRegionCountsByPage must be a non-empty object"
+            )
+        for page_number, count in semantic_mixed_regions_by_page.items():
+            if not isinstance(page_number, str) or not page_number.isdigit() or int(page_number) < 1:
+                raise ValueError(
+                    f"{prefix} expectations.semanticMixedRegionCountsByPage keys must be positive page numbers"
+                )
+            if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+                raise ValueError(
+                    f"{prefix} expectations.semanticMixedRegionCountsByPage values must be positive integers"
+                )
+
 
 def _validate_https_url(value: str, label: str) -> None:
     parsed = urlparse(value)

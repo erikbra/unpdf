@@ -4768,6 +4768,12 @@ public static class PdfHtmlConverter
                     MathF.Max(0, page.Width - tracks[^1].Right)));
             }
 
+            PdfSemanticColumns? mixedRegions = TryCreateMixedGraphicTextColumns(page, semanticPage);
+            if (mixedRegions != null)
+            {
+                return AddColumnSpanningFigures(mixedRegions);
+            }
+
             if (!TryGetTwoColumnRuns(page, semanticPage, out _, out LineGridColumn[] legacyColumns, out float pitch))
             {
                 return null;
@@ -4832,6 +4838,303 @@ public static class PdfHtmlConverter
                 element.SemanticList != null &&
                 element.Lines.Count > 0)
             .ToArray();
+    }
+
+    private static PdfSemanticColumns? TryCreateMixedGraphicTextColumns(
+        PdfLayoutPage page,
+        PdfSemanticPage semanticPage)
+    {
+        if (page.FormControls.Count > 0 ||
+            semanticPage.Elements.Any(static element =>
+                element.Kind is PdfSemanticElementKind.Table or PdfSemanticElementKind.DefinitionList))
+        {
+            return null;
+        }
+
+        PdfTextRun[] horizontalRuns = page.Runs
+            .Where(static run => !string.IsNullOrWhiteSpace(run.Text))
+            .Where(static run => MathF.Abs(run.Direction) < 0.01f)
+            .ToArray();
+        if (horizontalRuns.Length < 18)
+        {
+            return null;
+        }
+
+        ColumnDetectionRow[] rows = CreateColumnDetectionRows(horizontalRuns);
+        if (rows.Length < 12)
+        {
+            return null;
+        }
+
+        PdfLayoutRectangle[] graphicSeeds = page.Images
+            .Select(VisibleImageBounds)
+            .Concat(page.Paths.Select(static path => path.Bounds))
+            .Where(bounds => IsMixedRegionGraphicSeed(page, bounds))
+            .OrderByDescending(static bounds => bounds.Width * bounds.Height)
+            .ToArray();
+        foreach (PdfLayoutRectangle seed in graphicSeeds)
+        {
+            bool graphicOnLeft = seed.X + seed.Width / 2f < page.Width / 2f;
+            float minimumGap = MathF.Max(6f, page.Width * 0.012f);
+            float regionTop = MathF.Max(0, seed.Y - MathF.Max(8f, page.Height * 0.02f));
+            PdfTextRun[] provisionalText = MixedRegionFragments(
+                rows,
+                regionTop,
+                seed,
+                graphicOnLeft,
+                minimumGap);
+            if (provisionalText.Length < 12)
+            {
+                continue;
+            }
+
+            float textEdge = graphicOnLeft
+                ? Percentile(provisionalText.Select(static run => run.Bounds.X), 0.1f)
+                : Percentile(provisionalText.Select(static run => run.Bounds.Right), 0.9f);
+            float seedEdge = graphicOnLeft ? seed.Right : seed.X;
+            if (graphicOnLeft
+                    ? textEdge - seedEdge < minimumGap
+                    : seedEdge - textEdge < minimumGap)
+            {
+                continue;
+            }
+
+            float provisionalBoundary = (seedEdge + textEdge) / 2f;
+            PdfLayoutRectangle[] localGraphics = page.Images
+                .Select(VisibleImageBounds)
+                .Concat(page.Paths.Select(static path => path.Bounds))
+                .Where(bounds => IsLocalizedMixedRegionGraphic(
+                    page,
+                    seed,
+                    bounds,
+                    provisionalBoundary,
+                    graphicOnLeft))
+                .Append(seed)
+                .ToArray();
+            PdfLayoutRectangle graphicRegion = UnionRectangles(localGraphics);
+            float graphicEdge = graphicOnLeft ? graphicRegion.Right : graphicRegion.X;
+            if (graphicOnLeft
+                    ? textEdge <= graphicEdge + 2f
+                    : textEdge >= graphicEdge - 2f)
+            {
+                continue;
+            }
+
+            float boundary = (graphicEdge + textEdge) / 2f;
+            PdfTextRun[] graphicFragments = MixedRegionColumnFragments(
+                rows,
+                regionTop,
+                boundary,
+                graphicOnLeft)
+                .Where(run => run.Bounds.Bottom >= graphicRegion.Y - 12f)
+                .Where(run => run.Bounds.Y <= graphicRegion.Bottom + 12f)
+                .Where(run => graphicOnLeft
+                    ? run.Bounds.Right <= textEdge - 1f
+                    : run.Bounds.X >= textEdge + 1f)
+                .ToArray();
+            PdfTextRun[] textFragments = MixedRegionColumnFragments(
+                rows,
+                regionTop,
+                boundary,
+                !graphicOnLeft);
+            if (graphicFragments.Length < 3 || textFragments.Length < 12)
+            {
+                continue;
+            }
+
+            float textTop = textFragments.Min(static run => run.Bounds.Y);
+            float textBottom = textFragments.Max(static run => run.Bounds.Bottom);
+            float verticalOverlap = MathF.Max(
+                0,
+                MathF.Min(graphicRegion.Bottom, textBottom) - MathF.Max(graphicRegion.Y, textTop));
+            if (verticalOverlap < MathF.Min(graphicRegion.Height, textBottom - textTop) * 0.45f)
+            {
+                continue;
+            }
+
+            graphicRegion = UnionRectangles(
+                localGraphics.Concat(graphicFragments.Select(static run => run.Bounds)));
+            graphicEdge = graphicOnLeft ? graphicRegion.Right : graphicRegion.X;
+            float gutterLeft = graphicOnLeft ? graphicEdge : textEdge;
+            float gutterRight = graphicOnLeft ? textEdge : graphicEdge;
+            if (gutterRight <= gutterLeft + 1f)
+            {
+                continue;
+            }
+
+            float overlapTolerance = MathF.Max(1f, page.Width * 0.002f);
+            if (horizontalRuns
+                .Where(run => run.Bounds.Y >= graphicRegion.Y - overlapTolerance)
+                .Where(run => run.Bounds.Y <= MathF.Max(graphicRegion.Bottom, textBottom) + overlapTolerance)
+                .Any(run =>
+                    run.Bounds.X < gutterLeft - overlapTolerance &&
+                    run.Bounds.Right > gutterRight + overlapTolerance))
+            {
+                continue;
+            }
+
+            boundary = (gutterLeft + gutterRight) / 2f;
+            PdfTextRun[] leftFragments = MixedRegionColumnFragments(
+                rows,
+                MathF.Min(regionTop, graphicRegion.Y),
+                boundary,
+                takeLeft: true);
+            PdfTextRun[] rightFragments = MixedRegionColumnFragments(
+                rows,
+                MathF.Min(regionTop, graphicRegion.Y),
+                boundary,
+                takeLeft: false);
+            if (leftFragments.Length == 0 ||
+                rightFragments.Length == 0 ||
+                (graphicOnLeft ? rightFragments : leftFragments).Length < 12)
+            {
+                continue;
+            }
+
+            LineGridColumn leftColumn = CreateLineGridColumn(leftFragments);
+            LineGridColumn rightColumn = CreateLineGridColumn(rightFragments);
+            float leftInset = graphicOnLeft
+                ? MathF.Max(0, MathF.Min(graphicRegion.X, Percentile(leftFragments.Select(static run => run.Bounds.X), 0.1f)))
+                : MathF.Max(0, Percentile(leftFragments.Select(static run => run.Bounds.X), 0.1f));
+            float contentRight = graphicOnLeft
+                ? Percentile(rightFragments.Select(static run => run.Bounds.Right), 0.9f)
+                : MathF.Max(graphicRegion.Right, Percentile(rightFragments.Select(static run => run.Bounds.Right), 0.9f));
+            float rightInset = MathF.Max(0, page.Width - contentRight);
+            if (gutterLeft - leftInset < page.Width * 0.12f ||
+                page.Width - rightInset - gutterRight < page.Width * 0.12f)
+            {
+                continue;
+            }
+
+            float mixedTop = MathF.Min(
+                graphicRegion.Y,
+                MathF.Min(
+                    leftFragments.Min(static run => run.Bounds.Y),
+                    rightFragments.Min(static run => run.Bounds.Y)));
+            PdfTextRun[] leadingRuns = horizontalRuns
+                .Where(run => run.Bounds.Bottom < mixedTop - 1f)
+                .OrderBy(static run => run.Bounds.Y)
+                .ThenBy(static run => run.Bounds.X)
+                .ToArray();
+            string accessibleText = string.Join(
+                ' ',
+                graphicFragments
+                    .OrderBy(static run => run.Bounds.Y)
+                    .ThenBy(static run => run.Bounds.X)
+                    .SelectMany(static run => run.Text.Split(
+                        [' ', '\t', '\r', '\n'],
+                        StringSplitOptions.RemoveEmptyEntries)));
+            PdfSemanticColumns columns = new(
+                page,
+                semanticPage,
+                leadingRuns,
+                [
+                    new SemanticColumnTrack(leftColumn, leftInset, gutterLeft),
+                    new SemanticColumnTrack(rightColumn, gutterRight, page.Width - rightInset)
+                ],
+                [new SemanticColumnGutter(gutterLeft, gutterRight)],
+                SemanticColumnListElements(semanticPage),
+                leftInset,
+                rightInset)
+            {
+                ColumnFigures =
+                [
+                    new PdfSemanticColumnRegionFigure(
+                        graphicRegion,
+                        graphicOnLeft ? 0 : 1,
+                        accessibleText)
+                ]
+            };
+            return columns;
+        }
+
+        return null;
+    }
+
+    private static bool IsMixedRegionGraphicSeed(
+        PdfLayoutPage page,
+        PdfLayoutRectangle bounds)
+    {
+        if (bounds.Width < page.Width * 0.12f ||
+            bounds.Width > page.Width * 0.50f ||
+            bounds.Height < page.Height * 0.20f ||
+            bounds.Height > page.Height * 0.92f)
+        {
+            return false;
+        }
+
+        float center = bounds.X + bounds.Width / 2f;
+        return center <= page.Width * 0.42f || center >= page.Width * 0.58f;
+    }
+
+    private static bool IsLocalizedMixedRegionGraphic(
+        PdfLayoutPage page,
+        PdfLayoutRectangle seed,
+        PdfLayoutRectangle candidate,
+        float boundary,
+        bool graphicOnLeft)
+    {
+        float center = candidate.X + candidate.Width / 2f;
+        if (candidate.Width > page.Width * 0.55f ||
+            candidate.Height > page.Height * 0.95f ||
+            graphicOnLeft && center >= boundary ||
+            !graphicOnLeft && center <= boundary)
+        {
+            return false;
+        }
+
+        return VerticalGap(seed, candidate) <= MathF.Max(12f, page.Height * 0.04f) &&
+            HorizontalGap(seed, candidate) <= page.Width * 0.06f;
+    }
+
+    private static PdfTextRun[] MixedRegionFragments(
+        IReadOnlyList<ColumnDetectionRow> rows,
+        float regionTop,
+        PdfLayoutRectangle graphic,
+        bool graphicOnLeft,
+        float minimumGap)
+    {
+        return rows
+            .Where(row => row.Top >= regionTop)
+            .Select(row => CombineColumnLine(row.Runs.Where(run =>
+            {
+                float center = run.Bounds.X + run.Bounds.Width / 2f;
+                return graphicOnLeft
+                    ? center >= graphic.Right + minimumGap
+                    : center <= graphic.X - minimumGap;
+            })))
+            .Where(static run => run != null)
+            .Cast<PdfTextRun>()
+            .ToArray();
+    }
+
+    private static PdfTextRun[] MixedRegionColumnFragments(
+        IReadOnlyList<ColumnDetectionRow> rows,
+        float regionTop,
+        float boundary,
+        bool takeLeft)
+    {
+        return rows
+            .Where(row => row.Top >= regionTop)
+            .Select(row => CombineColumnLine(row.Runs.Where(run =>
+            {
+                float center = run.Bounds.X + run.Bounds.Width / 2f;
+                return takeLeft ? center < boundary : center >= boundary;
+            })))
+            .Where(static run => run != null)
+            .Cast<PdfTextRun>()
+            .ToArray();
+    }
+
+    private static LineGridColumn CreateLineGridColumn(IReadOnlyList<PdfTextRun> runs)
+    {
+        LineGridColumn column = new(Percentile(runs.Select(static run => run.Bounds.X), 0.1f));
+        foreach (PdfTextRun run in runs)
+        {
+            column.Add(run);
+        }
+
+        return column;
     }
 
     private static PdfLayoutRectangle[] CaptionedTopSpanningFigureRegions(
@@ -5689,6 +5992,8 @@ public static class PdfHtmlConverter
             .Where(static bounds => bounds.Width >= 4f && bounds.Height >= 4f)
             .Where(bounds => !columns.SpanningFigures.Any(figure =>
                 RectanglesIntersect(bounds, figure.Region, 2f)))
+            .Where(bounds => !columns.ColumnFigures.Any(figure =>
+                RectanglesIntersect(bounds, figure.Region, 2f)))
             .ToArray();
         PdfLayoutRectangle[] leadingImageRegions = imageRegions
             .Where(region => region.Y < columnTop)
@@ -5699,7 +6004,19 @@ public static class PdfHtmlConverter
             .Append(columnTop)
             .Min();
         bool hasLeadingContent = columns.LeadingRuns.Count > 0 || leadingImageRegions.Length > 0;
-        html.Append("      <div class=\"pdf-semantic-columns\" style=\"--pdf-semantic-column-count:")
+        html.Append("      <div class=\"pdf-semantic-columns");
+        if (columns.IsMixedRegions)
+        {
+            html.Append(" pdf-semantic-mixed-regions");
+        }
+        html.Append("\"");
+        if (columns.IsMixedRegions)
+        {
+            html.Append(" data-source-page=\"")
+                .Append(columns.Page.PageNumber.ToString(CultureInfo.InvariantCulture))
+                .Append('"');
+        }
+        html.Append(" style=\"--pdf-semantic-column-count:")
             .Append(columns.Columns.Count.ToString(CultureInfo.InvariantCulture))
             .Append(";--pdf-semantic-columns-left:")
             .Append(CssPoints(columns.LeftInset * scale))
@@ -5808,6 +6125,25 @@ public static class PdfHtmlConverter
                 .Append(bodyGridRow.ToString(CultureInfo.InvariantCulture))
                 .AppendLine("\">");
             SemanticColumnTrack track = columns.Tracks[columnIndex];
+            foreach (PdfSemanticColumnRegionFigure figure in columns.ColumnFigures
+                .Where(figure => figure.ColumnIndex == columnIndex))
+            {
+                WriteSemanticFigure(
+                    html,
+                    columns.Page,
+                    columns.SemanticPage,
+                    figure.Region,
+                    imageAssets,
+                    scale,
+                    inline: false,
+                    includeAllText: true,
+                    additionalClass: "pdf-semantic-column-positioned-figure pdf-semantic-mixed-region-figure",
+                    additionalStyle: "left:" + CssPoints((figure.Region.X - track.Left) * scale) +
+                        ";top:" + CssPoints((figure.Region.Y - columnTop) * scale),
+                    accessibleText: figure.AccessibleText,
+                    constrainSourceDecorationsToRegion: true);
+            }
+
             foreach (PdfLayoutRectangle region in imageRegions.Where(region =>
                 region.Y >= columnTop &&
                 ColumnIndexAt(columns.Boundaries, region.X + region.Width / 2f) == columnIndex &&
@@ -5849,6 +6185,11 @@ public static class PdfHtmlConverter
                 .Concat(columns.SpanningFigures
                     .Where(static figure => figure.Caption != null)
                     .SelectMany(static figure => SemanticElementGlyphs(figure.Caption!)))
+                .Concat(columns.ColumnFigures
+                    .Where(figure => figure.ColumnIndex == columnIndex)
+                    .SelectMany(figure => FigureRegionTextRuns(columns.Page, figure.Region, includeAllText: true)
+                        .Where(run => RectangleContainsCenter(figure.Region, run.PageBounds)))
+                    .SelectMany(static run => run.Glyphs))
                 .ToHashSet();
             PdfLayoutRectangle[] tableCells = tables
                 .SelectMany(static table => table.TableRows)
@@ -7083,16 +7424,24 @@ public static class PdfHtmlConverter
         bool columnSpanning = false,
         string? additionalClass = null,
         string? additionalStyle = null,
-        bool includeSourceDecorations = true)
+        bool includeSourceDecorations = true,
+        string? accessibleText = null,
+        bool constrainSourceDecorationsToRegion = false)
     {
         PdfLayoutImage[] images = page.Images
             .Where(image => RectanglesIntersect(VisibleImageBounds(image), region, 2f))
             .ToArray();
         PdfLayoutPath[] paths = includeSourceDecorations
-            ? FigureRegionPaths(page, semanticPage, region).ToArray()
+            ? FigureRegionPaths(page, semanticPage, region)
+                .Where(path => !constrainSourceDecorationsToRegion ||
+                    IsLocalizedFigureDecoration(path.Bounds, region))
+                .ToArray()
             : [];
         PdfTextRun[] textRuns = includeSourceDecorations
-            ? FigureRegionTextRuns(page, region, includeAllText).ToArray()
+            ? FigureRegionTextRuns(page, region, includeAllText)
+                .Where(run => !constrainSourceDecorationsToRegion ||
+                    RectangleContainsCenter(region, run.PageBounds))
+                .ToArray()
             : [];
         if (images.Length == 0 && paths.Length == 0 && textRuns.Length == 0)
         {
@@ -7116,7 +7465,17 @@ public static class PdfHtmlConverter
             html.Append(' ')
                 .Append(HtmlAttribute(additionalClass));
         }
-        html.Append("\" data-source-page=\"")
+        if (!string.IsNullOrWhiteSpace(accessibleText))
+        {
+            html.Append("\" aria-label=\"")
+                .Append(HtmlAttribute(accessibleText))
+                .Append("\"");
+        }
+        else
+        {
+            html.Append('"');
+        }
+        html.Append(" data-source-page=\"")
             .Append(page.PageNumber.ToString(CultureInfo.InvariantCulture))
             .Append("\" data-source-top=\"")
             .Append(HtmlAttribute(CssPoints(region.Y)))
@@ -7179,6 +7538,17 @@ public static class PdfHtmlConverter
             .Append(tagName)
             .AppendLine(">");
         return true;
+    }
+
+    private static bool IsLocalizedFigureDecoration(
+        PdfLayoutRectangle decoration,
+        PdfLayoutRectangle figure)
+    {
+        float widthLimit = MathF.Max(figure.Width * 1.35f, figure.Width + 8f);
+        float heightLimit = MathF.Max(figure.Height * 1.35f, figure.Height + 8f);
+        return decoration.Width <= widthLimit &&
+            decoration.Height <= heightLimit &&
+            RectanglesIntersect(decoration, figure, 2f);
     }
 
     private static IEnumerable<PdfLayoutPath> FigureRegionPaths(
@@ -14698,6 +15068,8 @@ public static class PdfHtmlConverter
 
         public IReadOnlyList<PdfSemanticColumnFigure> SpanningFigures { get; set; } = [];
 
+        public IReadOnlyList<PdfSemanticColumnRegionFigure> ColumnFigures { get; set; } = [];
+
         public IReadOnlyList<SemanticColumnGutter> Gutters { get; }
 
         public IReadOnlyList<float> Boundaries { get; }
@@ -14707,6 +15079,8 @@ public static class PdfHtmlConverter
         public float LeftInset { get; }
 
         public float RightInset { get; }
+
+        public bool IsMixedRegions => ColumnFigures.Count > 0;
     }
 
     private readonly record struct SemanticColumnItem(
@@ -14717,6 +15091,11 @@ public static class PdfHtmlConverter
     private readonly record struct PdfSemanticColumnFigure(
         PdfLayoutRectangle Region,
         PdfSemanticElement? Caption);
+
+    private readonly record struct PdfSemanticColumnRegionFigure(
+        PdfLayoutRectangle Region,
+        int ColumnIndex,
+        string AccessibleText);
 
     private readonly record struct SemanticColumnTrack(
         LineGridColumn Column,

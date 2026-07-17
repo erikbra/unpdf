@@ -251,7 +251,11 @@ public static class HtmlReviewArtifactGenerator
             example.Expectations?.SemanticOrderedListItemCountsByPage ?? [];
         Dictionary<int, List<int>> expectedUnorderedByPage =
             example.Expectations?.SemanticUnorderedListItemCountsByPage ?? [];
-        if (expectedOrderedByPage.Count == 0 && expectedUnorderedByPage.Count == 0)
+        Dictionary<int, int> expectedMixedRegionsByPage =
+            example.Expectations?.SemanticMixedRegionCountsByPage ?? [];
+        if (expectedOrderedByPage.Count == 0 &&
+            expectedUnorderedByPage.Count == 0 &&
+            expectedMixedRegionsByPage.Count == 0)
         {
             return;
         }
@@ -277,11 +281,58 @@ public static class HtmlReviewArtifactGenerator
             "ul",
             "unordered",
             failures);
+        ValidateSemanticMixedRegionExpectations(
+            example,
+            dom,
+            expectedMixedRegionsByPage,
+            failures);
 
         if (failures.Count > 0)
         {
             throw new InvalidOperationException(
                 $"HTML review semantic expectations failed for '{example.Id}': {string.Join("; ", failures)}.");
+        }
+    }
+
+    private static void ValidateSemanticMixedRegionExpectations(
+        HtmlReviewManifestExample example,
+        XDocument dom,
+        IReadOnlyDictionary<int, int> expectedByPage,
+        List<string> failures)
+    {
+        foreach ((int pageNumber, int expectedCount) in expectedByPage)
+        {
+            if (pageNumber < 1 || expectedCount < 1)
+            {
+                throw new InvalidOperationException(
+                    $"HTML review example '{example.Id}' has an invalid semantic mixed-region expectation for page {pageNumber}.");
+            }
+
+            int actual = dom.Descendants()
+                .Where(element =>
+                    element.Attribute("data-source-page")?.Value == pageNumber.ToString() &&
+                    (element.Attribute("class")?.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                        .Contains("pdf-semantic-mixed-regions", StringComparer.Ordinal) ?? false))
+                .Count(element =>
+                {
+                    XElement[] columns = element.Elements()
+                        .Where(child => child.Attribute("class")?.Value.Split(
+                                ' ',
+                                StringSplitOptions.RemoveEmptyEntries)
+                            .Contains("pdf-semantic-column", StringComparer.Ordinal) ?? false)
+                        .ToArray();
+                    return columns.Length == 2 &&
+                        columns.SelectMany(static column => column.DescendantsAndSelf())
+                            .Any(descendant => descendant.Attribute("class")?.Value.Split(
+                                    ' ',
+                                    StringSplitOptions.RemoveEmptyEntries)
+                                .Contains("pdf-semantic-mixed-region-figure", StringComparer.Ordinal) ?? false);
+                });
+            if (actual != expectedCount)
+            {
+                failures.Add(
+                    $"semantic mixed-region count on page {pageNumber} was {actual}, expected {expectedCount}");
+            }
         }
     }
 
@@ -756,4 +807,6 @@ public sealed class HtmlReviewExpectations
     public Dictionary<int, List<int>> SemanticOrderedListItemCountsByPage { get; set; } = [];
 
     public Dictionary<int, List<int>> SemanticUnorderedListItemCountsByPage { get; set; } = [];
+
+    public Dictionary<int, int> SemanticMixedRegionCountsByPage { get; set; } = [];
 }

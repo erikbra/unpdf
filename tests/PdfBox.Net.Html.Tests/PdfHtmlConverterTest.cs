@@ -1632,6 +1632,102 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_SemanticContinuousFlow_PreservesMixedDiagramAndTextRegions()
+    {
+        PdfLayoutDocument layout = CreateMixedDiagramAndTextLayoutFixture();
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(html.Html);
+
+        XElement grid = Assert.Single(ElementsByClass(dom, "pdf-semantic-mixed-regions"));
+        Assert.Equal("1", grid.Attribute("data-source-page")?.Value);
+        XElement[] columns = grid.Elements()
+            .Where(element => HasClass(element, "pdf-semantic-column"))
+            .ToArray();
+        Assert.Equal(2, columns.Length);
+        XElement figure = Assert.Single(columns[0].Elements(), element =>
+            HasClass(element, "pdf-semantic-mixed-region-figure"));
+        Assert.Contains("LOOP CORE", figure.Attribute("aria-label")?.Value, StringComparison.Ordinal);
+        Assert.Contains("DELTA RIDGE", figure.Attribute("aria-label")?.Value, StringComparison.Ordinal);
+        Assert.Contains(figure.Descendants(), static element =>
+            element.Name.LocalName == "path" && element.Attribute("data-path-index")?.Value == "43");
+        Assert.Contains(figure.Descendants("text"), element => element.Value == "ARCH FLOW");
+        Assert.DoesNotContain("Instruction row", columns[0].Value, StringComparison.Ordinal);
+        Assert.Contains("Instruction row 01", columns[1].Value, StringComparison.Ordinal);
+        Assert.Contains("Instruction row 18", columns[1].Value, StringComparison.Ordinal);
+        Assert.True(
+            grid.Descendants().ToList().IndexOf(figure) <
+            grid.Descendants().ToList().FindIndex(element =>
+                element.Value.Contains("Instruction row 01", StringComparison.Ordinal)));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-layout-fallback-page"));
+    }
+
+    [Fact]
+    public async Task Convert_SemanticContinuousFlow_RendersCompactNonOverlappingMixedRegions()
+    {
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(
+            CreateMixedDiagramAndTextLayoutFixture(),
+            new PdfHtmlOptions
+            {
+                TextMode = PdfHtmlTextMode.Semantic,
+                SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+            });
+        using TempDirectory tempDirectory = new();
+        html.WriteToDirectory(tempDirectory.Path);
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage page = await browser.NewPageAsync(new BrowserNewPageOptions
+        {
+            ViewportSize = new ViewportSize { Width = 1000, Height = 1200 }
+        });
+        await page.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+
+        MixedRegionRenderMetrics metrics = await page.EvaluateAsync<MixedRegionRenderMetrics>(
+            """
+            () => {
+              const grid = document.querySelector(".pdf-semantic-mixed-regions");
+              const columns = Array.from(grid.querySelectorAll(":scope > .pdf-semantic-column"));
+              const figure = grid.querySelector(".pdf-semantic-mixed-region-figure");
+              const instruction = Array.from(columns[1].querySelectorAll(".pdf-semantic-column-run"))
+                .find(element => element.textContent.includes("Instruction row 01"));
+              const gridBox = grid.getBoundingClientRect();
+              const leftBox = columns[0].getBoundingClientRect();
+              const rightBox = columns[1].getBoundingClientRect();
+              const figureBox = figure.getBoundingClientRect();
+              const instructionBox = instruction.getBoundingClientRect();
+              return {
+                gridHeight: gridBox.height,
+                gridLeft: gridBox.left,
+                gridRight: gridBox.right,
+                leftRight: leftBox.right,
+                rightLeft: rightBox.left,
+                figureLeft: figureBox.left,
+                figureRight: figureBox.right,
+                figureTop: figureBox.top,
+                figureBottom: figureBox.bottom,
+                instructionLeft: instructionBox.left,
+                instructionTop: instructionBox.top
+              };
+            }
+            """);
+
+        Assert.True(metrics.GridHeight < 800);
+        Assert.True(metrics.FigureLeft >= metrics.GridLeft - 0.5);
+        Assert.True(metrics.FigureRight <= metrics.LeftRight + 0.5);
+        Assert.True(metrics.LeftRight < metrics.RightLeft);
+        Assert.True(metrics.FigureRight < metrics.InstructionLeft);
+        Assert.True(metrics.FigureTop <= metrics.InstructionTop + 24);
+        Assert.True(metrics.FigureBottom > metrics.InstructionTop + 300);
+        Assert.True(metrics.GridRight <= 1000.5);
+    }
+
+    [Fact]
     public void Convert_SemanticTwoColumnRule_RemainsVectorAndIsNotPromoted()
     {
         PdfLayoutDocument layout = CreateSideBySideSemanticRuleLayoutFixture();
@@ -6995,6 +7091,31 @@ public class PdfHtmlConverterTest
         public double[] Widths { get; set; } = [];
     }
 
+    private sealed class MixedRegionRenderMetrics
+    {
+        public double GridHeight { get; set; }
+
+        public double GridLeft { get; set; }
+
+        public double GridRight { get; set; }
+
+        public double LeftRight { get; set; }
+
+        public double RightLeft { get; set; }
+
+        public double FigureLeft { get; set; }
+
+        public double FigureRight { get; set; }
+
+        public double FigureTop { get; set; }
+
+        public double FigureBottom { get; set; }
+
+        public double InstructionLeft { get; set; }
+
+        public double InstructionTop { get; set; }
+    }
+
     private sealed class BrowserRenderComparison
     {
         public BrowserRenderComparison(List<string> mismatches, byte[] browserPagePng, byte[] pdfPagePng)
@@ -8095,6 +8216,32 @@ public class PdfHtmlConverterTest
             [],
             []);
         return new PdfLayoutDocument([page], []);
+    }
+
+    private static PdfLayoutDocument CreateMixedDiagramAndTextLayoutFixture()
+    {
+        List<PdfTextLine> lines =
+        [
+            CreateScientificFixtureLine("Mixed Region Reference", 188f, 36f, 236f, 14f, "Times-Bold"),
+            CreateScientificFixtureLine("LOOP CORE", 82f, 112f, 92f, 10f, "Helvetica-Bold"),
+            CreateScientificFixtureLine("DELTA RIDGE", 82f, 286f, 104f, 10f, "Helvetica-Bold"),
+            CreateScientificFixtureLine("ARCH FLOW", 82f, 486f, 88f, 10f, "Helvetica-Bold")
+        ];
+        for (int index = 0; index < 18; index++)
+        {
+            lines.Add(CreateScientificFixtureLine(
+                $"Instruction row {index + 1:00} remains in the dense prose region.",
+                282f,
+                100f + index * 22f,
+                258f));
+        }
+
+        PdfLayoutColor diagramFill = new(0.88f, 0.92f, 0.97f, 1f, "DeviceRGB");
+        PdfLayoutPath diagram = CreateFilledRectanglePath(
+            43,
+            new PdfLayoutRectangle(60f, 88f, 160f, 430f),
+            diagramFill);
+        return CreateSemanticHtmlFixture(lines, [diagram]);
     }
 
     private static PdfLayoutDocument CreateSideBySideSemanticRuleLayoutFixture()
