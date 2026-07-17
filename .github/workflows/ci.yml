@@ -35,9 +35,43 @@ jobs:
           install --with-deps chromium
       - name: Test
         run: dotnet test Unpdf.slnx --configuration Release --no-build --nologo
+      - name: Test deterministic browser-wasm conversion
+        run: >-
+          dotnet test
+          tests/PdfBox.Net.Html.Tests/PdfBox.Net.Html.Tests.csproj
+          --configuration Release
+          --no-build
+          --nologo
+          --filter
+          'FullyQualifiedName~WasmBrowserSmokeTest.BrowserLite_UploadedPdf_IsConvertedWithoutNetworkRequests'
+          --logger 'console;verbosity=detailed'
       - name: Verify single-file CLI
         run: eng/verify-unpdf-single-file.sh linux-x64
       - name: Verify NativeAOT CLI
         run: eng/verify-unpdf-nativeaot.sh linux-x64
-      - name: Publish WebAssembly sample
-        run: dotnet publish samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj --configuration Release --no-restore
+      - name: Publish browser-wasm application
+        run: >-
+          dotnet publish
+          samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj
+          --configuration Release
+          --no-restore
+          --output artifacts/wasm-publish
+      - name: Check browser payload budget
+        run: |
+          status=0
+          python3 eng/wasm_payload_report.py \
+            --publish-directory artifacts/wasm-publish/wwwroot \
+            --baseline eng/wasm-payload-baseline.json \
+            --json artifacts/wasm-payload/payload-report.json \
+            --markdown artifacts/wasm-payload/payload-report.md || status=$?
+          if test -f artifacts/wasm-payload/payload-report.md; then
+            cat artifacts/wasm-payload/payload-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+      - name: Upload browser payload report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: wasm-payload-report
+          path: artifacts/wasm-payload
+          if-no-files-found: warn

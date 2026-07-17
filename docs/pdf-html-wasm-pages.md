@@ -33,8 +33,29 @@ fingerprinted framework assets retain theirs.
 The workflow verifies the deployed root and application documents byte for
 byte, confirms the sample PDF is public, and checks that GitHub Pages serves a
 framework binary with the `application/wasm` media type. The ordinary CI build
-continues to run the Playwright conversion test that asserts no network
-requests occur after a local PDF is selected.
+publishes the `browser-wasm` application independently, then runs the
+Playwright conversion test against a deterministic one-page fixture. The test
+asserts expected text and page structure, records conversion duration, and
+states in its output that the PDF never leaves the browser after selection.
+
+Both CI and the Pages publication produce `wasm-payload-report` artifacts with
+machine-readable JSON and a Markdown summary of every framework asset's raw and
+Brotli size. The checked-in `eng/wasm-payload-baseline.json` is a ratchet:
+unexpected new assets or growth beyond its small build-noise allowance fail
+the workflow. When an intentional dependency or application change affects the
+payload, publish locally and review the report before updating the baseline:
+
+```sh
+dotnet publish samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj \
+  --configuration Release --output artifacts/wasm-publish
+python3 eng/wasm_payload_report.py \
+  --publish-directory artifacts/wasm-publish/wwwroot \
+  --baseline eng/wasm-payload-baseline.json \
+  --update-baseline
+```
+
+Baseline growth should be committed with its explanation. Durable reductions
+should ratchet the baseline down so the saved bytes cannot silently return.
 
 Disabling or removing this workflow does not affect package build or test CI.
 The current preview is public and has no telemetry, upload endpoint, or server
