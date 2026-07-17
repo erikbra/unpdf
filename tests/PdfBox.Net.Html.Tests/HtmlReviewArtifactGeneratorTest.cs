@@ -297,6 +297,118 @@ public sealed class HtmlReviewArtifactGeneratorTest
     }
 
     [Fact]
+    public async Task AnalyzeAsync_ExcludesPageBackgroundsFromOverlapChecks()
+    {
+        using TempDirectory tempDirectory = new();
+        string sourcePdf = Path.Combine(tempDirectory.Path, "source.pdf");
+        PdfLayoutDocument layout;
+        using (PDDocument document = CreateTextDocument())
+        {
+            document.Save(sourcePdf);
+            layout = PdfLayoutExtractor.Extract(document);
+        }
+
+        string htmlDirectory = Path.Combine(tempDirectory.Path, "html");
+        Directory.CreateDirectory(htmlDirectory);
+        File.WriteAllText(
+            Path.Combine(htmlDirectory, "index.html"),
+            """
+            <!doctype html>
+            <html lang="en">
+            <body style="margin:0">
+              <section class="pdf-page" data-page-number="1" style="position:relative;width:612pt;height:792pt;overflow:hidden">
+                <div class="pdf-image" style="position:absolute;left:0;top:0;width:612pt;height:700pt"></div>
+                <svg viewBox="0 0 612 792" style="position:absolute;inset:0;width:612pt;height:792pt">
+                  <path data-path-index="0" d="M0 0H612V792H0Z" />
+                </svg>
+                <span class="pdf-text-run" style="position:absolute;left:72pt;top:80pt;font-size:12pt">Review artifact sample</span>
+              </section>
+            </body>
+            </html>
+            """);
+
+        PdfHtmlQualityReport report = await new PdfHtmlQualityProbe().AnalyzeAsync(new PdfHtmlQualityProbeOptions(
+            sourcePdf,
+            htmlDirectory,
+            layout,
+            Path.Combine(tempDirectory.Path, "quality"),
+            MaxPages: 1),
+            TestContext.Current.CancellationToken);
+
+        PdfHtmlQualityCheck imageCheck = Assert.Single(
+            report.Checks,
+            check => check.Id == "text-image-overlap" && check.PageNumber == 1);
+        Assert.Equal("passed", imageCheck.Status);
+        Assert.Equal(0d, imageCheck.Metrics["overlapCount"]);
+        Assert.Equal(1d, imageCheck.Metrics["backgroundImageCount"]);
+        Assert.Equal(0d, imageCheck.Metrics["overlapCandidateImageCount"]);
+
+        PdfHtmlQualityCheck vectorCheck = Assert.Single(
+            report.Checks,
+            check => check.Id == "text-vector-overlap" && check.PageNumber == 1);
+        Assert.Equal("passed", vectorCheck.Status);
+        Assert.Equal(0d, vectorCheck.Metrics["overlapCount"]);
+        Assert.Equal(1d, vectorCheck.Metrics["backgroundVectorPathCount"]);
+        Assert.Equal(0d, vectorCheck.Metrics["overlapCandidateVectorPathCount"]);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_StillReportsOrdinaryContentObjectOverlaps()
+    {
+        using TempDirectory tempDirectory = new();
+        string sourcePdf = Path.Combine(tempDirectory.Path, "source.pdf");
+        PdfLayoutDocument layout;
+        using (PDDocument document = CreateTextDocument())
+        {
+            document.Save(sourcePdf);
+            layout = PdfLayoutExtractor.Extract(document);
+        }
+
+        string htmlDirectory = Path.Combine(tempDirectory.Path, "html");
+        Directory.CreateDirectory(htmlDirectory);
+        File.WriteAllText(
+            Path.Combine(htmlDirectory, "index.html"),
+            """
+            <!doctype html>
+            <html lang="en">
+            <body style="margin:0">
+              <section class="pdf-page" data-page-number="1" style="position:relative;width:612pt;height:792pt;overflow:hidden">
+                <div class="pdf-image" style="position:absolute;left:68pt;top:76pt;width:180pt;height:30pt"></div>
+                <svg viewBox="0 0 180 30" style="position:absolute;left:68pt;top:76pt;width:180pt;height:30pt">
+                  <path data-path-index="0" d="M0 0H180V30H0Z" />
+                </svg>
+                <span class="pdf-text-run" style="position:absolute;left:72pt;top:80pt;font-size:12pt">Review artifact sample</span>
+              </section>
+            </body>
+            </html>
+            """);
+
+        PdfHtmlQualityReport report = await new PdfHtmlQualityProbe().AnalyzeAsync(new PdfHtmlQualityProbeOptions(
+            sourcePdf,
+            htmlDirectory,
+            layout,
+            Path.Combine(tempDirectory.Path, "quality"),
+            MaxPages: 1),
+            TestContext.Current.CancellationToken);
+
+        PdfHtmlQualityCheck imageCheck = Assert.Single(
+            report.Checks,
+            check => check.Id == "text-image-overlap" && check.PageNumber == 1);
+        Assert.Equal("needs-review", imageCheck.Status);
+        Assert.Equal(1d, imageCheck.Metrics["overlapCount"]);
+        Assert.Equal(0d, imageCheck.Metrics["backgroundImageCount"]);
+        Assert.Equal(1d, imageCheck.Metrics["overlapCandidateImageCount"]);
+
+        PdfHtmlQualityCheck vectorCheck = Assert.Single(
+            report.Checks,
+            check => check.Id == "text-vector-overlap" && check.PageNumber == 1);
+        Assert.Equal("needs-review", vectorCheck.Status);
+        Assert.Equal(1d, vectorCheck.Metrics["overlapCount"]);
+        Assert.Equal(0d, vectorCheck.Metrics["backgroundVectorPathCount"]);
+        Assert.Equal(1d, vectorCheck.Metrics["overlapCandidateVectorPathCount"]);
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_DetectsContextualJoiningOfAdjacentSourceWords()
     {
         using TempDirectory tempDirectory = new();
