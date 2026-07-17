@@ -929,6 +929,42 @@ public class PdfLayoutExtractorTest
     }
 
     [Fact]
+    public void Extract_JmlrVectorFontsRetainPositionedGlyphOutlines()
+    {
+        using PDDocument document = Loader.LoadPDF(Path.Combine(
+            AppContext.BaseDirectory,
+            "Fixtures",
+            "jmlr-lda-page-11.pdf"));
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeFontAssets = true,
+            IncludePaths = true
+        });
+
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        PdfTextGlyph[] outlined = page.Glyphs
+            .Where(static glyph => glyph.Outline is { Count: > 0 })
+            .ToArray();
+        Assert.True(outlined.Length > 1800);
+        Assert.Contains(
+            outlined,
+            static glyph => glyph.Text == "p" &&
+                glyph.FontName.Contains("Times", StringComparison.Ordinal));
+        Assert.Contains(
+            outlined,
+            static glyph => glyph.Text == "θ" &&
+                glyph.FontName.Contains("Symbol", StringComparison.Ordinal));
+        PdfTextGlyph timesGlyph = outlined.First(static glyph =>
+            glyph.Text == "p" && glyph.FontName.Contains("Times", StringComparison.Ordinal));
+        PdfTextGlyph symbolGlyph = outlined.First(static glyph =>
+            glyph.Text == "θ" && glyph.FontName.Contains("Symbol", StringComparison.Ordinal));
+        Assert.False(timesGlyph.OutlineIsExact);
+        Assert.False(symbolGlyph.OutlineIsExact);
+        Assert.All(outlined, static glyph => Assert.False(glyph.UsesBrowserFontAsset));
+    }
+
+    [Fact]
     public void Extract_RepeatedUnsupportedFontReportsOneDiagnosticPerDocument()
     {
         using PDDocument document = CreateUnnamedType3TextDocument(

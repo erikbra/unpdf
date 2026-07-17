@@ -17,9 +17,14 @@ public sealed record PdfTextGlyph(
     public PdfLayoutRectangle PageBounds { get; init; } = Bounds;
 
     /// <summary>
-    /// Gets the optional PDF glyph outline in normalized page coordinates when the embedded font cannot be used by a browser.
+    /// Gets the optional glyph outline in normalized page coordinates when the PDF font cannot be used by a browser.
     /// </summary>
     public IReadOnlyList<PdfLayoutPathCommand>? Outline { get; init; }
+
+    /// <summary>
+    /// Gets whether <see cref="Outline"/> comes from an embedded source font rather than a PDF font substitution.
+    /// </summary>
+    public bool OutlineIsExact { get; init; } = true;
 
     /// <summary>
     /// Gets whether the glyph's exact PDF font has been exported as a browser-loadable asset.

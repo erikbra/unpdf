@@ -1947,6 +1947,7 @@ public static class PdfLayoutExtractor
             {
                 PageBounds = pageBounds,
                 Outline = hasBrowserFontAsset ? null : TryCreateGlyphOutline(position, font),
+                OutlineIsExact = HasExactGlyphOutlineSource(font),
                 UsesBrowserFontAsset = hasBrowserFontAsset,
                 IsPainted = textPaintStates.GetValueOrDefault(position, true)
             };
@@ -1954,16 +1955,18 @@ public static class PdfLayoutExtractor
 
         private PdfLayoutPathCommand[]? TryCreateGlyphOutline(TextPosition position, PDFont font)
         {
-            // Raw CFF programs are valid PDF fonts but cannot be referenced by CSS @font-face.
-            // Preserve their original outlines so the visible HTML remains faithful and the text copy remains selectable.
-            if (font is not PDType1CFont cffFont || position.GetCharacterCodes() is not [int code])
+            // PDF vector fonts that cannot be referenced by CSS @font-face still have usable glyph
+            // geometry. Preserve it for positioned formula fallback; callers can distinguish
+            // embedded source outlines from outlines resolved through PDF font substitution.
+            if (font is not PDVectorFont vectorFont ||
+                position.GetCharacterCodes() is not [int code])
             {
                 return null;
             }
 
             try
             {
-                GeneralPath path = cffFont.GetNormalizedPath(code);
+                GeneralPath path = vectorFont.GetNormalizedPath(code);
                 if (path.Segments.Count == 0)
                 {
                     return [];
@@ -2028,10 +2031,23 @@ public static class PdfLayoutExtractor
                 _diagnostics.Add(new PdfLayoutDiagnostic(
                     PdfLayoutDiagnosticSeverity.Warning,
                     "glyph-outline-collection-failed",
-                    "Embedded CFF glyph outlines could not be collected: " + ex.Message,
+                    "Vector glyph outlines could not be collected: " + ex.Message,
                     _pageNumber));
                 return null;
             }
+        }
+
+        private static bool HasExactGlyphOutlineSource(PDFont font)
+        {
+            if (font is PDType1CFont)
+            {
+                return true;
+            }
+
+            COSDictionary? descriptor = font.GetFontDescriptor()?.GetCOSObject();
+            return descriptor?.GetDictionaryObject(COSName.GetPDFName("FontFile")) is COSStream ||
+                descriptor?.GetDictionaryObject(COSName.GetPDFName("FontFile2")) is COSStream ||
+                descriptor?.GetDictionaryObject(COSName.GetPDFName("FontFile3")) is COSStream;
         }
 
         private (float X, float Y) NormalizeGlyphOutlinePoint(float x, float y, Matrix glyphMatrix)

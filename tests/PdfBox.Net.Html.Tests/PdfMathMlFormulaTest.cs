@@ -782,6 +782,28 @@ public class PdfMathMlFormulaTest
         XElement marginal = Assert.Single(formulas, static formula =>
             formula.Attribute("aria-label")?.Value.Contains("p(w|α,β)", StringComparison.Ordinal) == true &&
             formula.Attribute("aria-label")?.Value.Contains('∫') == true);
+        Assert.False(HasClass(marginal, "pdf-semantic-formula-native"));
+        XElement outlineLayer = Assert.Single(
+            marginal.Elements("svg"),
+            static element => HasClass(element, "pdf-semantic-formula-glyph-outline-layer"));
+        Assert.True(outlineLayer.Elements("path").Count() > 40);
+        Assert.Equal(
+            ["open", "close", "open", "close"],
+            outlineLayer.Elements("path")
+                .Where(static path => HasClass(path, "pdf-semantic-formula-tall-delimiter"))
+                .Select(static path => path.Attribute("data-delimiter")?.Value ?? "")
+                .ToArray());
+        XElement vectorLayer = Assert.Single(
+            marginal.Elements("svg"),
+            static element => HasClass(element, "pdf-semantic-formula-vector-layer") &&
+                !HasClass(element, "pdf-semantic-formula-glyph-outline-layer"));
+        Assert.Single(vectorLayer.Elements("path"), static path =>
+            path.Attribute("data-path-index")?.Value == "18");
+        XElement[] marginalRuns = marginal.Descendants()
+            .Where(static element => HasClass(element, "pdf-semantic-formula-run"))
+            .ToArray();
+        Assert.Equal(4, marginalRuns.Count(static run => run.Value == "∏"));
+        Assert.Single(marginalRuns, static run => run.Value == "∫");
         Assert.DoesNotContain("coupling between", marginal.Value, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "couplingbetween",
@@ -833,9 +855,181 @@ public class PdfMathMlFormulaTest
                 formula.Attribute("aria-label")?.Value.Contains(equationNumber, StringComparison.Ordinal) == true);
         }
 
+        XElement equationSix = Assert.Single(formulas, static formula =>
+            formula.Attribute("aria-label")?.Value.Contains("(6)", StringComparison.Ordinal) == true);
+        XElement[] equationSixRuns = equationSix.Descendants()
+            .Where(static element => HasClass(element, "pdf-semantic-formula-run"))
+            .ToArray();
+        Assert.DoesNotContain(equationSixRuns, static run => run.Value == "N");
+        Assert.Equal(2, equationSixRuns.Count(static run => run.Value == "n"));
+
+        XElement equationSeven = Assert.Single(formulas, static formula =>
+            formula.Attribute("aria-label")?.Value.Contains("(7)", StringComparison.Ordinal) == true);
+        Assert.False(HasClass(equationSeven, "pdf-semantic-formula-native"));
+        XElement[] equationSevenRuns = equationSeven.Descendants()
+            .Where(static element => HasClass(element, "pdf-semantic-formula-run"))
+            .ToArray();
+        Assert.Single(equationSevenRuns, static run => run.Value == "N");
+        Assert.Equal(2, equationSevenRuns.Count(static run => run.Value == "n"));
+
+        XElement equationEight = Assert.Single(formulas, static formula =>
+            formula.Attribute("aria-label")?.Value.Contains("(8)", StringComparison.Ordinal) == true);
+        Assert.Equal(
+            ["open", "close"],
+            equationEight.Descendants("path")
+                .Where(static path => HasClass(path, "pdf-semantic-formula-tall-delimiter"))
+                .Select(static path => path.Attribute("data-delimiter")?.Value ?? "")
+                .ToArray());
+
         Assert.DoesNotContain(dom.Descendants("table"), static table =>
             table.Value.Contains("(6)", StringComparison.Ordinal) ||
             table.Value.Contains("(7)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Convert_JmlrComplexEquationFallbacks_PreserveSourceGeometryInBrowser()
+    {
+        using TempDirectory tempDirectory = new();
+        string pageElevenDirectory = Path.Combine(tempDirectory.Path, "page-11");
+        string pageTwelveDirectory = Path.Combine(tempDirectory.Path, "page-12");
+        ConvertFixture("jmlr-lda-page-11.pdf").WriteToDirectory(pageElevenDirectory);
+        ConvertFixture("jmlr-lda-page-12.pdf").WriteToDirectory(pageTwelveDirectory);
+
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage page = await browser.NewPageAsync(new BrowserNewPageOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1000,
+                Height = 1200
+            }
+        });
+
+        await page.GotoAsync(new Uri(Path.Combine(pageElevenDirectory, "index.html")).AbsoluteUri);
+        await page.EvaluateAsync("() => document.fonts.ready");
+        JmlrPageElevenBrowserMetrics pageEleven = await page.EvaluateAsync<JmlrPageElevenBrowserMetrics>(
+            """
+            () => {
+              const formula = Array.from(document.querySelectorAll('.pdf-semantic-formula'))
+                .find(element => element.getAttribute('aria-label')?.includes('∫'));
+              const delimiters = Array.from(
+                formula.querySelectorAll('.pdf-semantic-formula-tall-delimiter'));
+              const fractionRule = formula.querySelector('[data-path-index="18"]');
+              const formulaBox = formula.getBoundingClientRect();
+              const ruleBox = fractionRule.getBoundingClientRect();
+              return {
+                delimiterCount: delimiters.length,
+                minimumDelimiterHeight: Math.min(
+                  ...delimiters.map(delimiter => delimiter.getBoundingClientRect().height)),
+                fractionRuleWidth: ruleBox.width,
+                fractionRuleInside:
+                  ruleBox.left >= formulaBox.left - 1 &&
+                  ruleBox.right <= formulaBox.right + 1 &&
+                  ruleBox.top >= formulaBox.top - 1 &&
+                  ruleBox.bottom <= formulaBox.bottom + 1,
+                productCount: Array.from(
+                  formula.querySelectorAll('.pdf-semantic-formula-run'))
+                  .filter(run => run.textContent === '∏').length,
+                outlinePathCount: formula.querySelectorAll(
+                  '.pdf-semantic-formula-glyph-outline-layer path').length
+              };
+            }
+            """);
+
+        Assert.Equal(4, pageEleven.DelimiterCount);
+        Assert.True(pageEleven.MinimumDelimiterHeight >= 36);
+        Assert.True(pageEleven.FractionRuleWidth >= 45);
+        Assert.True(pageEleven.FractionRuleInside);
+        Assert.Equal(4, pageEleven.ProductCount);
+        Assert.True(pageEleven.OutlinePathCount > 40);
+
+        await page.GotoAsync(new Uri(Path.Combine(pageTwelveDirectory, "index.html")).AbsoluteUri);
+        await page.EvaluateAsync("() => document.fonts.ready");
+        JmlrPageTwelveBrowserMetrics pageTwelve = await page.EvaluateAsync<JmlrPageTwelveBrowserMetrics>(
+            """
+            () => {
+              const formulas = Array.from(document.querySelectorAll('.pdf-semantic-formula'));
+              const formula = number => formulas.find(element =>
+                element.dataset.equationNumber === number ||
+                element.getAttribute('aria-label')?.includes(number));
+              const six = formula('(6)');
+              const seven = formula('(7)');
+              const eight = formula('(8)');
+              const runs = element => Array.from(
+                element.querySelectorAll('.pdf-semantic-formula-run'));
+              const sevenRuns = runs(seven);
+              const sumIndex = sevenRuns.findIndex(run => run.textContent === '∑');
+              const sumBox = sevenRuns[sumIndex].getBoundingClientRect();
+              const upperBox = sevenRuns
+                .slice(sumIndex + 1)
+                .find(run => run.textContent === 'N')
+                .getBoundingClientRect();
+              const lowerBox = sevenRuns
+                .slice(sumIndex + 1)
+                .find(run => run.textContent === 'n')
+                .getBoundingClientRect();
+              const center = box => ({
+                x: box.left + box.width / 2,
+                y: box.top + box.height / 2
+              });
+              const sumCenter = center(sumBox);
+              const sixBox = six.getBoundingClientRect();
+              const sevenBox = seven.getBoundingClientRect();
+              const eightSum = runs(eight).find(run => run.textContent === '∑')
+                .getBoundingClientRect();
+              const eightDelimiters = Array.from(
+                eight.querySelectorAll('.pdf-semantic-formula-tall-delimiter'));
+              return {
+                formulaCount: formulas.length,
+                sixUpperNCount: runs(six).filter(run => run.textContent === 'N').length,
+                sevenUpperNCount: sevenRuns.filter(run => run.textContent === 'N').length,
+                sevenLowerNCount: sevenRuns.filter(run => run.textContent === 'n').length,
+                upperAboveOperator: center(upperBox).y < sumCenter.y,
+                lowerBelowOperator: center(lowerBox).y > sumCenter.y,
+                upperCenterDelta: Math.abs(center(upperBox).x - sumCenter.x),
+                lowerCenterDelta: Math.abs(center(lowerBox).x - sumCenter.x),
+                adjacentEquationsSeparated: sixBox.bottom <= sevenBox.top + 1,
+                equationEightDelimiterCount: eightDelimiters.length,
+                equationEightMinimumDelimiterHeight: Math.min(
+                  ...eightDelimiters.map(delimiter => delimiter.getBoundingClientRect().height)),
+                equationEightSumHeight: eightSum.height
+              };
+            }
+            """);
+
+        Assert.Equal(5, pageTwelve.FormulaCount);
+        Assert.Equal(0, pageTwelve.SixUpperNCount);
+        Assert.Equal(1, pageTwelve.SevenUpperNCount);
+        Assert.Equal(2, pageTwelve.SevenLowerNCount);
+        Assert.True(pageTwelve.UpperAboveOperator);
+        Assert.True(pageTwelve.LowerBelowOperator);
+        Assert.InRange(pageTwelve.UpperCenterDelta, 0, 12);
+        Assert.InRange(pageTwelve.LowerCenterDelta, 0, 12);
+        Assert.True(pageTwelve.AdjacentEquationsSeparated);
+        Assert.Equal(2, pageTwelve.EquationEightDelimiterCount);
+        Assert.True(
+            pageTwelve.EquationEightMinimumDelimiterHeight >=
+            pageTwelve.EquationEightSumHeight * 1.5);
+
+        static PdfHtmlDocument ConvertFixture(string fileName)
+        {
+            using PDDocument document = Loader.LoadPDF(FixturePath(fileName));
+            PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+            {
+                IncludeImages = false,
+                IncludeLinks = false,
+                IncludePaths = true
+            });
+            return PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+            {
+                TextMode = PdfHtmlTextMode.Semantic,
+                SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+            });
+        }
     }
 
     private static string Render(
@@ -1039,6 +1233,48 @@ public class PdfMathMlFormulaTest
         public int RowCount { get; set; }
 
         public int CellCount { get; set; }
+    }
+
+    private sealed class JmlrPageElevenBrowserMetrics
+    {
+        public int DelimiterCount { get; set; }
+
+        public double MinimumDelimiterHeight { get; set; }
+
+        public double FractionRuleWidth { get; set; }
+
+        public bool FractionRuleInside { get; set; }
+
+        public int ProductCount { get; set; }
+
+        public int OutlinePathCount { get; set; }
+    }
+
+    private sealed class JmlrPageTwelveBrowserMetrics
+    {
+        public int FormulaCount { get; set; }
+
+        public int SixUpperNCount { get; set; }
+
+        public int SevenUpperNCount { get; set; }
+
+        public int SevenLowerNCount { get; set; }
+
+        public bool UpperAboveOperator { get; set; }
+
+        public bool LowerBelowOperator { get; set; }
+
+        public double UpperCenterDelta { get; set; }
+
+        public double LowerCenterDelta { get; set; }
+
+        public bool AdjacentEquationsSeparated { get; set; }
+
+        public int EquationEightDelimiterCount { get; set; }
+
+        public double EquationEightMinimumDelimiterHeight { get; set; }
+
+        public double EquationEightSumHeight { get; set; }
     }
 
     private sealed class TempDirectory : IDisposable
