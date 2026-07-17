@@ -8,6 +8,11 @@ options, and read-only/required flags. `PdfBox.Net.Html` emits native HTML
 controls and omits a matching rasterized widget appearance so field text is not
 duplicated.
 
+Positioned controls keep the authored widget rectangle as their interaction
+area and clip browser paint to that rectangle. Their editing surface remains
+transparent so an oversized PDF widget cannot erase an intersecting prompt or
+vector rule. Focus indicators are drawn inside the widget bounds.
+
 ## XFA limitation
 
 XFA packets are not parsed or reconstructed as HTML controls. Pure XFA forms

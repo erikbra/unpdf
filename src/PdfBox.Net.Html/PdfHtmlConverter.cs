@@ -185,23 +185,29 @@ public static class PdfHtmlConverter
           resize: none;
         }
 
+        .pdf-form-control-widget {
+          clip-path: inset(0);
+          min-height: 0;
+          overflow: hidden;
+        }
+
         .pdf-form-control-positioned.pdf-form-control-authored-appearance {
           color: transparent;
         }
 
         .pdf-form-control-positioned.pdf-form-control-active,
         .pdf-form-control-positioned.pdf-form-control-edited {
-          appearance: auto;
-          background: var(--pdf-page-background);
-          border: 1px solid #767676;
-          border-radius: 2px;
+          appearance: none;
+          background: transparent;
+          border: 0;
+          border-radius: 0;
           color: #111827;
           padding: 1px 2px;
         }
 
-        .pdf-form-control-authored-appearance.pdf-form-control-active {
+        .pdf-form-control-widget.pdf-form-control-active {
           outline: 2px solid #2563eb;
-          outline-offset: 1px;
+          outline-offset: -2px;
         }
 
         .pdf-form-control-authored-appearance[type="checkbox"],
@@ -2589,6 +2595,11 @@ public static class PdfHtmlConverter
         bool usesNativeToggleAppearance = control.Kind is
             PdfLayoutFormControlKind.CheckBox or PdfLayoutFormControlKind.RadioButton;
         html.Append(" class=\"pdf-form-control");
+        if (positioned)
+        {
+            html.Append(" pdf-form-control-widget");
+        }
+
         if (positioned && !usesNativeToggleAppearance)
         {
             html.Append(" pdf-form-control-positioned");
@@ -2662,7 +2673,7 @@ public static class PdfHtmlConverter
     {
         html.AppendLine("  <script>");
         html.AppendLine("    (function () {");
-        html.AppendLine("      const selector = '.pdf-form-control-positioned, .pdf-form-control-authored-appearance';");
+        html.AppendLine("      const selector = '.pdf-form-control-widget';");
         html.AppendLine("      function appearance(control) {");
         html.AppendLine("        const id = control.dataset.widgetAppearanceId;");
         html.AppendLine("        return id === undefined ? null : document.getElementById(id);");
