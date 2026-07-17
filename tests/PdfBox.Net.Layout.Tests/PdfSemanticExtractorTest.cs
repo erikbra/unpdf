@@ -100,6 +100,38 @@ public sealed class PdfSemanticExtractorTest
     }
 
     [Fact]
+    public void Extract_FigCaption_SkipsInterleavedDirectedLabelsAndFollowingProse()
+    {
+        PdfLayoutDocument layout = CreateSemanticPassageFixture(
+        [
+            CreateFixtureLine("Opening prose establishes the ordinary body font and line rhythm.", 72f, 48f, 410f),
+            CreateFixtureLine("A second prose line completes the surrounding paragraph.", 72f, 60f, 340f),
+            CreateFixtureLine("Ordinary body text supplies a stable source line cadence.", 72f, 72f, 350f),
+            CreateFixtureLine("Another body line continues at the same source cadence.", 72f, 84f, 340f),
+            CreateFixtureLine("More ordinary prose remains outside the synthetic diagram.", 72f, 96f, 350f),
+            CreateFixtureLine("The final setup line completes the surrounding body passage.", 72f, 108f, 370f),
+            CreateDirectedFixtureLine("Input 1", 250f, 180f, 42f, 270f),
+            CreateFixtureLine("Fig. 1. Diagram labels stay with the complete figure while the", 72f, 184f, 410f),
+            CreateDirectedFixtureLine("Output 1", 320f, 188f, 48f, 90f),
+            CreateFixtureLine("caption continues on its own second source line.", 72f, 192f, 330f),
+            CreateFixtureLine("Following prose starts after the figure and remains ordinary flow.", 72f, 216f, 390f)
+        ]);
+
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+        PdfSemanticElement caption = Assert.Single(page.Elements, static element =>
+            element.Text.StartsWith("Fig. 1.", StringComparison.Ordinal));
+
+        Assert.Equal(2, caption.Lines.Count);
+        Assert.DoesNotContain("Input 1", caption.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Output 1", caption.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Following prose", caption.Text, StringComparison.Ordinal);
+        Assert.Contains(page.Elements, static element => element.Text == "Input 1");
+        Assert.Contains(page.Elements, static element => element.Text == "Output 1");
+        Assert.Contains(page.Elements, static element =>
+            element.Text.StartsWith("Following prose", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Extract_MonospacedHeadersFormValuesEmailsAndFormulas_AreNotCode()
     {
         PdfLayoutDocument headerLayout = CreateSemanticPassageFixture(
@@ -3556,6 +3588,21 @@ public sealed class PdfSemanticExtractorTest
         PdfLayoutColor color = new(0f, 0f, 0f, 1f, "DeviceGray");
         PdfTextGlyph glyph = new(text, fontName, fontSize, 0f, bounds, color);
         PdfTextRun run = new(text, fontName, fontSize, 0f, bounds, color, [glyph]);
+        return new PdfTextLine(text, bounds, [run]);
+    }
+
+    private static PdfTextLine CreateDirectedFixtureLine(
+        string text,
+        float x,
+        float y,
+        float width,
+        float direction)
+    {
+        const float fontSize = 10f;
+        PdfLayoutRectangle bounds = new(x, y, width, fontSize * 0.75f);
+        PdfLayoutColor color = new(0f, 0f, 0f, 1f, "DeviceGray");
+        PdfTextGlyph glyph = new(text, "Times-Roman", fontSize, direction, bounds, color);
+        PdfTextRun run = new(text, "Times-Roman", fontSize, direction, bounds, color, [glyph]);
         return new PdfTextLine(text, bounds, [run]);
     }
 
