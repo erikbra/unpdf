@@ -30,4 +30,9 @@ public sealed record PdfTextGlyph(
     /// Gets whether the PDF text rendering mode paints this glyph.
     /// </summary>
     public bool IsPainted { get; init; } = true;
+
+    /// <summary>
+    /// Gets the nearest enclosing page marked-content identifier, when present.
+    /// </summary>
+    public int? MarkedContentId { get; init; }
 }

@@ -274,14 +274,19 @@ Deliver:
 - structure tree projection in `PdfBox.Net.Layout`
 - MCID to collected content correlation
 - ActualText, Alt, Lang, and standard structure type support
-- tagged-PDF-first HTML and Markdown conversion paths
+- tagged-PDF-first semantic HTML conversion
+- a converter-neutral structure model for the Markdown package to consume
 
 Acceptance tests:
 
-- tagged heading/paragraph/list fixtures map to expected HTML and Markdown
+- tagged heading/paragraph/list fixtures map to the shared semantic model and expected HTML
 - tagged figure fixtures preserve alt text
 - tagged table fixtures preserve rectangular cell matrix
 - ActualText replaces glyph text where expected
+
+The dependent Markdown package owns Markdown serialization and golden-output
+tests; it consumes this shared bridge instead of rebuilding PDF structure-tree
+correlation.
 
 ### Phase 5: Vector Paths And Better Visual HTML
 

@@ -132,6 +132,11 @@ public sealed class PdfSemanticSectionTree
         IReadOnlyList<PdfSemanticSection> stack)
     {
         int visualLevel = Math.Clamp(heading.HeadingLevel, 1, 6);
+        if (heading.TaggedStructure != null)
+        {
+            return visualLevel;
+        }
+
         string text = heading.Text.Trim();
         if (text == "References" || AppendixHeadingPattern.IsMatch(text))
         {

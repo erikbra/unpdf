@@ -35,8 +35,10 @@ html.WriteToDirectory("output");
 
 The default text mode preserves source positioning. Semantic mode infers
 reading order and document structure and can use fixed pages or a continuous
-flow. The generated `PdfHtmlDocument` exposes the HTML, CSS, and binary assets
-directly as well as `WriteToDirectory`.
+flow. For tagged PDFs, authored headings, paragraphs, nested lists, rectangular
+tables, reading order, `ActualText`, language/title metadata, and figure alt
+text take precedence over geometric inference. The generated `PdfHtmlDocument`
+exposes the HTML, CSS, and binary assets directly as well as `WriteToDirectory`.
 
 For images and raster fallbacks, register a rendering provider such as
 `PdfBox.Net.SkiaSharp` or `PdfBox.Net.ImageMagick` before extraction. Without a

@@ -59,7 +59,8 @@ public sealed class PdfSemanticElement
         PdfSemanticNote? note = null,
         PdfSemanticThematicBreak? thematicBreak = null,
         PdfSemanticAlgorithm? algorithm = null,
-        PdfSemanticTableCaption? tableCaption = null)
+        PdfSemanticTableCaption? tableCaption = null,
+        PdfTaggedStructureElement? taggedStructure = null)
     {
         Kind = kind;
         Text = text;
@@ -78,6 +79,7 @@ public sealed class PdfSemanticElement
         Algorithm = algorithm;
         TableCaption = tableCaption;
         IsDocumentTitle = isDocumentTitle;
+        TaggedStructure = taggedStructure;
     }
 
     public PdfSemanticElementKind Kind { get; }
@@ -134,6 +136,11 @@ public sealed class PdfSemanticElement
     /// Gets whether this heading is the inferred document title rather than a section heading.
     /// </summary>
     public bool IsDocumentTitle { get; }
+
+    /// <summary>
+    /// Gets the authored tagged-PDF source element when this semantic element was projected from one.
+    /// </summary>
+    public PdfTaggedStructureElement? TaggedStructure { get; }
 }
 
 /// <summary>

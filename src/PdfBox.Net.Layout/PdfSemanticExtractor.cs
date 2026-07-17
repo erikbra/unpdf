@@ -59,7 +59,9 @@ public static class PdfSemanticExtractor
     {
         ArgumentNullException.ThrowIfNull(layout);
         options ??= new PdfSemanticExtractionOptions();
-        PdfSemanticPage[] pages = layout.Pages.Select(page => ExtractPage(page, options)).ToArray();
+        PdfSemanticPage[] pages = layout.Pages
+            .Select(page => ExtractPagePreferTagged(page, layout.TaggedStructure, options))
+            .ToArray();
         pages = LinkDefinitionListContinuations(pages);
         pages = LinkFootnoteContinuations(layout.Pages, pages);
         pages = PdfSemanticBibliographyExtractor.Extract(layout, pages).ToArray();
@@ -72,6 +74,108 @@ public static class PdfSemanticExtractor
         }
 
         return new PdfSemanticDocument(pages);
+    }
+
+    private static PdfSemanticPage ExtractPagePreferTagged(
+        PdfLayoutPage page,
+        PdfTaggedStructureDocument? taggedStructure,
+        PdfSemanticExtractionOptions options)
+    {
+        PdfSemanticPage inferred = ExtractPage(page, options);
+        PdfSemanticPage? tagged = taggedStructure == null
+            ? null
+            : PdfTaggedSemanticProjector.ProjectPage(page, taggedStructure);
+        if (tagged == null)
+        {
+            return inferred;
+        }
+
+        PdfSemanticElement[] taggedElements = tagged.Elements
+            .Select(element => EnrichTaggedListMetadata(element, inferred.Elements))
+            .ToArray();
+        HashSet<PdfTextRun> authoredRuns = taggedElements
+            .SelectMany(element => element.TaggedStructure?.DescendantContentReferences()
+                .Where(reference => reference.PageNumber == page.PageNumber)
+                .SelectMany(static reference => reference.TextRuns) ?? [])
+            .ToHashSet((IEqualityComparer<PdfTextRun>)ReferenceEqualityComparer.Instance);
+        PdfSemanticElement[] unownedFallback = inferred.Elements
+            .Where(element => !element.Lines
+                .SelectMany(static line => line.Runs)
+                .Any(authoredRuns.Contains))
+            .ToArray();
+        return new PdfSemanticPage(
+            page.PageNumber,
+            taggedElements.Concat(unownedFallback).ToArray());
+    }
+
+    private static PdfSemanticElement EnrichTaggedListMetadata(
+        PdfSemanticElement tagged,
+        IReadOnlyList<PdfSemanticElement> inferredElements)
+    {
+        if (tagged.SemanticList is not PdfSemanticList taggedList ||
+            tagged.TaggedStructure?.Attributes.ListNumbering != null)
+        {
+            return tagged;
+        }
+
+        HashSet<PdfTextRun> taggedRuns = tagged.Lines
+            .SelectMany(static line => line.Runs)
+            .ToHashSet((IEqualityComparer<PdfTextRun>)ReferenceEqualityComparer.Instance);
+        PdfSemanticList? inferredList = inferredElements
+            .Where(static element => element.Kind == PdfSemanticElementKind.List)
+            .Where(element => element.SemanticList?.Items.Count == taggedList.Items.Count)
+            .Select(element => new
+            {
+                List = element.SemanticList!,
+                SharedRuns = element.Lines
+                    .SelectMany(static line => line.Runs)
+                    .Count(taggedRuns.Contains)
+            })
+            .Where(static candidate => candidate.SharedRuns > 0)
+            .OrderByDescending(static candidate => candidate.SharedRuns)
+            .Select(static candidate => candidate.List)
+            .FirstOrDefault();
+        if (inferredList == null ||
+            inferredList.Kind == taggedList.Kind && inferredList.MarkerKind == taggedList.MarkerKind)
+        {
+            return tagged;
+        }
+
+        PdfSemanticListItem[] items = taggedList.Items
+            .Select((item, index) => new PdfSemanticListItem(
+                item.Text,
+                item.Bounds,
+                item.Lines,
+                inferredList.Items[index].Marker,
+                inferredList.Items[index].MarkerLength,
+                inferredList.Items[index].Value,
+                item.NestedLists))
+            .ToArray();
+        PdfSemanticList enrichedList = new(
+            inferredList.Kind,
+            inferredList.MarkerKind,
+            items,
+            inferredList.Start,
+            inferredList.IsReversed);
+        return new PdfSemanticElement(
+            tagged.Kind,
+            tagged.Text,
+            tagged.Bounds,
+            tagged.Lines,
+            tagged.HeadingLevel,
+            tagged.TableRows,
+            enrichedList,
+            tagged.DocumentIndex,
+            tagged.IsDocumentTitle,
+            tagged.BibliographyFragment,
+            tagged.DefinitionList,
+            tagged.Quotation,
+            tagged.Aside,
+            tagged.Note,
+            tagged.ThematicBreak,
+            tagged.Algorithm,
+            tagged.TableCaption,
+            tagged.TaggedStructure);
     }
 
     private static PdfSemanticPage AddThematicBreaks(PdfLayoutPage page, PdfSemanticPage semanticPage)

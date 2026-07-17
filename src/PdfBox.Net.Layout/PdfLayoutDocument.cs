@@ -22,12 +22,14 @@ public sealed class PdfLayoutDocument
         IReadOnlyList<PdfLayoutPage> pages,
         IReadOnlyList<PdfLayoutImageAsset> imageAssets,
         IReadOnlyList<PdfLayoutFontAsset> fontAssets,
-        IReadOnlyList<PdfLayoutDiagnostic> diagnostics)
+        IReadOnlyList<PdfLayoutDiagnostic> diagnostics,
+        PdfTaggedStructureDocument? taggedStructure = null)
     {
         Pages = pages.ToArray();
         ImageAssets = imageAssets.ToArray();
         FontAssets = fontAssets.ToArray();
         Diagnostics = diagnostics.ToArray();
+        TaggedStructure = taggedStructure;
     }
 
     /// <summary>
@@ -49,6 +51,11 @@ public sealed class PdfLayoutDocument
     /// Gets document-level diagnostics.
     /// </summary>
     public IReadOnlyList<PdfLayoutDiagnostic> Diagnostics { get; }
+
+    /// <summary>
+    /// Gets authored tagged-PDF structure correlated to layout content, when available.
+    /// </summary>
+    public PdfTaggedStructureDocument? TaggedStructure { get; }
 
     /// <summary>
     /// Gets extracted text in page order.

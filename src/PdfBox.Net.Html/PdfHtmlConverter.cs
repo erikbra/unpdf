@@ -2764,7 +2764,9 @@ public static class PdfHtmlConverter
             .Append(HtmlAttribute(image.OverprintCompositeColor is PdfLayoutColor compositeColor
                 ? SolidColorImageDataUri(compositeColor)
                 : asset.RelativePath))
-            .Append("\" alt=\"\" data-asset-id=\"")
+            .Append("\" alt=\"")
+            .Append(HtmlAttribute(image.AlternateDescription ?? string.Empty))
+            .Append("\" data-asset-id=\"")
             .Append(HtmlAttribute(image.AssetId));
 
         if (!string.IsNullOrEmpty(image.SourceName))
@@ -4385,9 +4387,14 @@ public static class PdfHtmlConverter
         PdfSemanticPage semanticPage,
         FootnoteContext? footnotes = null)
     {
-        PdfSemanticLineGrid? lineGrid = TryCreateSemanticLineGrid(page, semanticPage);
+        bool hasAuthoredStructure = semanticPage.Elements.Any(static element => element.TaggedStructure != null);
+        PdfSemanticLineGrid? lineGrid = hasAuthoredStructure
+            ? null
+            : TryCreateSemanticLineGrid(page, semanticPage);
         PdfSemanticColumns? columns = lineGrid == null
-            ? TryCreateSemanticColumns(page, semanticPage)
+            ? hasAuthoredStructure
+                ? null
+                : TryCreateSemanticColumns(page, semanticPage)
             : null;
         PdfLayoutRectangle[] figureRegions = SemanticFigureRegions(page, semanticPage).ToArray();
         PdfSemanticElement[] positioned = semanticPage.Elements
@@ -4427,6 +4434,14 @@ public static class PdfHtmlConverter
         if (IsRasterScanPageWithOcrText(page))
         {
             return true;
+        }
+
+        // A tagged PDF has already supplied the reading order and semantic
+        // relationships. Geometry-based sparse-page and column heuristics must
+        // not replace that authored structure with fixed-layout text.
+        if (semanticPage.Elements.Any(static element => element.TaggedStructure != null))
+        {
+            return false;
         }
 
         if (RequiresDocumentIndexVisualPreservation(page, semanticPage))
@@ -7080,6 +7095,7 @@ public static class PdfHtmlConverter
         html.Append("<span class=\"")
             .Append(SemanticClassNames(element, page, allowMeasuredWidth: false))
             .Append(" pdf-semantic-inline-flow-element\"");
+        AppendTaggedStructureAttributes(html, element);
         AppendTextDirectionAttribute(html, element.Text);
         string style = FlowSemanticStyle(element, page, allowMeasuredWidth: false);
         if (style.Length > 0)
@@ -8595,6 +8611,7 @@ public static class PdfHtmlConverter
             html.Append(" id=\"").Append(HtmlAttribute(elementId)).Append('"');
         }
 
+        AppendTaggedStructureAttributes(html, element);
         AppendTextDirectionAttribute(html, element.Text);
         AppendAsideLabelAttribute(html, element);
         string style = FlowSemanticStyle(element, page, allowMeasuredWidth);
@@ -8735,6 +8752,7 @@ public static class PdfHtmlConverter
         }
 
         html.Append('"');
+        AppendTaggedStructureAttributes(html, element);
         AppendTextDirectionAttribute(html, element.Text);
         if (definitionList.TermColumnWidth is float termColumnWidth)
         {
@@ -8870,6 +8888,7 @@ public static class PdfHtmlConverter
         }
 
         html.Append('"');
+        AppendTaggedStructureAttributes(html, element);
         AppendTextDirectionAttribute(html, element.Text);
         if (isRoot && !string.IsNullOrWhiteSpace(rootStyle))
         {
@@ -9203,6 +9222,7 @@ public static class PdfHtmlConverter
                 .Append('"');
         }
 
+        AppendTaggedStructureAttributes(html, element);
         AppendTextDirectionAttribute(html, element.Text);
         string style = FlowSemanticStyle(element, page, allowMeasuredWidth);
         if (style.Length > 0)
@@ -10885,6 +10905,7 @@ public static class PdfHtmlConverter
             html.Append(" id=\"").Append(HtmlAttribute(elementId)).Append('"');
         }
 
+        AppendTaggedStructureAttributes(html, element);
         AppendTextDirectionAttribute(html, element.Text);
         AppendAsideLabelAttribute(html, element);
         html.Append(" style=\"")
@@ -16432,6 +16453,31 @@ public static class PdfHtmlConverter
         if (IsRightToLeftText(text))
         {
             html.Append(" dir=\"rtl\"");
+        }
+    }
+
+    private static void AppendTaggedStructureAttributes(StringBuilder html, PdfSemanticElement element)
+    {
+        if (element.TaggedStructure is not PdfTaggedStructureElement tagged)
+        {
+            return;
+        }
+
+        html.Append(" data-pdf-structure-type=\"")
+            .Append(HtmlAttribute(tagged.StandardStructureType))
+            .Append('"');
+        if (!string.IsNullOrWhiteSpace(tagged.Language))
+        {
+            html.Append(" lang=\"")
+                .Append(HtmlAttribute(tagged.Language))
+                .Append('"');
+        }
+
+        if (!string.IsNullOrWhiteSpace(tagged.Title))
+        {
+            html.Append(" title=\"")
+                .Append(HtmlAttribute(tagged.Title))
+                .Append('"');
         }
     }
 
