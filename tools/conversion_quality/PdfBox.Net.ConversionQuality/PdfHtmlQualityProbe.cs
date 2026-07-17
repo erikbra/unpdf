@@ -250,10 +250,19 @@ public sealed class PdfHtmlQualityProbe
                 new Dictionary<string, double>()));
         }
 
-        int imageOverlaps = CountOverlaps(snapshot.TextRuns, snapshot.Images, minArea: 4, minTextFraction: 0.10);
+        BrowserBox[] overlapCandidateImages = snapshot.Images
+            .Where(image => !IsPageBackground(image, snapshot))
+            .ToArray();
+        BrowserBox[] overlapCandidateVectorPaths = snapshot.VectorPaths
+            .Where(path => path.Area >= 400 && !IsPageBackground(path, snapshot))
+            .ToArray();
+        int backgroundImageCount = snapshot.Images.Count - overlapCandidateImages.Length;
+        int backgroundVectorPathCount = snapshot.VectorPaths.Count(path =>
+            path.Area >= 400 && IsPageBackground(path, snapshot));
+        int imageOverlaps = CountOverlaps(snapshot.TextRuns, overlapCandidateImages, minArea: 4, minTextFraction: 0.10);
         int vectorOverlaps = CountOverlaps(
             snapshot.TextRuns,
-            snapshot.VectorPaths.Where(static box => box.Area >= 400).ToArray(),
+            overlapCandidateVectorPaths,
             minArea: 8,
             minTextFraction: 0.20);
         pageChecks.Add(new PdfHtmlQualityCheck(
@@ -268,7 +277,9 @@ public sealed class PdfHtmlQualityProbe
             {
                 ["overlapCount"] = imageOverlaps,
                 ["htmlImageCount"] = snapshot.Images.Count,
-                ["layoutImageCount"] = layoutPage.Images.Count
+                ["layoutImageCount"] = layoutPage.Images.Count,
+                ["backgroundImageCount"] = backgroundImageCount,
+                ["overlapCandidateImageCount"] = overlapCandidateImages.Length
             }));
         pageChecks.Add(new PdfHtmlQualityCheck(
             "text-vector-overlap",
@@ -282,7 +293,9 @@ public sealed class PdfHtmlQualityProbe
             {
                 ["overlapCount"] = vectorOverlaps,
                 ["htmlVectorPathCount"] = snapshot.VectorPaths.Count,
-                ["layoutVectorPathCount"] = layoutPage.Paths.Count
+                ["layoutVectorPathCount"] = layoutPage.Paths.Count,
+                ["backgroundVectorPathCount"] = backgroundVectorPathCount,
+                ["overlapCandidateVectorPathCount"] = overlapCandidateVectorPaths.Length
             }));
 
         PdfHtmlVisualMetrics? visualMetrics = await AddVisualChecksAsync(
@@ -979,6 +992,45 @@ public sealed class PdfHtmlQualityProbe
         }
 
         return count;
+    }
+
+    private static bool IsPageBackground(BrowserBox box, BrowserPageSnapshot snapshot)
+    {
+        if (box.Area <= 0 || snapshot.Width <= 0 || snapshot.Height <= 0)
+        {
+            return false;
+        }
+
+        double horizontalTolerance = Math.Max(2, snapshot.Width * 0.02);
+        double verticalTolerance = Math.Max(2, snapshot.Height * 0.02);
+        bool touchesLeft = box.X <= horizontalTolerance;
+        bool touchesTop = box.Y <= verticalTolerance;
+        bool touchesRight = box.Right >= snapshot.Width - horizontalTolerance;
+        bool touchesBottom = box.Bottom >= snapshot.Height - verticalTolerance;
+
+        BrowserBox page = new()
+        {
+            Width = snapshot.Width,
+            Height = snapshot.Height
+        };
+        double visibleArea = IntersectionArea(box, page);
+        if (touchesLeft && touchesTop && touchesRight && touchesBottom &&
+            visibleArea >= page.Area * 0.85)
+        {
+            return true;
+        }
+
+        double visibleWidth = Math.Max(0, Math.Min(box.Right, page.Right) - Math.Max(box.X, page.X));
+        double visibleHeight = Math.Max(0, Math.Min(box.Bottom, page.Bottom) - Math.Max(box.Y, page.Y));
+        bool fullWidthEdgeBand = touchesLeft && touchesRight &&
+            (touchesTop || touchesBottom) &&
+            visibleWidth >= page.Width * 0.90 &&
+            visibleHeight >= page.Height * 0.15;
+        bool fullHeightEdgeBand = touchesTop && touchesBottom &&
+            (touchesLeft || touchesRight) &&
+            visibleHeight >= page.Height * 0.90 &&
+            visibleWidth >= page.Width * 0.15;
+        return fullWidthEdgeBand || fullHeightEdgeBand;
     }
 
     private static double IntersectionArea(BrowserBox first, BrowserBox second)
