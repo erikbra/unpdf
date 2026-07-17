@@ -928,6 +928,25 @@ public class PdfLayoutExtractorTest
         Assert.Contains("fallback text", diagnostic.Message);
     }
 
+    [Fact]
+    public void Extract_RepeatedUnsupportedFontReportsOneDiagnosticPerDocument()
+    {
+        using PDDocument document = CreateUnnamedType3TextDocument(
+            pageCount: 2,
+            text: "AAAAAAAAAAAAAAAA");
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeFontAssets = true
+        });
+
+        Assert.Equal(32, layout.Pages.SelectMany(static page => page.Glyphs).Count());
+        PdfLayoutDiagnostic diagnostic = Assert.Single(
+            layout.Diagnostics,
+            item => item.Code == "embedded-font-web-unsupported");
+        Assert.Contains("Type 3 font 'Type3'", diagnostic.Message);
+    }
+
     private static string Snapshot(PdfLayoutDocument document)
     {
         StringBuilder builder = new();
@@ -1132,11 +1151,11 @@ public class PdfLayoutExtractorTest
         return document;
     }
 
-    private static PDDocument CreateUnnamedType3TextDocument()
+    private static PDDocument CreateUnnamedType3TextDocument(
+        int pageCount = 1,
+        string text = "A")
     {
         PDDocument document = new();
-        PDPage page = new();
-        document.AddPage(page);
 
         COSDictionary type3Font = new();
         type3Font.SetItem(COSName.TYPE, COSName.GetPDFName("Font"));
@@ -1156,9 +1175,17 @@ public class PdfLayoutExtractorTest
         COSDictionary resources = new();
         resources.SetItem(COSName.GetPDFName("Font"), fonts);
 
-        COSDictionary pageDictionary = (COSDictionary)page.GetCOSObject();
-        pageDictionary.SetItem(COSName.RESOURCES, resources);
-        pageDictionary.SetItem(COSName.CONTENTS, CreateContentStream("BT /FType3 24 Tf 72 700 Td (A) Tj ET"));
+        for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+        {
+            PDPage page = new();
+            document.AddPage(page);
+            COSDictionary pageDictionary = (COSDictionary)page.GetCOSObject();
+            pageDictionary.SetItem(COSName.RESOURCES, resources);
+            pageDictionary.SetItem(
+                COSName.CONTENTS,
+                CreateContentStream($"BT /FType3 24 Tf 72 700 Td ({text}) Tj ET"));
+        }
+
         return document;
     }
 
