@@ -391,7 +391,10 @@
         "minImagePlacements": 1,
         "minVectorPaths": 50,
         "minLinks": 1,
-        "minFormControls": 1
+        "minFormControls": 1,
+        "semanticMixedRegionCountsByPage": {
+          "2": 1
+        }
       }
     },
     {

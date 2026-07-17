@@ -85,6 +85,11 @@ class RemoteCorpusTest(unittest.TestCase):
             {"1": [4]},
             w9.expectations["semanticOrderedListItemCountsByPage"],
         )
+        fbi = next(item for item in documents if item.id == "fbi-fd258")
+        self.assertEqual(
+            {"2": 1},
+            fbi.expectations["semanticMixedRegionCountsByPage"],
+        )
         self.assertEqual(
             {
                 "jmlr-lda": (
@@ -272,6 +277,12 @@ class RemoteCorpusTest(unittest.TestCase):
             entry["expectations"]["minImagePlacementsByPage"] = {"0": 1}
             self._write_manifest(manifest, [entry])
             with self.assertRaisesRegex(ValueError, "positive page numbers"):
+                remote_corpus.load_manifest(manifest)
+
+            entry["expectations"]["minImagePlacementsByPage"] = {"1": 0}
+            entry["expectations"]["semanticMixedRegionCountsByPage"] = {"2": 0}
+            self._write_manifest(manifest, [entry])
+            with self.assertRaisesRegex(ValueError, "positive integers"):
                 remote_corpus.load_manifest(manifest)
 
     def test_fetch_document_retries_verifies_hash_and_installs_atomically(self) -> None:

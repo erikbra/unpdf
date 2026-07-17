@@ -206,6 +206,51 @@ public sealed class HtmlReviewArtifactGeneratorTest
     }
 
     [Fact]
+    public void ValidateSemanticExpectations_RequiresStableMixedRegionStructureByPage()
+    {
+        HtmlReviewManifestExample example = new()
+        {
+            Id = "mixed-regions",
+            Expectations = new HtmlReviewExpectations
+            {
+                SemanticMixedRegionCountsByPage = new Dictionary<int, int>
+                {
+                    [2] = 1
+                }
+            }
+        };
+        PdfHtmlDocument accepted = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-columns pdf-semantic-mixed-regions" data-source-page="2">
+                <div class="pdf-semantic-column">
+                  <figure class="pdf-semantic-figure pdf-semantic-mixed-region-figure"></figure>
+                </div>
+                <div class="pdf-semantic-column"><p>Instructions</p></div>
+              </div>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+        PdfHtmlDocument rejected = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-columns" data-source-page="2">
+                <div class="pdf-semantic-column"></div>
+                <div class="pdf-semantic-column"><p>Instructions</p></div>
+              </div>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+
+        HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, accepted);
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, rejected));
+        Assert.Contains("mixed-region count on page 2 was 0, expected 1", exception.Message);
+    }
+
+    [Fact]
     public void Generate_FailsWhenStableLayoutExpectationsAreNotMet()
     {
         using TempDirectory tempDirectory = new();
