@@ -1,22 +1,25 @@
 namespace PdfBox.Net.Layout;
 
 /// <summary>
-/// Selects how layout extraction handles PDF images that cannot be emitted as browser-safe assets directly.
+/// Selects how layout extraction handles requested image assets and raster fallbacks
+/// that cannot be emitted directly.
 /// </summary>
 public enum PdfImageExportPolicy
 {
     /// <summary>
-    /// Preserve the image placement, omit the unavailable asset, and add a stable diagnostic.
+    /// Preserve directly representable content, omit the unavailable asset or fallback,
+    /// and add a stable diagnostic.
     /// </summary>
     Degraded,
 
     /// <summary>
-    /// Fail extraction when any requested image asset cannot be exported.
+    /// Fail extraction when any requested image asset or raster fallback cannot be exported.
     /// </summary>
     Strict,
 
     /// <summary>
-    /// Require a registered rendering backend before image asset extraction begins.
+    /// Require a registered rendering backend before requested image asset or raster-fallback
+    /// extraction begins.
     /// </summary>
     BackendRequired
 }

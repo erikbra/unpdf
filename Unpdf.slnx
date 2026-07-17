@@ -10,6 +10,7 @@
     <Project Path="samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/PdfBox.Net.Layout.BrowserLite.Tests/PdfBox.Net.Layout.BrowserLite.Tests.csproj" />
     <Project Path="tests/PdfBox.Net.Layout.Tests/PdfBox.Net.Layout.Tests.csproj" />
     <Project Path="tests/PdfBox.Net.Html.Tests/PdfBox.Net.Html.Tests.csproj" />
     <Project Path="tests/PdfBox.Net.Unpdf.Tests/PdfBox.Net.Unpdf.Tests.csproj" />

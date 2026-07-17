@@ -609,6 +609,7 @@ public static class PdfLayoutExtractor
         private readonly float _width;
         private readonly float _height;
         private readonly int _rotation;
+        private readonly PdfImageExportPolicy _imageExportPolicy;
         private readonly List<PdfTextGlyph> _glyphs = new();
         private readonly List<PdfTextRun> _runs = new();
         private readonly List<PdfTextLine> _lines = new();
@@ -655,6 +656,7 @@ public static class PdfLayoutExtractor
             _mediaBox = PdfLayoutRectangle.FromPdfRectangle(mediaBox);
             _cropBox = PdfLayoutRectangle.FromPdfRectangle(cropBox);
             _rotation = page.GetRotation();
+            _imageExportPolicy = options.ImageExportPolicy;
             bool rotated = _rotation == 90 || _rotation == 270;
             _width = rotated ? cropBox.GetHeight() : cropBox.GetWidth();
             _height = rotated ? cropBox.GetWidth() : cropBox.GetHeight();
@@ -1403,23 +1405,21 @@ public static class PdfLayoutExtractor
                 return;
             }
 
-            if (_rotation != 0)
+            if (!RenderingBackend.IsRegistered)
             {
-                _diagnostics.Add(new PdfLayoutDiagnostic(
-                    PdfLayoutDiagnosticSeverity.Warning,
-                    "transparency-group-rasterization-rotation-unsupported",
-                    "Transparency-group raster fallbacks are not collected for rotated pages yet.",
-                    _pageNumber));
+                HandleFallbackExportFailure(
+                    "transparency-group-rasterization-backend-missing",
+                    "Transparency-group fallback rendering requires a registered rendering backend.",
+                    backendMissing: true);
                 return;
             }
 
-            if (!RenderingBackend.IsRegistered)
+            if (_rotation != 0)
             {
-                _diagnostics.Add(new PdfLayoutDiagnostic(
-                    PdfLayoutDiagnosticSeverity.Warning,
-                    "transparency-group-rasterization-backend-missing",
-                    "Transparency-group fallback rendering requires a registered rendering backend.",
-                    _pageNumber));
+                HandleFallbackExportFailure(
+                    "transparency-group-rasterization-rotation-unsupported",
+                    "Transparency-group raster fallbacks are not collected for rotated pages yet.",
+                    backendMissing: false);
                 return;
             }
 
@@ -1474,11 +1474,11 @@ public static class PdfLayoutExtractor
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException or NotSupportedException)
             {
-                _diagnostics.Add(new PdfLayoutDiagnostic(
-                    PdfLayoutDiagnosticSeverity.Warning,
+                HandleFallbackExportFailure(
                     "transparency-group-rasterization-failed",
                     "Transparency-group fallback rendering failed: " + ex.Message,
-                    _pageNumber));
+                    backendMissing: false,
+                    exception: ex);
             }
         }
 
@@ -1701,29 +1701,27 @@ public static class PdfLayoutExtractor
 
         private void CollectAnnotationAppearances(PDDocument document, int pageIndex, PDPage page)
         {
-            if (_rotation != 0)
+            if (!RenderingBackend.IsRegistered)
             {
                 if (page.GetAnnotations().Any(ShouldCollectAnnotationAppearance))
                 {
-                    _diagnostics.Add(new PdfLayoutDiagnostic(
-                        PdfLayoutDiagnosticSeverity.Warning,
-                        "annotation-rotation-unsupported",
-                        "Annotation appearance geometry is not collected for rotated pages yet.",
-                        _pageNumber));
+                    HandleFallbackExportFailure(
+                        "annotation-appearance-backend-missing",
+                        "Annotation appearances require a registered rendering backend and were skipped.",
+                        backendMissing: true);
                 }
 
                 return;
             }
 
-            if (!RenderingBackend.IsRegistered)
+            if (_rotation != 0)
             {
                 if (page.GetAnnotations().Any(ShouldCollectAnnotationAppearance))
                 {
-                    _diagnostics.Add(new PdfLayoutDiagnostic(
-                        PdfLayoutDiagnosticSeverity.Warning,
-                        "annotation-appearance-backend-missing",
-                        "Annotation appearances require a registered rendering backend and were skipped.",
-                        _pageNumber));
+                    HandleFallbackExportFailure(
+                        "annotation-rotation-unsupported",
+                        "Annotation appearance geometry is not collected for rotated pages yet.",
+                        backendMissing: false);
                 }
 
                 return;
@@ -1754,12 +1752,39 @@ public static class PdfLayoutExtractor
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException or NotSupportedException)
             {
-                _diagnostics.Add(new PdfLayoutDiagnostic(
-                    PdfLayoutDiagnosticSeverity.Warning,
+                HandleFallbackExportFailure(
                     "annotation-appearance-export-failed",
                     "Annotation appearance export failed: " + ex.Message,
-                    _pageNumber));
+                    backendMissing: false,
+                    exception: ex);
             }
+        }
+
+        private void HandleFallbackExportFailure(
+            string diagnosticCode,
+            string message,
+            bool backendMissing,
+            Exception? exception = null)
+        {
+            if (_imageExportPolicy == PdfImageExportPolicy.Strict)
+            {
+                throw new InvalidOperationException(
+                    $"Raster fallback export failed in strict mode: {message}",
+                    exception);
+            }
+
+            if (backendMissing && _imageExportPolicy == PdfImageExportPolicy.BackendRequired)
+            {
+                throw new InvalidOperationException(
+                    $"Raster fallback export requires a registered rendering backend: {message}",
+                    exception);
+            }
+
+            _diagnostics.Add(new PdfLayoutDiagnostic(
+                PdfLayoutDiagnosticSeverity.Warning,
+                diagnosticCode,
+                message,
+                _pageNumber));
         }
 
         private static bool ShouldCollectAnnotationAppearance(PDAnnotation annotation)
@@ -5800,7 +5825,7 @@ public static class PdfLayoutExtractor
                     exception);
             }
 
-            string code = ImageExportDiagnosticCode(exception.Message);
+            string code = PdfImageExportDiagnosticClassifier.CodeForFailure(exception.Message);
             _diagnostics.Add(new PdfLayoutDiagnostic(
                 PdfLayoutDiagnosticSeverity.Warning,
                 code,
@@ -5808,38 +5833,6 @@ public static class PdfLayoutExtractor
                 _pageNumber));
             return assetId;
         }
-
-        private static string ImageExportDiagnosticCode(string message)
-        {
-            if (message.Contains("JPX", StringComparison.OrdinalIgnoreCase) ||
-                message.Contains("JPEG 2000", StringComparison.OrdinalIgnoreCase))
-            {
-                return "image-asset-jpx-backend-required";
-            }
-            if (message.Contains("TIFF", StringComparison.OrdinalIgnoreCase))
-            {
-                return "image-asset-tiff-backend-required";
-            }
-            if (message.Contains("CMYK", StringComparison.OrdinalIgnoreCase) ||
-                message.Contains("YCCK", StringComparison.OrdinalIgnoreCase))
-            {
-                return "image-asset-cmyk-backend-required";
-            }
-            if (message.Contains("ICC", StringComparison.OrdinalIgnoreCase))
-            {
-                return "image-asset-icc-backend-required";
-            }
-            if (ExceptionNeedsBackend(message))
-            {
-                return "image-asset-backend-required";
-            }
-            return "image-asset-export-failed";
-        }
-
-        private static bool ExceptionNeedsBackend(string message) =>
-            message.Contains("backend", StringComparison.OrdinalIgnoreCase) ||
-            message.Contains("decoder", StringComparison.OrdinalIgnoreCase) ||
-            message.Contains("codec", StringComparison.OrdinalIgnoreCase);
 
         private static string[] ExplicitColorants(params PDColorSpace?[] colorSpaces)
         {
