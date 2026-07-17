@@ -3866,7 +3866,10 @@ public static class PdfHtmlConverter
 
     private static bool HasGlyphOutlineFallback(PdfTextRun run)
     {
-        return run.Glyphs.Count > 0 && run.Glyphs.All(static glyph => glyph.Outline is not null);
+        return run.Glyphs.Any(static glyph => glyph.Outline is { Count: > 0 }) &&
+            run.Glyphs.All(static glyph =>
+                glyph.Outline is { Count: > 0 } ||
+                glyph.Outline is not null && string.IsNullOrWhiteSpace(glyph.Text));
     }
 
     private static float FixedTextFontSize(
@@ -10136,9 +10139,21 @@ public static class PdfHtmlConverter
                 WriteFormulaVectorLayer(html, bounds, paths);
             }
 
+            PdfTextGlyph[] outlinedGlyphs = glyphs
+                .Where(static glyph => glyph.Outline is { Count: > 0 })
+                .ToArray();
+            IReadOnlyDictionary<PdfTextGlyph, PdfLayoutRectangle> tallDelimiters =
+                FormulaTallDelimiterBounds(glyphs);
+            if (outlinedGlyphs.Length > 0 || tallDelimiters.Count > 0)
+            {
+                WriteFormulaGlyphOutlineLayer(html, bounds, outlinedGlyphs, tallDelimiters);
+            }
+
             for (int glyphIndex = 0; glyphIndex < glyphs.Length; glyphIndex++)
             {
                 PdfTextGlyph glyph = glyphs[glyphIndex];
+                bool hasExactShape = glyph.Outline is { Count: > 0 } ||
+                    tallDelimiters.ContainsKey(glyph);
                 html.Append("<span class=\"pdf-semantic-formula-run");
                 if (IsFormulaRadicalGlyph(glyph))
                 {
@@ -10150,7 +10165,13 @@ public static class PdfHtmlConverter
                     html.Append(" pdf-semantic-formula-attached-suffix");
                 }
 
-                html.Append("\" style=\"left:")
+                html.Append('"');
+                if (hasExactShape)
+                {
+                    html.Append(" aria-hidden=\"true\"");
+                }
+
+                html.Append(" style=\"left:")
                     .Append(CssPoints(glyph.Bounds.X - bounds.X))
                     .Append(";top:")
                     .Append(CssPoints(glyph.Bounds.Y - bounds.Y))
@@ -10159,10 +10180,20 @@ public static class PdfHtmlConverter
                     .Append(";font-size:")
                     .Append(CssPoints(glyph.FontSize))
                     .Append(";color:")
-                    .Append(ColorHex(glyph.Color))
+                    .Append(hasExactShape ? "transparent" : ColorHex(glyph.Color))
                     .Append("\">")
                     .Append(Html(glyph.Text))
                     .Append("</span>");
+            }
+
+            // Adjacent compact equation rows can share a semantic source run. Claim the glyphs
+            // from each rendered row so the following row cannot paint them a second time.
+            if (claimedFormulaGlyphs != null && IsCompactFormulaRow(element.Bounds))
+            {
+                foreach (PdfTextGlyph glyph in glyphs)
+                {
+                    claimedFormulaGlyphs.Add(FormulaGlyphIdentity(glyph));
+                }
             }
         }
 
@@ -10275,10 +10306,31 @@ public static class PdfHtmlConverter
             .Where(run => sourceRuns.Contains(run) ||
                 IsFormulaOperatorLimitRun(bounds, run, pageLookup.LargeOperators) ||
                 !pageLookup.ProseLineRuns.Contains(run) &&
+                IsVerticallyAttachedFormulaRun(element.Bounds, run.Bounds) &&
                 (RectanglesIntersect(run.Bounds, bounds, 0.75f) &&
                         (IsFormulaRunCandidate(run) ||
                             hasMathFontContext && IsCompactFormulaContextRun(run)) ||
                     IsFormulaAdjacentRun(page, bounds, run)));
+    }
+
+    private static bool IsVerticallyAttachedFormulaRun(
+        PdfLayoutRectangle formulaBounds,
+        PdfLayoutRectangle runBounds)
+    {
+        if (!IsCompactFormulaRow(formulaBounds))
+        {
+            return true;
+        }
+
+        float center = runBounds.Y + runBounds.Height / 2f;
+        float tolerance = MathF.Max(0.75f, MathF.Min(2f, formulaBounds.Height * 0.06f));
+        return center >= formulaBounds.Y - tolerance &&
+            center <= formulaBounds.Bottom + tolerance;
+    }
+
+    private static bool IsCompactFormulaRow(PdfLayoutRectangle bounds)
+    {
+        return bounds.Height <= 14f;
     }
 
     internal static IReadOnlyList<PdfTextRun> FormulaSourceRuns(PdfSemanticElement element)
@@ -10474,6 +10526,150 @@ public static class PdfHtmlConverter
         }
 
         html.Append("</svg>");
+    }
+
+    private static void WriteFormulaGlyphOutlineLayer(
+        StringBuilder html,
+        PdfLayoutRectangle bounds,
+        IReadOnlyList<PdfTextGlyph> glyphs,
+        IReadOnlyDictionary<PdfTextGlyph, PdfLayoutRectangle> tallDelimiters)
+    {
+        html.Append("<svg class=\"pdf-semantic-formula-vector-layer pdf-semantic-formula-glyph-outline-layer\" viewBox=\"")
+            .Append(SvgNumber(bounds.X))
+            .Append(' ')
+            .Append(SvgNumber(bounds.Y))
+            .Append(' ')
+            .Append(SvgNumber(bounds.Width))
+            .Append(' ')
+            .Append(SvgNumber(bounds.Height))
+            .Append("\" aria-hidden=\"true\">");
+
+        foreach (PdfTextGlyph glyph in glyphs)
+        {
+            html.Append("<path d=\"")
+                .Append(HtmlAttribute(SvgPathData(glyph.Outline!)))
+                .Append("\" fill=\"")
+                .Append(ColorHex(glyph.Color))
+                .Append('"');
+            if (glyph.Color.Alpha < 0.999f)
+            {
+                html.Append(" fill-opacity=\"")
+                    .Append(SvgNumber(glyph.Color.Alpha))
+                    .Append('"');
+            }
+
+            html.Append(" />");
+        }
+
+        foreach ((PdfTextGlyph glyph, PdfLayoutRectangle delimiterBounds) in tallDelimiters)
+        {
+            float x = glyph.Text == "("
+                ? delimiterBounds.Right - delimiterBounds.Width * 0.2f
+                : delimiterBounds.X + delimiterBounds.Width * 0.2f;
+            float controlX = glyph.Text == "("
+                ? delimiterBounds.X
+                : delimiterBounds.Right;
+            float quarter = delimiterBounds.Height * 0.24f;
+            html.Append("<path class=\"pdf-semantic-formula-tall-delimiter\" data-delimiter=\"")
+                .Append(glyph.Text == "(" ? "open" : "close")
+                .Append("\" d=\"M ")
+                .Append(SvgNumber(x))
+                .Append(' ')
+                .Append(SvgNumber(delimiterBounds.Y))
+                .Append(" C ")
+                .Append(SvgNumber(controlX))
+                .Append(' ')
+                .Append(SvgNumber(delimiterBounds.Y + quarter))
+                .Append(' ')
+                .Append(SvgNumber(controlX))
+                .Append(' ')
+                .Append(SvgNumber(delimiterBounds.Bottom - quarter))
+                .Append(' ')
+                .Append(SvgNumber(x))
+                .Append(' ')
+                .Append(SvgNumber(delimiterBounds.Bottom))
+                .Append("\" fill=\"none\" stroke=\"")
+                .Append(ColorHex(glyph.Color))
+                .Append("\" stroke-width=\"")
+                .Append(SvgNumber(MathF.Max(0.55f, glyph.FontSize * 0.065f)))
+                .Append("\" stroke-linecap=\"round\"");
+            if (glyph.Color.Alpha < 0.999f)
+            {
+                html.Append(" stroke-opacity=\"")
+                    .Append(SvgNumber(glyph.Color.Alpha))
+                    .Append('"');
+            }
+
+            html.Append(" />");
+        }
+
+        html.Append("</svg>");
+    }
+
+    private static IReadOnlyDictionary<PdfTextGlyph, PdfLayoutRectangle> FormulaTallDelimiterBounds(
+        IReadOnlyList<PdfTextGlyph> glyphs)
+    {
+        Dictionary<PdfTextGlyph, PdfLayoutRectangle> result =
+            new((IEqualityComparer<PdfTextGlyph>)ReferenceEqualityComparer.Instance);
+        HashSet<PdfTextGlyph> pairedCloses =
+            new((IEqualityComparer<PdfTextGlyph>)ReferenceEqualityComparer.Instance);
+        PdfTextGlyph[] closes = glyphs
+            .Where(static glyph => IsUnoutlinedComputerModernDelimiter(glyph, ")"))
+            .OrderBy(static glyph => glyph.Bounds.X)
+            .ToArray();
+        foreach (PdfTextGlyph open in glyphs
+            .Where(static glyph => IsUnoutlinedComputerModernDelimiter(glyph, "("))
+            .OrderBy(static glyph => glyph.Bounds.X))
+        {
+            PdfTextGlyph? close = closes.FirstOrDefault(candidate =>
+                !pairedCloses.Contains(candidate) &&
+                candidate.Bounds.X > open.Bounds.Right &&
+                MathF.Abs(candidate.Bounds.Y - open.Bounds.Y) <=
+                    MathF.Max(1f, open.FontSize * 0.2f));
+            if (close == null)
+            {
+                continue;
+            }
+
+            PdfTextGlyph[] interior = glyphs
+                .Where(glyph => !ReferenceEquals(glyph, open) && !ReferenceEquals(glyph, close))
+                .Where(glyph =>
+                {
+                    float center = glyph.Bounds.X + glyph.Bounds.Width / 2f;
+                    return center >= open.Bounds.Right - 0.5f &&
+                        center <= close.Bounds.X + 0.5f;
+                })
+                .ToArray();
+            if (interior.Length == 0)
+            {
+                continue;
+            }
+
+            float top = MathF.Min(
+                MathF.Min(open.Bounds.Y, close.Bounds.Y),
+                interior.Min(static glyph => glyph.Bounds.Y));
+            float bottom = MathF.Max(
+                MathF.Max(open.Bounds.Bottom, close.Bounds.Bottom),
+                interior.Max(static glyph => glyph.Bounds.Bottom));
+            float height = bottom - top;
+            if (height < MathF.Max(open.Bounds.Height, close.Bounds.Height) * 1.35f)
+            {
+                continue;
+            }
+
+            pairedCloses.Add(close);
+            result.Add(open, new PdfLayoutRectangle(open.Bounds.X, top, open.Bounds.Width, height));
+            result.Add(close, new PdfLayoutRectangle(close.Bounds.X, top, close.Bounds.Width, height));
+        }
+
+        return result;
+    }
+
+    private static bool IsUnoutlinedComputerModernDelimiter(PdfTextGlyph glyph, string text)
+    {
+        return glyph.Text == text &&
+            glyph.Outline is not { Count: > 0 } &&
+            NormalizeFontName(glyph.FontName).StartsWith("CMEX", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsFormulaAdjacentRun(PdfLayoutPage page, PdfLayoutRectangle bounds, PdfTextRun run)

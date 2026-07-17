@@ -92,6 +92,11 @@ internal sealed class PdfMathMlFormula
             return false;
         }
 
+        if (DominantFontSize(baseline!.Glyphs) > fontSize * 1.2f)
+        {
+            return false;
+        }
+
         HashSet<PdfTextGlyph> relevant = SelectRelevantGlyphs(glyphs, paths, baseline!, fontSize);
         if (!TryTakeEquationNumber(
                 baseline!.Glyphs,

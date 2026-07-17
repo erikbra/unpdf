@@ -929,6 +929,39 @@ public class PdfLayoutExtractorTest
     }
 
     [Fact]
+    public void Extract_JmlrUnembeddedFontsDoNotUseSubstituteOutlines()
+    {
+        using PDDocument document = Loader.LoadPDF(Path.Combine(
+            AppContext.BaseDirectory,
+            "Fixtures",
+            "jmlr-lda-page-11.pdf"));
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeFontAssets = true,
+            IncludePaths = true
+        });
+
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        Assert.Contains(
+            page.Glyphs,
+            static glyph => glyph.Text == "p" &&
+                glyph.FontName.Contains("Times", StringComparison.Ordinal));
+        Assert.Contains(
+            page.Glyphs,
+            static glyph => glyph.Text == "θ" &&
+                glyph.FontName.Contains("Symbol", StringComparison.Ordinal));
+        PdfTextGlyph timesGlyph = page.Glyphs.First(static glyph =>
+            glyph.Text == "p" && glyph.FontName.Contains("Times", StringComparison.Ordinal));
+        PdfTextGlyph symbolGlyph = page.Glyphs.First(static glyph =>
+            glyph.Text == "θ" && glyph.FontName.Contains("Symbol", StringComparison.Ordinal));
+        Assert.Null(timesGlyph.Outline);
+        Assert.Null(symbolGlyph.Outline);
+        Assert.False(timesGlyph.UsesBrowserFontAsset);
+        Assert.False(symbolGlyph.UsesBrowserFontAsset);
+    }
+
+    [Fact]
     public void Extract_RepeatedUnsupportedFontReportsOneDiagnosticPerDocument()
     {
         using PDDocument document = CreateUnnamedType3TextDocument(
