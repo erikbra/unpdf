@@ -176,14 +176,28 @@ public sealed class PdfSemanticSectionTree
     private static bool IsFigureCaption(string text)
     {
         string trimmed = text.TrimStart();
-        if (!trimmed.StartsWith("Figure ", StringComparison.Ordinal))
+        int numberStart;
+        char separator;
+        if (trimmed.StartsWith("Figure ", StringComparison.OrdinalIgnoreCase))
+        {
+            numberStart = 7;
+            separator = ':';
+        }
+        else if (trimmed.StartsWith("Fig. ", StringComparison.OrdinalIgnoreCase))
+        {
+            numberStart = 5;
+            separator = '.';
+        }
+        else
         {
             return false;
         }
 
-        int colon = trimmed.IndexOf(':', StringComparison.Ordinal);
-        return colon is >= 8 and <= 18 &&
-            trimmed[7..colon].All(static character => char.IsDigit(character));
+        int delimiter = trimmed.IndexOf(separator, numberStart);
+        return delimiter > numberStart &&
+            delimiter - numberStart <= 10 &&
+            trimmed[numberStart..delimiter].All(static character =>
+                char.IsDigit(character) || character == '.');
     }
 
     private static IEnumerable<PdfSemanticSection> Flatten(IEnumerable<PdfSemanticSection> sections)

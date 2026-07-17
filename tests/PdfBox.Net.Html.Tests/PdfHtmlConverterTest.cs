@@ -1666,6 +1666,101 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public async Task Convert_UnetPageTwo_KeepsLabelsAndCaptionWithFigure()
+    {
+        using PDDocument document = Loader.LoadPDF(FixturePath("arxiv-unet-page-2-issue-19.pdf"));
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeLinks = false
+        });
+        PdfSemanticPage semanticPage = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+        PdfSemanticElement captionElement = Assert.Single(
+            semanticPage.Elements,
+            element => element.Text.StartsWith("Fig. 1.", StringComparison.Ordinal));
+        Assert.Equal(4, captionElement.Lines.Count);
+        Assert.DoesNotContain("as input", captionElement.Text, StringComparison.Ordinal);
+        PdfSemanticElement sourceProse = Assert.Single(
+            semanticPage.Elements,
+            element => element.Text.Contains("as input. First", StringComparison.Ordinal));
+        Assert.All(sourceProse.Lines, line => Assert.True(
+            MathF.Abs(line.Direction) < 0.01f,
+            $"{line.Direction:0.###}: {line.Text}"));
+
+        PdfHtmlDocument converted = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(converted.Html);
+
+        XElement figure = Assert.Single(
+            dom.Descendants("figure"),
+            element => element.Attribute("data-source-page")?.Value == "1");
+        XElement caption = Assert.Single(figure.Elements("figcaption"));
+        Assert.StartsWith("Fig. 1. U-net architecture", caption.Value, StringComparison.Ordinal);
+        Assert.Contains(figure.Descendants("text"), element => element.Value == "input");
+        Assert.Contains(figure.Descendants("text"), element => element.Value == "output");
+        Assert.Contains(figure.Descendants("text"), element =>
+            element.Value.Contains("conv 3x3, ReLU", StringComparison.Ordinal));
+        Assert.Contains(figure.Descendants("text"), element => element.Value == "128");
+        Assert.Contains(figure.Descendants("text"), element => element.Value == "2");
+
+        XElement prose = Assert.Single(
+            dom.Descendants("p"),
+            element => element.Value.StartsWith("as input. First, this network", StringComparison.Ordinal));
+        Assert.DoesNotContain("390 x 390", prose.Value, StringComparison.Ordinal);
+        List<XElement> readingOrder = dom.Descendants().ToList();
+        Assert.True(readingOrder.IndexOf(figure) < readingOrder.IndexOf(prose));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-page-artifacts"));
+
+        using TempDirectory tempDirectory = new();
+        converted.WriteToDirectory(tempDirectory.Path);
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage browserPage = await browser.NewPageAsync(new BrowserNewPageOptions
+        {
+            ViewportSize = new ViewportSize { Width = 1000, Height = 1200 }
+        });
+        await browserPage.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+
+        double[] geometry = await browserPage.EvaluateAsync<double[]>(
+            """
+            () => {
+              const figure = document.querySelector("figure[data-source-page='1']");
+              const svg = figure.querySelector("svg");
+              const caption = figure.querySelector("figcaption");
+              const prose = Array.from(document.querySelectorAll("p"))
+                .find(element => element.textContent.startsWith("as input. First, this network"));
+              const labels = Array.from(svg.querySelectorAll("text"))
+                .filter(element => element.textContent === "input" || element.textContent === "output");
+              const figureBox = figure.getBoundingClientRect();
+              const svgBox = svg.getBoundingClientRect();
+              const captionBox = caption.getBoundingClientRect();
+              const proseBox = prose.getBoundingClientRect();
+              const labelBoxes = labels.map(element => element.getBoundingClientRect());
+              return [
+                svgBox.left,
+                svgBox.right,
+                svgBox.bottom,
+                captionBox.top,
+                figureBox.bottom,
+                proseBox.top,
+                Math.min(...labelBoxes.map(box => box.left)),
+                Math.max(...labelBoxes.map(box => box.right))
+              ];
+            }
+            """);
+
+        Assert.True(geometry[3] >= geometry[2] - 1);
+        Assert.True(geometry[5] >= geometry[4] - 1);
+        Assert.True(geometry[6] >= geometry[0] - 1);
+        Assert.True(geometry[7] <= geometry[1] + 1);
+    }
+
+    [Fact]
     public async Task Convert_SemanticContinuousFlow_RendersCompactNonOverlappingMixedRegions()
     {
         PdfHtmlDocument html = PdfHtmlConverter.Convert(

@@ -684,6 +684,18 @@ public class PdfMathMlFormulaTest
             equationThree.Descendants(),
             element => HasClass(element, "pdf-semantic-formula-run") &&
                 element.Attribute("style")?.Value.Contains("left:", StringComparison.Ordinal) == true);
+
+        XElement figureTwo = Assert.Single(
+            dom.Descendants("figure"),
+            element => element.Elements("figcaption").Any(caption =>
+                caption.Value.StartsWith("Figure 2:", StringComparison.Ordinal)));
+        Assert.Single(figureTwo.Elements("figcaption"));
+        Assert.DoesNotContain("latexi", converted.Html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sha1_base64", converted.Html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(figureTwo.Descendants("text"), element =>
+            element.Attribute("style")?.Value.Contains("font-size:0", StringComparison.Ordinal) == true);
+        Assert.DoesNotContain(figureTwo.Descendants("text"), element =>
+            element.Value.StartsWith("Figure 2:", StringComparison.Ordinal));
     }
 
     [Fact]

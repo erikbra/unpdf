@@ -3969,7 +3969,7 @@ public static class PdfHtmlConverter
         PdfLayoutRectangle[] figureRegions = SemanticFigureRegions(page, semanticPage).ToArray();
         PdfSemanticElement[] positioned = semanticPage.Elements
             .Where(IsPositionedSemanticElement)
-            .Where(element => !ShouldKeepInFlowForFigureRendering(page, element, figureRegions))
+            .Where(element => !ShouldKeepInFlowForFigureRendering(page, semanticPage, element, figureRegions))
             .ToArray();
         foreach (PdfSemanticElement element in positioned)
         {
@@ -4389,7 +4389,7 @@ public static class PdfHtmlConverter
         PdfLayoutRectangle[] figureRegions = SemanticFigureRegions(page, semanticPage).ToArray();
         PdfSemanticElement[] positioned = semanticPage.Elements
             .Where(IsPositionedSemanticElement)
-            .Where(element => !ShouldKeepInFlowForFigureRendering(page, element, figureRegions))
+            .Where(element => !ShouldKeepInFlowForFigureRendering(page, semanticPage, element, figureRegions))
             .ToArray();
         HashSet<PdfSemanticElement> positionedSet = positioned.ToHashSet();
         PdfSemanticElement[] flowElements = semanticPage.Elements
@@ -7233,6 +7233,11 @@ public static class PdfHtmlConverter
             : SemanticFigureRegions(page, semanticPage)
                 .Where(region => skippedFigureRegions == null || !skippedFigureRegions.Contains(region))
                 .ToArray();
+        Dictionary<PdfLayoutRectangle, PdfSemanticElement> captionsByFigure =
+            figureRendering == SemanticFigureRendering.Content
+                ? FigureCaptionsByRegion(page, semanticPage, figureRegions)
+                : [];
+        PdfLayoutRectangle[] captionedFigureRegions = captionsByFigure.Keys.ToArray();
         HashSet<FormulaGlyphKey> claimedFormulaGlyphs = [];
         List<PdfSemanticElement> deferredPageArtifacts = [];
         int nextFigureRegion = 0;
@@ -7257,7 +7262,9 @@ public static class PdfHtmlConverter
                 continue;
             }
 
-            if (IsFigureLabelFlowElement(element, figureRegions))
+            if (IsMicroscopicUnpaintedPayloadElement(element) ||
+                IsFigureLabelFlowElement(element, figureRegions, captionedFigureRegions) ||
+                captionsByFigure.Values.Any(caption => ReferenceEquals(caption, element)))
             {
                 continue;
             }
@@ -7278,7 +7285,10 @@ public static class PdfHtmlConverter
                         figureRegions[nextFigureRegion],
                         imageAssets,
                         scale,
-                        inline: false);
+                        inline: false,
+                        caption: captionsByFigure.GetValueOrDefault(figureRegions[nextFigureRegion]),
+                        footnotes: footnotes,
+                        includeAllText: captionsByFigure.ContainsKey(figureRegions[nextFigureRegion]));
                 }
 
                 nextFigureRegion++;
@@ -7394,7 +7404,10 @@ public static class PdfHtmlConverter
                     figureRegions[nextFigureRegion],
                     imageAssets,
                     scale,
-                    inline: false);
+                    inline: false,
+                    caption: captionsByFigure.GetValueOrDefault(figureRegions[nextFigureRegion]),
+                    footnotes: footnotes,
+                    includeAllText: captionsByFigure.ContainsKey(figureRegions[nextFigureRegion]));
             }
 
             nextFigureRegion++;
@@ -7437,8 +7450,13 @@ public static class PdfHtmlConverter
                     IsLocalizedFigureDecoration(path.Bounds, region))
                 .ToArray()
             : [];
+        HashSet<PdfTextRun> captionRuns = caption?.Lines
+            .SelectMany(static line => line.Runs)
+            .Where(static run => MathF.Abs(NormalizeDirection(run.Direction)) < 0.01f)
+            .ToHashSet() ?? [];
         PdfTextRun[] textRuns = includeSourceDecorations
             ? FigureRegionTextRuns(page, region, includeAllText)
+                .Where(run => !captionRuns.Contains(run))
                 .Where(run => !constrainSourceDecorationsToRegion ||
                     RectangleContainsCenter(region, run.PageBounds))
                 .ToArray()
@@ -7570,10 +7588,24 @@ public static class PdfHtmlConverter
     {
         return page.Runs
             .Where(run => includeAllText || IsFigureLabelRun(run))
+            .Where(run => !IsUnpaintedTextRun(run))
+            .Where(run => !IsHorizontalTextInsideInvisibleVectorGroup(page, run))
             .Where(run => !IsCoveredByTransparencyFallback(page, run.PageBounds))
             .Where(run => RectanglesIntersect(run.PageBounds, region, 2f))
             .OrderBy(static run => run.PageBounds.Y)
             .ThenBy(static run => run.PageBounds.X);
+    }
+
+    private static bool IsHorizontalTextInsideInvisibleVectorGroup(PdfLayoutPage page, PdfTextRun run)
+    {
+        if (MathF.Abs(NormalizeDirection(run.Direction)) >= 0.01f)
+        {
+            return false;
+        }
+
+        return page.VectorGroups
+            .Where(static group => group.Opacity <= 0.01f)
+            .Any(group => RectangleContainsCenter(group.Bounds, run.PageBounds));
     }
 
     private static void WriteFigureTextRun(StringBuilder html, PdfLayoutPage page, PdfTextRun run)
@@ -7943,7 +7975,8 @@ public static class PdfHtmlConverter
 
     private static bool IsFigureLabelFlowElement(
         PdfSemanticElement element,
-        IReadOnlyList<PdfLayoutRectangle> figureRegions)
+        IReadOnlyList<PdfLayoutRectangle> figureRegions,
+        IReadOnlyList<PdfLayoutRectangle>? captionedFigureRegions = null)
     {
         if (figureRegions.Count == 0 ||
             element.Kind is PdfSemanticElementKind.Table or PdfSemanticElementKind.Footnote or PdfSemanticElementKind.Footer ||
@@ -7956,6 +7989,15 @@ public static class PdfHtmlConverter
             .SelectMany(static line => line.Runs)
             .Where(static run => !string.IsNullOrWhiteSpace(run.Text))
             .ToArray();
+        if (captionedFigureRegions is { Count: > 0 } &&
+            allRuns.Length > 0 &&
+            allRuns.Any(run => !IsUnpaintedTextRun(run)) &&
+            allRuns.All(run => captionedFigureRegions.Any(region =>
+                RectangleContainsCenter(ExpandRectangle(region, 2f, 2f), run.PageBounds))))
+        {
+            return true;
+        }
+
         if (LooksLikeEscapedFigureLabelText(element.Text) &&
             figureRegions.Any(region => RectanglesIntersect(element.Bounds, ExpandRectangle(region, 24f, 72f), 2f)))
         {
@@ -8015,10 +8057,18 @@ public static class PdfHtmlConverter
 
     private static bool ShouldKeepInFlowForFigureRendering(
         PdfLayoutPage page,
+        PdfSemanticPage semanticPage,
         PdfSemanticElement element,
         IReadOnlyList<PdfLayoutRectangle> figureRegions)
     {
-        if (IsFigureLabelFlowElement(element, figureRegions))
+        PdfLayoutRectangle[] captionedFigureRegions = FigureCaptionsByRegion(
+            page,
+            semanticPage,
+            figureRegions).Keys.ToArray();
+        if (IsFigureLabelFlowElement(element, figureRegions, captionedFigureRegions) ||
+            IsFigureCaption(element) &&
+            captionedFigureRegions.Any(region =>
+                IsCaptionAssociatedWithFigure(page, element.Bounds, region)))
         {
             return true;
         }
@@ -8035,6 +8085,56 @@ public static class PdfHtmlConverter
         return directedRuns.Length > 0 &&
             directedRuns.All(run => IsFigureLabelRun(run) &&
                 figureRegions.Any(region => RectanglesIntersect(run.PageBounds, region, 2f)));
+    }
+
+    private static Dictionary<PdfLayoutRectangle, PdfSemanticElement> FigureCaptionsByRegion(
+        PdfLayoutPage page,
+        PdfSemanticPage semanticPage,
+        IReadOnlyList<PdfLayoutRectangle> figureRegions)
+    {
+        Dictionary<PdfLayoutRectangle, PdfSemanticElement> captions = [];
+        HashSet<PdfSemanticElement> claimedCaptions =
+            new((IEqualityComparer<PdfSemanticElement>)ReferenceEqualityComparer.Instance);
+        foreach (PdfLayoutRectangle region in figureRegions.OrderBy(static region => region.Y))
+        {
+            PdfSemanticElement? caption = semanticPage.Elements
+                .Where(IsFigureCaption)
+                .Where(candidate => candidate.Bounds.Y >=
+                    region.Y + MathF.Min(region.Height * 0.60f, region.Height - 6f))
+                .Where(candidate => IsCaptionAssociatedWithFigure(page, candidate.Bounds, region))
+                .Where(candidate => !claimedCaptions.Contains(candidate))
+                .OrderBy(candidate => VerticalGap(candidate.Bounds, region))
+                .ThenBy(static candidate => candidate.Bounds.Y)
+                .FirstOrDefault();
+            if (caption != null)
+            {
+                captions[region] = caption;
+                claimedCaptions.Add(caption);
+            }
+        }
+
+        return captions;
+    }
+
+    private static bool IsMicroscopicUnpaintedPayloadElement(PdfSemanticElement element)
+    {
+        PdfTextGlyph[] glyphs = element.Lines
+            .SelectMany(static line => line.Runs)
+            .SelectMany(static run => run.Glyphs)
+            .Where(static glyph => !string.IsNullOrWhiteSpace(glyph.Text))
+            .ToArray();
+        PdfTextGlyph[] unpainted = glyphs
+            .Where(static glyph => !glyph.IsPainted)
+            .ToArray();
+        return unpainted.Length >= 24 &&
+            unpainted.Length >= glyphs.Length * 0.85f &&
+            unpainted.All(static glyph =>
+                glyph.FontSize <= 0.25f ||
+                glyph.PageBounds.Width <= 0.01f && glyph.PageBounds.Height <= 0.01f) &&
+            unpainted.Count(glyph =>
+                NormalizeFontName(glyph.FontName).Contains("Courier", StringComparison.OrdinalIgnoreCase) ||
+                NormalizeFontName(glyph.FontName).Contains("Mono", StringComparison.OrdinalIgnoreCase)) >=
+                unpainted.Length * 0.85f;
     }
 
     private static bool IsFigureLabelRun(PdfTextRun run)
@@ -13700,18 +13800,31 @@ public static class PdfHtmlConverter
         }
 
         string text = element.Text.TrimStart();
-        if (!text.StartsWith("Figure ", StringComparison.Ordinal))
+        int numberStart;
+        char separator;
+        if (text.StartsWith("Figure ", StringComparison.OrdinalIgnoreCase))
+        {
+            numberStart = 7;
+            separator = ':';
+        }
+        else if (text.StartsWith("Fig. ", StringComparison.OrdinalIgnoreCase))
+        {
+            numberStart = 5;
+            separator = '.';
+        }
+        else
         {
             return false;
         }
 
-        int colon = text.IndexOf(':', StringComparison.Ordinal);
-        if (colon < 8 || colon > 18)
+        int delimiter = text.IndexOf(separator, numberStart);
+        if (delimiter <= numberStart || delimiter - numberStart > 10)
         {
             return false;
         }
 
-        return text[7..colon].All(static character => char.IsDigit(character));
+        return text[numberStart..delimiter].All(static character =>
+            char.IsDigit(character) || character == '.');
     }
 
     private static bool IsSameRowLineGroup(PdfSemanticElement element)

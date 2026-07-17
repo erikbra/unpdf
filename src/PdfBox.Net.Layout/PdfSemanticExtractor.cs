@@ -46,6 +46,9 @@ public static class PdfSemanticExtractor
     private static readonly Regex AlgorithmCaptionPattern = new(
         @"^Algorithm\b(?:\s+\d+)?\s*[:.]?\s*",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex FigureCaptionPattern = new(
+        @"^\s*(?:Figure|Fig\.)\s*\d{1,4}(?:\.\d+)*(?:[A-Za-z])?\s*[:.\-–—]\s*",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex AlgorithmKeywordPattern = new(
         @"\b(?:Require|while|do|end|return)\b",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -996,6 +999,15 @@ public static class PdfSemanticExtractor
             }
         }
 
+        foreach (PdfSemanticElement caption in ExtractFigureCaptions(
+            lines,
+            lineStep,
+            consumed,
+            options))
+        {
+            elements.Add(caption);
+        }
+
         foreach (PdfSemanticElement formula in ExtractNumberedDisplayFormulas(
             lines,
             bodyFontSize,
@@ -1763,13 +1775,20 @@ public static class PdfSemanticExtractor
             return false;
         }
 
+        float fragmentHorizontalGap = HorizontalGap(previous.Bounds, current.Bounds);
+        if (fragmentHorizontalGap >= pageWidth * 0.05f &&
+            (previous.Bounds.Width <= pageWidth * 0.20f ||
+                current.Bounds.Width <= pageWidth * 0.20f))
+        {
+            return false;
+        }
+
         if (preserveColumnLanes)
         {
-            float horizontalGap = HorizontalGap(previous.Bounds, current.Bounds);
             bool crossesPageGutter =
                 previous.Bounds.Right <= pageWidth * 0.52f && current.Bounds.X >= pageWidth * 0.48f ||
                 current.Bounds.Right <= pageWidth * 0.52f && previous.Bounds.X >= pageWidth * 0.48f;
-            if (horizontalGap >= pageWidth * 0.01f &&
+            if (fragmentHorizontalGap >= pageWidth * 0.01f &&
                 (crossesPageGutter ||
                     previous.Bounds.Width >= pageWidth * 0.20f &&
                     current.Bounds.Width >= pageWidth * 0.20f))
@@ -1967,14 +1986,21 @@ public static class PdfSemanticExtractor
     {
         if (tableCandidateRegions.Count == 0)
         {
-            return page.Lines.Select((line, index) => CreateLineCandidate(index, line, options));
+            return page.Lines
+                .Select(line => CreateTextLine(line.Runs
+                    .Where(static run => !IsMicroscopicUnpaintedPayloadRun(run))
+                    .ToArray()))
+                .Where(static line => line.Runs.Count > 0)
+                .Select((line, index) => CreateLineCandidate(index, line, options));
         }
 
         List<LineCandidate> candidates = [];
         int candidateIndex = 0;
         foreach (PdfTextLine source in page.Lines)
         {
-            List<PdfTextRun> remainingRuns = source.Runs.ToList();
+            List<PdfTextRun> remainingRuns = source.Runs
+                .Where(static run => !IsMicroscopicUnpaintedPayloadRun(run))
+                .ToList();
             foreach (TableCandidateRegion region in tableCandidateRegions)
             {
                 PdfTextRun[] regionRuns = remainingRuns
@@ -2003,6 +2029,25 @@ public static class PdfSemanticExtractor
         }
 
         return candidates;
+    }
+
+    private static bool IsMicroscopicUnpaintedPayloadRun(PdfTextRun run)
+    {
+        PdfTextGlyph[] glyphs = run.Glyphs
+            .Where(static glyph => !string.IsNullOrWhiteSpace(glyph.Text))
+            .ToArray();
+        PdfTextGlyph[] unpainted = glyphs
+            .Where(static glyph => !glyph.IsPainted)
+            .ToArray();
+        return unpainted.Length >= 24 &&
+            unpainted.Length >= glyphs.Length * 0.85f &&
+            unpainted.All(static glyph =>
+                glyph.FontSize <= 0.25f ||
+                glyph.PageBounds.Width <= 0.01f && glyph.PageBounds.Height <= 0.01f) &&
+            unpainted.Count(glyph =>
+                NormalizeFontName(glyph.FontName).Contains("Courier", StringComparison.OrdinalIgnoreCase) ||
+                NormalizeFontName(glyph.FontName).Contains("Mono", StringComparison.OrdinalIgnoreCase)) >=
+                unpainted.Length * 0.85f;
     }
 
     private static int? FindHorizontalTableLane(
@@ -4347,6 +4392,48 @@ public static class PdfSemanticExtractor
         if (current.Count > 0)
         {
             yield return CreateParagraph(current, consumed, options);
+        }
+    }
+
+    private static IEnumerable<PdfSemanticElement> ExtractFigureCaptions(
+        IReadOnlyList<LineCandidate> lines,
+        float lineStep,
+        HashSet<int> consumed,
+        PdfSemanticExtractionOptions options)
+    {
+        foreach (LineCandidate anchor in lines
+            .Where(line => !consumed.Contains(line.Index))
+            .Where(line => FigureCaptionPattern.IsMatch(line.Text))
+            .Where(static line => MathF.Abs(line.Direction) < 0.01f)
+            .OrderBy(static line => line.Bounds.Y)
+            .ThenBy(static line => line.Bounds.X))
+        {
+            List<LineCandidate> captionLines = [anchor];
+            LineCandidate previous = anchor;
+            foreach (LineCandidate candidate in lines
+                .Where(line => !consumed.Contains(line.Index) && line.Index != anchor.Index)
+                .Where(line => line.Bounds.Y > previous.Bounds.Y)
+                .OrderBy(static line => line.Bounds.Y)
+                .ThenBy(static line => line.Bounds.X))
+            {
+                if (candidate.Bounds.Y - previous.Bounds.Y > lineStep * 1.55f)
+                {
+                    break;
+                }
+
+                if (MathF.Abs(candidate.Direction) > 0.01f ||
+                    MathF.Abs(candidate.FontSize - anchor.FontSize) > 1.25f ||
+                    MathF.Abs(candidate.Bounds.X - anchor.Bounds.X) > MathF.Max(18f, anchor.FontSize * 2.5f) ||
+                    HorizontalGap(candidate.Bounds, anchor.Bounds) > MathF.Max(8f, anchor.FontSize))
+                {
+                    continue;
+                }
+
+                captionLines.Add(candidate);
+                previous = candidate;
+            }
+
+            yield return CreateParagraph(captionLines, consumed, options);
         }
     }
 
@@ -7927,6 +8014,13 @@ public static class PdfSemanticExtractor
     {
         if (previous.TableLaneIndex != current.TableLaneIndex &&
             (previous.TableLaneIndex.HasValue || current.TableLaneIndex.HasValue))
+        {
+            return true;
+        }
+
+        bool previousDirected = MathF.Abs(previous.Direction) > 0.01f;
+        bool currentDirected = MathF.Abs(current.Direction) > 0.01f;
+        if (previousDirected != currentDirected)
         {
             return true;
         }
