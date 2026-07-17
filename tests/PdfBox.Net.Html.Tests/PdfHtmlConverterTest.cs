@@ -22,6 +22,7 @@ using PdfBox.Net.PDModel.Graphics.Image;
 using PdfBox.Net.PDModel.Graphics.State;
 using PdfBox.Net.PDModel.Interactive.Action;
 using PdfBox.Net.PDModel.Interactive.Annotation;
+using PdfBox.Net.PDModel.Interactive.Form;
 using PdfBox.Net.PDModel.Resources;
 using PdfBox.Net.Rendering;
 using PdfBox.Net.Util;
@@ -5726,11 +5727,13 @@ public class PdfHtmlConverterTest
         Assert.Equal("40", text.Attribute("maxlength")?.Value);
         Assert.Contains("left:20pt", text.Attribute("style")?.Value);
         Assert.True(HasClass(text, "pdf-form-control-positioned"));
+        Assert.True(HasClass(text, "pdf-form-control-widget"));
         Assert.True(HasClass(text, "pdf-form-control-authored-appearance"));
         Assert.Equal("pdf-image-page-1-placement-0", text.Attribute("data-widget-appearance-id")?.Value);
 
         XElement checkBox = Assert.Single(emitted, element => element.Attribute("type")?.Value == "checkbox");
         Assert.NotNull(checkBox.Attribute("checked"));
+        Assert.True(HasClass(checkBox, "pdf-form-control-widget"));
         Assert.True(HasClass(checkBox, "pdf-form-control-authored-appearance"));
         Assert.False(HasClass(checkBox, "pdf-form-control-positioned"));
         Assert.Equal("pdf-image-page-1-placement-1", checkBox.Attribute("data-widget-appearance-id")?.Value);
@@ -5765,6 +5768,8 @@ public class PdfHtmlConverterTest
         Assert.True(HasClass(signature, "pdf-form-control-positioned"));
         Assert.Equal(4, ElementsByClass(dom, "pdf-image").Count());
         Assert.Contains(".pdf-form-control-positioned {", converted.Css,
+            StringComparison.Ordinal);
+        Assert.Contains(".pdf-form-control-widget {", converted.Css,
             StringComparison.Ordinal);
         Assert.Contains(".pdf-form-control-authored-appearance[type=\"checkbox\"]", converted.Css,
             StringComparison.Ordinal);
@@ -5843,7 +5848,8 @@ public class PdfHtmlConverterTest
         await notesControl.EvaluateAsync("element => element.blur()");
         Assert.True(await notesControl.EvaluateAsync<bool>("element => element.classList.contains('pdf-form-control-edited')"));
         Assert.Equal("Edited value", await notesControl.InputValueAsync());
-        Assert.NotEqual("none", await notesControl.EvaluateAsync<string>("element => getComputedStyle(element).borderStyle"));
+        Assert.Equal("none", await notesControl.EvaluateAsync<string>("element => getComputedStyle(element).borderStyle"));
+        Assert.Equal("none", await notesControl.EvaluateAsync<string>("element => getComputedStyle(element).outlineStyle"));
 
         ILocator listControl = browserPage.Locator("[name='colors']");
         Assert.Equal("none", await listControl.EvaluateAsync<string>("element => getComputedStyle(element).borderStyle"));
@@ -5852,12 +5858,125 @@ public class PdfHtmlConverterTest
         Assert.Null(await listControl.GetAttributeAsync("data-widget-appearance-id"));
         await listControl.FocusAsync();
         Assert.True(await listControl.EvaluateAsync<bool>("element => element.classList.contains('pdf-form-control-active')"));
-        Assert.NotEqual("none", await listControl.EvaluateAsync<string>("element => getComputedStyle(element).borderStyle"));
+        Assert.Equal("none", await listControl.EvaluateAsync<string>("element => getComputedStyle(element).borderStyle"));
+        Assert.Equal("2px", await listControl.EvaluateAsync<string>("element => getComputedStyle(element).outlineWidth"));
         await listControl.EvaluateAsync("element => element.dispatchEvent(new Event('change', { bubbles: true }))");
         await listControl.EvaluateAsync("element => element.blur()");
         Assert.True(await listControl.EvaluateAsync<bool>("element => element.classList.contains('pdf-form-control-edited')"));
         Assert.False(await listControl.EvaluateAsync<bool>("element => element.classList.contains('pdf-form-control-active')"));
-        Assert.NotEqual("none", await listControl.EvaluateAsync<string>("element => getComputedStyle(element).borderStyle"));
+        Assert.Equal("none", await listControl.EvaluateAsync<string>("element => getComputedStyle(element).borderStyle"));
+        Assert.Equal("none", await listControl.EvaluateAsync<string>("element => getComputedStyle(element).outlineStyle"));
+    }
+
+    [Fact]
+    public async Task Convert_FillableFixtureClipsControlsWithoutCoveringLabelsOrRules()
+    {
+        using PDDocument document = CreateOverlappingFormControlDocument();
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document);
+        PdfLayoutPage layoutPage = Assert.Single(layout.Pages);
+        PdfLayoutFormControl textLayout = Assert.Single(
+            layoutPage.FormControls,
+            control => control.Name == "placeOfBirth");
+        PdfLayoutFormControl checkLayout = Assert.Single(
+            layoutPage.FormControls,
+            control => control.Name == "confirmed");
+        PdfHtmlDocument converted = PdfHtmlConverter.Convert(layout);
+        XDocument dom = ParseHtml(converted.Html);
+
+        XElement textElement = Assert.Single(
+            ElementsByClass(dom, "pdf-form-control"),
+            element => element.Attribute("name")?.Value == "placeOfBirth");
+        XElement checkElement = Assert.Single(
+            ElementsByClass(dom, "pdf-form-control"),
+            element => element.Attribute("name")?.Value == "confirmed");
+        Assert.True(HasClass(textElement, "pdf-form-control-widget"));
+        Assert.True(HasClass(textElement, "pdf-form-control-positioned"));
+        Assert.True(HasClass(checkElement, "pdf-form-control-widget"));
+
+        using TempDirectory tempDirectory = new();
+        converted.WriteToDirectory(tempDirectory.Path);
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage browserPage = await browser.NewPageAsync(new BrowserNewPageOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1000,
+                Height = 1200
+            }
+        });
+        await browserPage.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+
+        ILocator pageLocator = browserPage.Locator(".pdf-page");
+        ILocator textControl = browserPage.Locator("[name='placeOfBirth']");
+        ILocator checkControl = browserPage.Locator("[name='confirmed']");
+        ILocator prompt = browserPage.Locator(".pdf-text-run")
+            .Filter(new LocatorFilterOptions { HasText = "PLACE OF BIRTH" });
+        ILocator checkCaption = browserPage.Locator(".pdf-text-run")
+            .Filter(new LocatorFilterOptions { HasText = "Confirmed" });
+        ILocator rule = browserPage.Locator(".pdf-vector-layer path[data-path-index]");
+        LocatorBoundingBoxResult pageBox = await pageLocator.BoundingBoxAsync()
+            ?? throw new InvalidOperationException("Page did not render a bounding box.");
+        LocatorBoundingBoxResult textBox = await textControl.BoundingBoxAsync()
+            ?? throw new InvalidOperationException("Text control did not render a bounding box.");
+        LocatorBoundingBoxResult checkBox = await checkControl.BoundingBoxAsync()
+            ?? throw new InvalidOperationException("Check box did not render a bounding box.");
+        LocatorBoundingBoxResult promptBox = await prompt.BoundingBoxAsync()
+            ?? throw new InvalidOperationException("Prompt did not render a bounding box.");
+        LocatorBoundingBoxResult checkCaptionBox = await checkCaption.BoundingBoxAsync()
+            ?? throw new InvalidOperationException("Check box caption did not render a bounding box.");
+        LocatorBoundingBoxResult ruleBox = await rule.BoundingBoxAsync()
+            ?? throw new InvalidOperationException("Rule did not render a bounding box.");
+
+        const float cssPixelsPerPoint = 96f / 72f;
+        const float tolerancePx = 1f;
+        AssertControlGeometry(pageBox, textBox, textLayout.Bounds, cssPixelsPerPoint, tolerancePx);
+        AssertControlGeometry(pageBox, checkBox, checkLayout.Bounds, cssPixelsPerPoint, tolerancePx);
+        Assert.True(RectanglesOverlap(textBox, promptBox), "The fixture prompt must intersect the authored text widget.");
+        Assert.True(RectanglesOverlap(textBox, ruleBox), "The fixture rule must intersect the authored text widget.");
+        Assert.True(checkCaptionBox.X >= checkBox.X + checkBox.Width);
+        AssertWithin(
+            3f,
+            (float)(checkBox.Y + checkBox.Height / 2),
+            (float)(checkCaptionBox.Y + checkCaptionBox.Height / 2));
+        Assert.Equal("rgba(0, 0, 0, 0)",
+            await textControl.EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor"));
+        Assert.Equal("none",
+            await textControl.EvaluateAsync<string>("element => getComputedStyle(element).borderStyle"));
+        string overflow = await textControl.EvaluateAsync<string>("element => getComputedStyle(element).overflow");
+        Assert.True(overflow is "clip" or "hidden");
+        Assert.NotEqual("none",
+            await textControl.EvaluateAsync<string>("element => getComputedStyle(element).clipPath"));
+
+        await textControl.FocusAsync();
+        Assert.Equal("rgba(0, 0, 0, 0)",
+            await textControl.EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor"));
+        Assert.Equal("none",
+            await textControl.EvaluateAsync<string>("element => getComputedStyle(element).borderStyle"));
+        Assert.Equal("2px",
+            await textControl.EvaluateAsync<string>("element => getComputedStyle(element).outlineWidth"));
+        await textControl.FillAsync("Oslo, Norway");
+        await textControl.EvaluateAsync("element => element.blur()");
+        Assert.Equal("rgba(0, 0, 0, 0)",
+            await textControl.EvaluateAsync<string>("element => getComputedStyle(element).backgroundColor"));
+        Assert.Equal("none",
+            await textControl.EvaluateAsync<string>("element => getComputedStyle(element).borderStyle"));
+        Assert.True(await prompt.IsVisibleAsync());
+        Assert.NotEqual("hidden",
+            await rule.EvaluateAsync<string>("element => getComputedStyle(element).visibility"));
+        Assert.NotEqual("none",
+            await rule.EvaluateAsync<string>("element => getComputedStyle(element).display"));
+
+        LocatorBoundingBoxResult editedTextBox = await textControl.BoundingBoxAsync()
+            ?? throw new InvalidOperationException("Edited text control did not render a bounding box.");
+        AssertControlGeometry(pageBox, editedTextBox, textLayout.Bounds, cssPixelsPerPoint, tolerancePx);
+        await checkControl.ClickAsync();
+        LocatorBoundingBoxResult editedCheckBox = await checkControl.BoundingBoxAsync()
+            ?? throw new InvalidOperationException("Edited check box did not render a bounding box.");
+        AssertControlGeometry(pageBox, editedCheckBox, checkLayout.Bounds, cssPixelsPerPoint, tolerancePx);
     }
 
     [Fact]
@@ -8081,6 +8200,84 @@ public class PdfHtmlConverterTest
         pageDictionary.SetItem(COSName.RESOURCES, CreateDefaultResourcesDictionary());
         pageDictionary.SetItem(COSName.CONTENTS, CreateContentStream(contentStream));
         return document;
+    }
+
+    private static PDDocument CreateOverlappingFormControlDocument()
+    {
+        PDDocument document = CreateTextDocument("""
+            BT /F1 11 Tf 40 638 Td
+            (3a. PLACE OF BIRTH \(Include city and state or country\)) Tj
+            ET
+            1 w
+            40 612 m
+            560 612 l
+            S
+            BT /F1 11 Tf 68 574 Td
+            (Confirmed) Tj
+            ET
+            """);
+        PDPage page = document.GetPage(0);
+        PDAcroForm acroForm = new(document);
+        document.GetDocumentCatalog().SetAcroForm(acroForm);
+
+        PDTextField placeOfBirth = new(acroForm);
+        placeOfBirth.SetPartialName("placeOfBirth");
+        ((COSDictionary)placeOfBirth.GetCOSObject()).SetString(
+            COSName.GetPDFName("TU"),
+            "Place of birth, including city and country");
+        PDCheckBox confirmed = new(acroForm);
+        confirmed.SetPartialName("confirmed");
+
+        List<PDAnnotationWidget> annotations = [];
+        SetFormWidgets(
+            placeOfBirth,
+            [CreateFormControlWidget(page, new PDRectangle(40, 610, 520, 32))],
+            annotations);
+        SetFormWidgets(
+            confirmed,
+            [CreateFormControlWidget(page, new PDRectangle(40, 570, 18, 18))],
+            annotations);
+        acroForm.SetFields([placeOfBirth, confirmed]);
+        page.SetAnnotations(annotations.Cast<PDAnnotation>().ToList());
+        return document;
+    }
+
+    private static void SetFormWidgets(
+        PDField field,
+        IList<PDAnnotationWidget> widgets,
+        List<PDAnnotationWidget> annotations)
+    {
+        field.SetWidgets(widgets);
+        annotations.AddRange(widgets);
+    }
+
+    private static PDAnnotationWidget CreateFormControlWidget(PDPage page, PDRectangle rectangle)
+    {
+        PDAnnotationWidget widget = new();
+        widget.SetRectangle(rectangle);
+        widget.SetPage(page);
+        return widget;
+    }
+
+    private static void AssertControlGeometry(
+        LocatorBoundingBoxResult pageBox,
+        LocatorBoundingBoxResult controlBox,
+        PdfLayoutRectangle expected,
+        float cssPixelsPerPoint,
+        float tolerancePx)
+    {
+        AssertWithin(tolerancePx, expected.X * cssPixelsPerPoint, (float)(controlBox.X - pageBox.X));
+        AssertWithin(tolerancePx, expected.Y * cssPixelsPerPoint, (float)(controlBox.Y - pageBox.Y));
+        AssertWithin(tolerancePx, expected.Width * cssPixelsPerPoint, (float)controlBox.Width);
+        AssertWithin(tolerancePx, expected.Height * cssPixelsPerPoint, (float)controlBox.Height);
+    }
+
+    private static bool RectanglesOverlap(LocatorBoundingBoxResult first, LocatorBoundingBoxResult second)
+    {
+        return first.X < second.X + second.Width &&
+            first.X + first.Width > second.X &&
+            first.Y < second.Y + second.Height &&
+            first.Y + first.Height > second.Y;
     }
 
     private static PDDocument CreateContinuingSectionDocument()
