@@ -1947,7 +1947,6 @@ public static class PdfLayoutExtractor
             {
                 PageBounds = pageBounds,
                 Outline = hasBrowserFontAsset ? null : TryCreateGlyphOutline(position, font),
-                OutlineIsExact = HasExactGlyphOutlineSource(font),
                 UsesBrowserFontAsset = hasBrowserFontAsset,
                 IsPainted = textPaintStates.GetValueOrDefault(position, true)
             };
@@ -1955,10 +1954,11 @@ public static class PdfLayoutExtractor
 
         private PdfLayoutPathCommand[]? TryCreateGlyphOutline(TextPosition position, PDFont font)
         {
-            // PDF vector fonts that cannot be referenced by CSS @font-face still have usable glyph
-            // geometry. Preserve it for positioned formula fallback; callers can distinguish
-            // embedded source outlines from outlines resolved through PDF font substitution.
+            // Embedded PDF vector fonts that cannot be referenced by CSS @font-face still have
+            // exact, cross-platform glyph geometry. Never collect normalized paths from
+            // unembedded fonts because those paths depend on host font substitution.
             if (font is not PDVectorFont vectorFont ||
+                !HasEmbeddedGlyphOutlineSource(font) ||
                 position.GetCharacterCodes() is not [int code])
             {
                 return null;
@@ -2031,13 +2031,13 @@ public static class PdfLayoutExtractor
                 _diagnostics.Add(new PdfLayoutDiagnostic(
                     PdfLayoutDiagnosticSeverity.Warning,
                     "glyph-outline-collection-failed",
-                    "Vector glyph outlines could not be collected: " + ex.Message,
+                    "Embedded vector glyph outlines could not be collected: " + ex.Message,
                     _pageNumber));
                 return null;
             }
         }
 
-        private static bool HasExactGlyphOutlineSource(PDFont font)
+        private static bool HasEmbeddedGlyphOutlineSource(PDFont font)
         {
             if (font is PDType1CFont)
             {

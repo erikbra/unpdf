@@ -786,7 +786,6 @@ public class PdfMathMlFormulaTest
         XElement outlineLayer = Assert.Single(
             marginal.Elements("svg"),
             static element => HasClass(element, "pdf-semantic-formula-glyph-outline-layer"));
-        Assert.True(outlineLayer.Elements("path").Count() > 40);
         Assert.Equal(
             ["open", "close", "open", "close"],
             outlineLayer.Elements("path")
@@ -933,9 +932,7 @@ public class PdfMathMlFormulaTest
                   ruleBox.bottom <= formulaBox.bottom + 1,
                 productCount: Array.from(
                   formula.querySelectorAll('.pdf-semantic-formula-run'))
-                  .filter(run => run.textContent === '∏').length,
-                outlinePathCount: formula.querySelectorAll(
-                  '.pdf-semantic-formula-glyph-outline-layer path').length
+                  .filter(run => run.textContent === '∏').length
               };
             }
             """);
@@ -945,7 +942,6 @@ public class PdfMathMlFormulaTest
         Assert.True(pageEleven.FractionRuleWidth >= 45);
         Assert.True(pageEleven.FractionRuleInside);
         Assert.Equal(4, pageEleven.ProductCount);
-        Assert.True(pageEleven.OutlinePathCount > 40);
 
         await page.GotoAsync(new Uri(Path.Combine(pageTwelveDirectory, "index.html")).AbsoluteUri);
         await page.EvaluateAsync("() => document.fonts.ready");
@@ -1247,7 +1243,6 @@ public class PdfMathMlFormulaTest
 
         public int ProductCount { get; set; }
 
-        public int OutlinePathCount { get; set; }
     }
 
     private sealed class JmlrPageTwelveBrowserMetrics

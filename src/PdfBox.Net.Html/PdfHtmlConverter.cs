@@ -3868,7 +3868,7 @@ public static class PdfHtmlConverter
     {
         return run.Glyphs.Any(static glyph => glyph.Outline is { Count: > 0 }) &&
             run.Glyphs.All(static glyph =>
-                glyph.OutlineIsExact && glyph.Outline is { Count: > 0 } ||
+                glyph.Outline is { Count: > 0 } ||
                 glyph.Outline is not null && string.IsNullOrWhiteSpace(glyph.Text));
     }
 
@@ -10143,7 +10143,7 @@ public static class PdfHtmlConverter
                 .Where(static glyph => glyph.Outline is { Count: > 0 })
                 .ToArray();
             IReadOnlyDictionary<PdfTextGlyph, PdfLayoutRectangle> tallDelimiters =
-                PdfFormulaGeometry.TallDelimiterBounds(glyphs);
+                FormulaTallDelimiterBounds(glyphs);
             if (outlinedGlyphs.Length > 0 || tallDelimiters.Count > 0)
             {
                 WriteFormulaGlyphOutlineLayer(html, bounds, outlinedGlyphs, tallDelimiters);
@@ -10604,6 +10604,72 @@ public static class PdfHtmlConverter
         }
 
         html.Append("</svg>");
+    }
+
+    private static IReadOnlyDictionary<PdfTextGlyph, PdfLayoutRectangle> FormulaTallDelimiterBounds(
+        IReadOnlyList<PdfTextGlyph> glyphs)
+    {
+        Dictionary<PdfTextGlyph, PdfLayoutRectangle> result =
+            new((IEqualityComparer<PdfTextGlyph>)ReferenceEqualityComparer.Instance);
+        HashSet<PdfTextGlyph> pairedCloses =
+            new((IEqualityComparer<PdfTextGlyph>)ReferenceEqualityComparer.Instance);
+        PdfTextGlyph[] closes = glyphs
+            .Where(static glyph => IsUnoutlinedComputerModernDelimiter(glyph, ")"))
+            .OrderBy(static glyph => glyph.Bounds.X)
+            .ToArray();
+        foreach (PdfTextGlyph open in glyphs
+            .Where(static glyph => IsUnoutlinedComputerModernDelimiter(glyph, "("))
+            .OrderBy(static glyph => glyph.Bounds.X))
+        {
+            PdfTextGlyph? close = closes.FirstOrDefault(candidate =>
+                !pairedCloses.Contains(candidate) &&
+                candidate.Bounds.X > open.Bounds.Right &&
+                MathF.Abs(candidate.Bounds.Y - open.Bounds.Y) <=
+                    MathF.Max(1f, open.FontSize * 0.2f));
+            if (close == null)
+            {
+                continue;
+            }
+
+            PdfTextGlyph[] interior = glyphs
+                .Where(glyph => !ReferenceEquals(glyph, open) && !ReferenceEquals(glyph, close))
+                .Where(glyph =>
+                {
+                    float center = glyph.Bounds.X + glyph.Bounds.Width / 2f;
+                    return center >= open.Bounds.Right - 0.5f &&
+                        center <= close.Bounds.X + 0.5f;
+                })
+                .ToArray();
+            if (interior.Length == 0)
+            {
+                continue;
+            }
+
+            float top = MathF.Min(
+                MathF.Min(open.Bounds.Y, close.Bounds.Y),
+                interior.Min(static glyph => glyph.Bounds.Y));
+            float bottom = MathF.Max(
+                MathF.Max(open.Bounds.Bottom, close.Bounds.Bottom),
+                interior.Max(static glyph => glyph.Bounds.Bottom));
+            float height = bottom - top;
+            if (height < MathF.Max(open.Bounds.Height, close.Bounds.Height) * 1.35f)
+            {
+                continue;
+            }
+
+            pairedCloses.Add(close);
+            result.Add(open, new PdfLayoutRectangle(open.Bounds.X, top, open.Bounds.Width, height));
+            result.Add(close, new PdfLayoutRectangle(close.Bounds.X, top, close.Bounds.Width, height));
+        }
+
+        return result;
+    }
+
+    private static bool IsUnoutlinedComputerModernDelimiter(PdfTextGlyph glyph, string text)
+    {
+        return glyph.Text == text &&
+            glyph.Outline is not { Count: > 0 } &&
+            NormalizeFontName(glyph.FontName).StartsWith("CMEX", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsFormulaAdjacentRun(PdfLayoutPage page, PdfLayoutRectangle bounds, PdfTextRun run)
