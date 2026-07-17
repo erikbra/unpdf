@@ -40,6 +40,7 @@ jobs:
         run: |
           dotnet pack src/PdfBox.Net.Layout/PdfBox.Net.Layout.csproj --configuration Release --no-build --output artifacts/packages -p:Version="${{ inputs.version }}"
           dotnet pack src/PdfBox.Net.Html/PdfBox.Net.Html.csproj --configuration Release --no-build --output artifacts/packages -p:Version="${{ inputs.version }}"
+          dotnet pack src/PdfBox.Net.Markdown/PdfBox.Net.Markdown.csproj --configuration Release --no-build --output artifacts/packages -p:Version="${{ inputs.version }}"
           dotnet pack apps/PdfBox.Net.Unpdf/PdfBox.Net.Unpdf.csproj --configuration Release --no-build --output artifacts/packages -p:Version="${{ inputs.version }}"
       - name: Install and smoke-test .NET tool package
         run: |

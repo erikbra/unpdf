@@ -249,6 +249,151 @@ class ConversionQualityHarnessTest(unittest.TestCase):
             self.assertEqual(1, comparison["summary"]["categories"]["crash"])
             self.assertEqual(7, comparison["fixtures"][0]["failures"][0]["exitCode"])
 
+    def test_markdown_fixture_reports_structures_and_diagnostic_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manifest = root / "manifest.json"
+            results = root / "results"
+            out_dir = root / "out"
+            data = {
+                "schema": 1,
+                "fixtures": [
+                    {
+                        "id": "markdown-tagged",
+                        "target": "markdown",
+                        "outputs": {
+                            "markdown": "markdown-tagged/document.md",
+                            "diagnostics": "markdown-tagged/diagnostics.json",
+                        },
+                        "expectedText": "Title Intro link First Nested Diagram Name Value Alpha 42",
+                        "expectations": {
+                            "minTextCoverage": 1.0,
+                            "maxDiagnostics": 1,
+                            "markdownStructures": {
+                                "headings": 1,
+                                "paragraphs": 1,
+                                "orderedListItems": 1,
+                                "unorderedListItems": 1,
+                                "links": 1,
+                                "images": 1,
+                                "tableRows": 2,
+                            },
+                        },
+                    }
+                ],
+            }
+            write_json(manifest, data)
+            write_text(
+                results / "markdown-tagged/document.md",
+                """# Title
+
+Intro [link](https://example.com).
+
+1. First
+    - Nested
+
+![Diagram](assets/diagram.png)
+
+| Name | Value |
+| --- | --- |
+| Alpha | 42 |
+
+```text
+# Ignored code heading
+- Ignored code list
+![Ignored](ignored.png)
+```
+""",
+            )
+            write_json(
+                results / "markdown-tagged/diagnostics.json",
+                {
+                    "source": "SemanticStructure",
+                    "confidence": "High",
+                    "diagnostics": [
+                        {
+                            "code": "markdown-semantic-structure-used",
+                            "source": "SemanticStructure",
+                        }
+                    ],
+                },
+            )
+
+            exit_code = harness.main(
+                [
+                    "--manifest",
+                    str(manifest),
+                    "--results-dir",
+                    str(results),
+                    "--out-dir",
+                    str(out_dir),
+                    "--fail-on-unexpected",
+                ]
+            )
+
+            self.assertEqual(0, exit_code)
+            comparison = json.loads((out_dir / "comparison.json").read_text(encoding="utf-8"))
+            fixture = comparison["fixtures"][0]
+            structures = fixture["metrics"]["markdownStructures"]
+            self.assertEqual(1.0, structures["matchRatio"])
+            self.assertEqual(7, structures["matched"])
+            self.assertEqual(
+                {"markdown-semantic-structure-used": 1},
+                fixture["metrics"]["diagnosticCodes"],
+            )
+            self.assertEqual({"SemanticStructure": 1}, fixture["metrics"]["diagnosticSources"])
+            self.assertEqual("SemanticStructure", fixture["metrics"]["diagnosticSource"])
+            self.assertEqual("High", fixture["metrics"]["diagnosticConfidence"])
+            checks = {check["category"]: check for check in fixture["qualityChecks"]}
+            self.assertEqual("passed", checks["markdown-structure"]["status"])
+            self.assertEqual(1.0, comparison["summary"]["metrics"]["minimumMarkdownStructureMatch"])
+
+    def test_markdown_structure_mismatch_is_a_quality_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manifest = root / "manifest.json"
+            results = root / "results"
+            out_dir = root / "out"
+            write_json(
+                manifest,
+                {
+                    "schema": 1,
+                    "fixtures": [
+                        {
+                            "id": "markdown-mismatch",
+                            "target": "markdown",
+                            "outputs": {"markdown": "document.md"},
+                            "expectedText": "Only prose",
+                            "expectations": {
+                                "minTextCoverage": 1.0,
+                                "markdownStructures": {"headings": 1, "paragraphs": 1},
+                            },
+                        }
+                    ],
+                },
+            )
+            write_text(results / "document.md", "Only prose\n")
+
+            exit_code = harness.main(
+                [
+                    "--manifest",
+                    str(manifest),
+                    "--results-dir",
+                    str(results),
+                    "--out-dir",
+                    str(out_dir),
+                    "--fail-on-unexpected",
+                ]
+            )
+
+            self.assertEqual(1, exit_code)
+            comparison = json.loads((out_dir / "comparison.json").read_text(encoding="utf-8"))
+            fixture = comparison["fixtures"][0]
+            self.assertEqual("markdown-structure", fixture["failures"][0]["category"])
+            self.assertEqual(0.5, fixture["metrics"]["markdownStructures"]["matchRatio"])
+            checks = {check["category"]: check for check in fixture["qualityChecks"]}
+            self.assertEqual("failed", checks["markdown-structure"]["status"])
+
     @staticmethod
     def _manifest() -> dict:
         return {
@@ -291,6 +436,7 @@ class ConversionQualityHarnessTest(unittest.TestCase):
                 "crash": 0,
                 "diagnostics": 0,
                 "dom": 0,
+                "markdown-structure": 0,
                 "required-files": 0,
                 "required-substrings": 0,
                 "text-coverage": 0,

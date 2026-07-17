@@ -10,12 +10,14 @@
     "crash": 0,
     "diagnostics": 0,
     "dom": 0,
+    "markdown-structure": 0,
     "required-files": 0,
     "required-substrings": 0,
     "text-coverage": 0,
     "visual": 0
   },
   "minMetrics": {
-    "minimumTextCoverage": 1.0
+    "minimumTextCoverage": 1.0,
+    "minimumMarkdownStructureMatch": 1.0
   }
 }

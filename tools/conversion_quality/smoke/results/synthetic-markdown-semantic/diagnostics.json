@@ -1,0 +1,13 @@
+{
+  "source": "SemanticStructure",
+  "confidence": "High",
+  "diagnostics": [
+    {
+      "code": "markdown-semantic-structure-used",
+      "source": "SemanticStructure",
+      "severity": "Information",
+      "pageNumber": 1,
+      "message": "Markdown was produced from authored tagged-PDF structure."
+    }
+  ]
+}

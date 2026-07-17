@@ -127,14 +127,22 @@ expectations. Current gates cover:
 - required files
 - required substrings in generated outputs
 - simple HTML DOM selector counts through `expectations.domSelectors`
+- exact Markdown structure counts through `expectations.markdownStructures`
+  (`headings`, `paragraphs`, ordered and unordered list items, links, images,
+  and table rows)
 - visual check reports through an optional `outputs.visual` JSON file with a
   `checks` array
+
+Markdown fixtures report a `markdown-structure` quality check with expected and
+actual counts, a match ratio, and aggregate minimum/average match metrics.
+Diagnostic reports may also include top-level `source` and `confidence`; the
+harness retains those fields plus diagnostic code/source histograms.
 
 Known divergences are listed separately and must include an owning issue and
 reason. Ratchet baselines cap the number of accepted `failed` and `known`
 fixtures, cap failure categories, and can set aggregate metric floors such as
 `minimumTextCoverage`.
 
-The first checked-in smoke fixture uses synthetic HTML output. Future converter
-issues should add real PDF fixtures and expected result folders as soon as the
-HTML and Markdown packages have runnable vertical slices.
+The checked-in smoke corpus includes synthetic HTML and tagged-first Markdown
+outputs. Converter work should add real PDF fixtures and expected result folders
+as stable vertical slices become available.

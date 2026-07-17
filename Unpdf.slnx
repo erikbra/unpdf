@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/PdfBox.Net.Layout/PdfBox.Net.Layout.csproj" />
     <Project Path="src/PdfBox.Net.Html/PdfBox.Net.Html.csproj" />
+    <Project Path="src/PdfBox.Net.Markdown/PdfBox.Net.Markdown.csproj" />
   </Folder>
   <Folder Name="/apps/">
     <Project Path="apps/PdfBox.Net.Unpdf/PdfBox.Net.Unpdf.csproj" />
@@ -13,6 +14,7 @@
     <Project Path="tests/PdfBox.Net.Layout.BrowserLite.Tests/PdfBox.Net.Layout.BrowserLite.Tests.csproj" />
     <Project Path="tests/PdfBox.Net.Layout.Tests/PdfBox.Net.Layout.Tests.csproj" />
     <Project Path="tests/PdfBox.Net.Html.Tests/PdfBox.Net.Html.Tests.csproj" />
+    <Project Path="tests/PdfBox.Net.Markdown.Tests/PdfBox.Net.Markdown.Tests.csproj" />
     <Project Path="tests/PdfBox.Net.Unpdf.Tests/PdfBox.Net.Unpdf.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">

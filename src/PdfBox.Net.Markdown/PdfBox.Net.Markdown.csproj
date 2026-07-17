@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <PackageId>PdfBox.Net.Markdown</PackageId>
+    <Description>Tagged-first Markdown conversion for PdfBox.Net layout documents.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PdfBox.Net.Layout\PdfBox.Net.Layout.csproj" />
+    <None Include="PACKAGE_README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+</Project>

@@ -26,6 +26,15 @@ LOCAL_REFERENCE_SCHEMES = {"", "file"}
 STATUS_ORDER = ("passed", "known", "failed")
 CHECK_STATUS_ORDER = ("passed", "known", "failed", "skipped")
 DOM_FAILURE_CATEGORIES = {"broken-assets", "dom", "required-files", "required-substrings"}
+MARKDOWN_STRUCTURE_KEYS = (
+    "headings",
+    "paragraphs",
+    "orderedListItems",
+    "unorderedListItems",
+    "links",
+    "images",
+    "tableRows",
+)
 
 
 @dataclass(frozen=True)
@@ -142,6 +151,84 @@ def extract_markdown_text(path: Path) -> str:
     return re.sub(r"[_`~|]", " ", text)
 
 
+def markdown_without_fenced_code(text: str) -> str:
+    output: list[str] = []
+    fence: str | None = None
+    for line in text.splitlines():
+        match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if match:
+            marker = match.group(1)
+            marker_kind = marker[0]
+            if fence is None:
+                fence = marker_kind
+            elif fence == marker_kind:
+                fence = None
+            output.append("")
+            continue
+        output.append("" if fence is not None else line)
+    return "\n".join(output)
+
+
+def markdown_structure_counts(path: Path) -> dict[str, int]:
+    text = markdown_without_fenced_code(path.read_text(encoding="utf-8", errors="replace"))
+    lines = text.splitlines()
+    headings = sum(bool(re.match(r"^ {0,3}#{1,6}\s+\S", line)) for line in lines)
+    ordered_items = sum(bool(re.match(r"^\s*\d+[.)]\s+\S", line)) for line in lines)
+    unordered_items = sum(bool(re.match(r"^\s*[-+*]\s+\S", line)) for line in lines)
+    images = len(re.findall(r"!\[[^\]]*\]\([^)]+\)", text))
+    links = len(re.findall(r"(?<!!)\[[^\]]+\]\([^)]+\)", text))
+
+    table_line_indexes: set[int] = set()
+    table_rows = 0
+    for index, line in enumerate(lines):
+        delimiter_cells = [
+            cell.strip()
+            for cell in line.strip().strip("|").split("|")
+        ]
+        if not delimiter_cells or not all(
+            re.fullmatch(r":?-{3,}:?", cell) for cell in delimiter_cells
+        ):
+            continue
+        start = index - 1
+        if start < 0 or "|" not in lines[start]:
+            continue
+        end = index + 1
+        while end < len(lines) and lines[end].strip() and "|" in lines[end]:
+            end += 1
+        indexes = set(range(start, end))
+        if indexes & table_line_indexes:
+            continue
+        table_line_indexes.update(indexes)
+        table_rows += end - start - 1
+
+    structural_line = re.compile(r"^\s*(?:#{1,6}\s+|\d+[.)]\s+|[-+*]\s+|>|!\[)")
+    paragraph_lines: list[str] = []
+    paragraphs = 0
+    for index, line in enumerate(lines + [""]):
+        stripped = line.strip()
+        is_structure = (
+            index in table_line_indexes
+            or bool(structural_line.match(line))
+            or (stripped.startswith("|") and stripped.endswith("|"))
+        )
+        if not stripped or is_structure:
+            if paragraph_lines:
+                paragraphs += 1
+                paragraph_lines = []
+            continue
+        paragraph_lines.append(stripped)
+
+    return {
+        "headings": headings,
+        "paragraphs": paragraphs,
+        "orderedListItems": ordered_items,
+        "unorderedListItems": unordered_items,
+        "links": links,
+        "images": images,
+        "tableRows": table_rows,
+    }
+
+
 def extract_output_text(path: Path, target: str) -> str:
     suffix = path.suffix.casefold()
     if target == "html" or suffix in {".html", ".htm"}:
@@ -251,15 +338,84 @@ def find_broken_local_references(path: Path, results_dir: Path) -> list[dict[str
     return broken
 
 
-def load_diagnostics(path: Path | None) -> list[Any]:
+def load_diagnostic_report(path: Path | None) -> tuple[list[Any], dict[str, Any]]:
     if path is None or not path.exists():
-        return []
+        return [], {}
     data = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(data, list):
-        return data
+        return data, {}
     if isinstance(data, dict) and isinstance(data.get("diagnostics"), list):
-        return data["diagnostics"]
+        return data["diagnostics"], {
+            "source": data.get("source"),
+            "confidence": data.get("confidence"),
+        }
     raise ValueError(f"{path} must contain a diagnostics array or an object with a diagnostics array")
+
+
+def diagnostic_histogram(diagnostics: list[Any], key: str) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for diagnostic in diagnostics:
+        if not isinstance(diagnostic, dict):
+            continue
+        value = diagnostic.get(key)
+        if value is None:
+            value = diagnostic.get(key[:1].upper() + key[1:])
+        if isinstance(value, str) and value:
+            counts[value] += 1
+    return dict(sorted(counts.items()))
+
+
+def evaluate_markdown_structures(
+    fixture: dict[str, Any],
+    *,
+    primary_path: Path,
+    expectations: dict[str, Any],
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    expected = expectations.get("markdownStructures")
+    if expected is None:
+        return None, []
+    if not isinstance(expected, dict):
+        raise ValueError(f"Fixture {fixture['id']} markdownStructures must be an object")
+
+    unknown = sorted(set(expected) - set(MARKDOWN_STRUCTURE_KEYS))
+    if unknown:
+        raise ValueError(
+            f"Fixture {fixture['id']} markdownStructures contains unknown keys: {', '.join(unknown)}"
+        )
+    normalized_expected: dict[str, int] = {}
+    for key, value in expected.items():
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(
+                f"Fixture {fixture['id']} markdownStructures.{key} must be a non-negative integer"
+            )
+        normalized_expected[key] = value
+
+    counts = markdown_structure_counts(primary_path)
+    actual = {key: counts[key] for key in normalized_expected}
+    mismatches = {
+        key: {"expected": normalized_expected[key], "actual": actual[key]}
+        for key in normalized_expected
+        if normalized_expected[key] != actual[key]
+    }
+    matched = len(normalized_expected) - len(mismatches)
+    total = len(normalized_expected)
+    metrics = {
+        "expected": normalized_expected,
+        "actual": actual,
+        "matched": matched,
+        "total": total,
+        "matchRatio": round(matched / total, 6) if total else 1.0,
+    }
+    failures = []
+    if mismatches:
+        failures.append(
+            {
+                "category": "markdown-structure",
+                "message": f"{len(mismatches)} Markdown structure count(s) did not match",
+                "mismatches": mismatches,
+            }
+        )
+    return metrics, failures
 
 
 def primary_output_key(fixture: dict[str, Any]) -> str | None:
@@ -457,6 +613,9 @@ def build_quality_checks(
     dom_failures = [failure for failure in failures if failure["category"] in DOM_FAILURE_CATEGORIES]
     text_failures = [failure for failure in failures if failure["category"] == "text-coverage"]
     visual_failures = [failure for failure in failures if failure["category"] == "visual"]
+    markdown_structure_failures = [
+        failure for failure in failures if failure["category"] == "markdown-structure"
+    ]
 
     dom_status = "skipped"
     if target == "html" or metrics.get("domSelectors"):
@@ -467,6 +626,11 @@ def build_quality_checks(
         "skipped"
         if not visual_declared and metrics.get("visualChecks") == 0 and not visual_failures
         else quality_check_status(visual_failures)
+    )
+    markdown_structure_status = (
+        "skipped"
+        if target != "markdown" or metrics.get("markdownStructures") is None
+        else quality_check_status(markdown_structure_failures)
     )
 
     return [
@@ -488,6 +652,12 @@ def build_quality_checks(
                 "textCoverage": metrics.get("textCoverage"),
             },
             "failures": text_failures,
+        },
+        {
+            "category": "markdown-structure",
+            "status": markdown_structure_status,
+            "metrics": metrics.get("markdownStructures"),
+            "failures": markdown_structure_failures,
         },
         {
             "category": "visual",
@@ -541,6 +711,11 @@ def evaluate_fixture(
         "domSelectors": [],
         "visualChecks": 0,
         "visualFailures": 0,
+        "markdownStructures": None,
+        "diagnosticCodes": {},
+        "diagnosticSources": {},
+        "diagnosticSource": None,
+        "diagnosticConfidence": None,
     }
     outputs = fixture.get("outputs", {})
     visual_declared = isinstance(outputs, dict) and isinstance(outputs.get("visual"), str)
@@ -629,6 +804,14 @@ def evaluate_fixture(
             )
             metrics["domSelectors"] = dom_results
             failures.extend(dom_failures)
+        if target == "markdown" or primary_path.suffix.casefold() in {".md", ".markdown"}:
+            markdown_metrics, markdown_failures = evaluate_markdown_structures(
+                fixture,
+                primary_path=primary_path,
+                expectations=expectations,
+            )
+            metrics["markdownStructures"] = markdown_metrics
+            failures.extend(markdown_failures)
 
         required_substrings = expectations.get("requiredSubstrings", [])
         if not isinstance(required_substrings, list):
@@ -657,8 +840,12 @@ def evaluate_fixture(
                 )
 
     diagnostics_path = output_path(fixture, "diagnostics", results_dir)
-    diagnostics = load_diagnostics(diagnostics_path)
+    diagnostics, diagnostic_metadata = load_diagnostic_report(diagnostics_path)
     metrics["diagnostics"] = len(diagnostics)
+    metrics["diagnosticCodes"] = diagnostic_histogram(diagnostics, "code")
+    metrics["diagnosticSources"] = diagnostic_histogram(diagnostics, "source")
+    metrics["diagnosticSource"] = diagnostic_metadata.get("source")
+    metrics["diagnosticConfidence"] = diagnostic_metadata.get("confidence")
     max_diagnostics = int(expectations.get("maxDiagnostics", 0))
     if len(diagnostics) > max_diagnostics:
         failures.append(
@@ -767,12 +954,18 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     category_counts: Counter[str] = Counter()
     check_category_counts: dict[str, dict[str, int]] = {}
     coverage_values: list[float] = []
+    markdown_structure_values: list[float] = []
 
     for result in results:
         status_counts[result["status"]] += 1
         coverage = result["metrics"].get("textCoverage")
         if isinstance(coverage, (int, float)):
             coverage_values.append(float(coverage))
+        markdown_structures = result["metrics"].get("markdownStructures")
+        if isinstance(markdown_structures, dict):
+            ratio = markdown_structures.get("matchRatio")
+            if isinstance(ratio, (int, float)):
+                markdown_structure_values.append(float(ratio))
         for failure in result["failures"]:
             category_counts[failure["category"]] += 1
         for check in result.get("qualityChecks", []):
@@ -789,6 +982,14 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     metrics = {
         "minimumTextCoverage": round(min(coverage_values), 6) if coverage_values else None,
         "averageTextCoverage": round(sum(coverage_values) / len(coverage_values), 6) if coverage_values else None,
+        "minimumMarkdownStructureMatch": (
+            round(min(markdown_structure_values), 6) if markdown_structure_values else None
+        ),
+        "averageMarkdownStructureMatch": (
+            round(sum(markdown_structure_values) / len(markdown_structure_values), 6)
+            if markdown_structure_values
+            else None
+        ),
     }
 
     return {
@@ -872,6 +1073,8 @@ def render_summary_markdown(comparison: dict[str, Any]) -> str:
         f"- Failed: {summary['status'].get('failed', 0)}",
         f"- Minimum text coverage: {summary['metrics'].get('minimumTextCoverage')}",
         f"- Average text coverage: {summary['metrics'].get('averageTextCoverage')}",
+        f"- Minimum Markdown structure match: {summary['metrics'].get('minimumMarkdownStructureMatch')}",
+        f"- Average Markdown structure match: {summary['metrics'].get('averageMarkdownStructureMatch')}",
         f"- Ratchet: {'passed' if comparison['ratchet']['passed'] else 'failed'}",
         "",
     ]

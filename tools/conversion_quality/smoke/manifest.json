@@ -51,6 +51,49 @@
           }
         ]
       }
+    },
+    {
+      "id": "synthetic-markdown-semantic",
+      "title": "Synthetic tagged-first Markdown structure",
+      "target": "markdown",
+      "categories": [
+        "markdown",
+        "text",
+        "structure"
+      ],
+      "outputs": {
+        "markdown": "synthetic-markdown-semantic/document.md",
+        "diagnostics": "synthetic-markdown-semantic/diagnostics.json"
+      },
+      "expectedText": "Tagged Markdown Intro link First Nested Diagram Name Value Alpha 42",
+      "expectations": {
+        "minTextCoverage": 1.0,
+        "maxDiagnostics": 1,
+        "markdownStructures": {
+          "headings": 1,
+          "paragraphs": 1,
+          "orderedListItems": 1,
+          "unorderedListItems": 1,
+          "links": 1,
+          "images": 1,
+          "tableRows": 2
+        },
+        "requiredFiles": [
+          "synthetic-markdown-semantic/document.md",
+          "synthetic-markdown-semantic/assets/diagram.svg",
+          "synthetic-markdown-semantic/diagnostics.json"
+        ],
+        "requiredSubstrings": [
+          {
+            "output": "markdown",
+            "text": "# Tagged Markdown"
+          },
+          {
+            "output": "markdown",
+            "text": "| Name | Value |"
+          }
+        ]
+      }
     }
   ]
 }

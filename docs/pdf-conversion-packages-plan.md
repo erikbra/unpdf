@@ -288,6 +288,15 @@ The dependent Markdown package owns Markdown serialization and golden-output
 tests; it consumes this shared bridge instead of rebuilding PDF structure-tree
 correlation.
 
+### Markdown MVP
+
+The first `PdfBox.Net.Markdown` vertical slice consumes that bridge and emits
+headings, paragraphs, nested lists, links, tagged figures, and rectangular
+tagged tables. Untagged content uses the shared conservative semantic inference
+and reports an explicit low-confidence fallback diagnostic. The conversion
+quality harness measures exact Markdown structure counts alongside text
+coverage and diagnostic provenance.
+
 ### Phase 5: Vector Paths And Better Visual HTML
 
 Deliver:

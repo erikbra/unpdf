@@ -28,6 +28,16 @@ jobs:
         run: python3 -m unittest discover -s tests/release -p 'test_*.py'
       - name: Test conversion quality tooling
         run: python3 -m unittest discover -s tests/conversion_quality -p 'test_*.py'
+      - name: Run conversion quality smoke ratchet
+        run: >-
+          python3 tools/conversion_quality/run_conversion_quality.py
+          --manifest tools/conversion_quality/smoke/manifest.json
+          --results-dir tools/conversion_quality/smoke/results
+          --out-dir artifacts/conversion-quality-smoke
+          --known-divergences tools/conversion_quality/smoke/known-divergences.json
+          --ratchet-baseline tools/conversion_quality/smoke/ratchet-baseline.json
+          --fail-on-unexpected
+          --fail-on-regression
       - name: Publish browser-wasm application
         run: >-
           dotnet publish
