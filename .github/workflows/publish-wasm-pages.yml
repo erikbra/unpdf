@@ -8,7 +8,9 @@ on:
       - ".github/actions/restore-pages-site/**"
       - ".github/workflows/publish-wasm-pages.yml"
       - "Directory.Packages.props"
+      - "eng/harden_wasm_site.py"
       - "eng/publish_wasm_pages_site.py"
+      - "eng/wasm-performance-baseline.json"
       - "eng/wasm-payload-baseline.json"
       - "eng/wasm_payload_report.py"
       - "packaging/pages/**"
@@ -59,6 +61,12 @@ jobs:
           --configuration Release
           --output artifacts/wasm-publish
 
+      - name: Harden browser hosting output
+        run: python3 eng/harden_wasm_site.py --root artifacts/wasm-publish/wwwroot
+
+      - name: Verify browser hosting policy
+        run: python3 eng/harden_wasm_site.py --root artifacts/wasm-publish/wwwroot --check
+
       - name: Check browser payload budget
         run: |
           status=0
@@ -96,6 +104,10 @@ jobs:
       - name: Verify staged site
         run: |
           grep -F '<base href="/unpdf/wasm/"' artifacts/pages/wasm/index.html
+          grep -F 'id="unpdf-csp"' artifacts/pages/wasm/index.html
+          grep -F "connect-src 'self'" artifacts/pages/wasm/index.html
+          test -f artifacts/pages/wasm/_headers
+          test -f artifacts/pages/wasm/staticwebapp.config.json
           grep -F 'PdfBox.Net' artifacts/pages/index.html
           if grep -Fq 'PdfBox.Net.Html.Wasm.styles.css' artifacts/pages/wasm/index.html; then
             echo "Published index references a missing scoped CSS bundle" >&2
@@ -164,6 +176,14 @@ jobs:
         env:
           FRAMEWORK_WASM: ${{ steps.publish.outputs.framework_wasm }}
         run: |
+          curl -fsS "$PAGES_BASE_URL/wasm/" -o "$RUNNER_TEMP/wasm-index.html"
+          grep -F 'id="unpdf-csp"' "$RUNNER_TEMP/wasm-index.html"
+          grep -F "connect-src 'self'" "$RUNNER_TEMP/wasm-index.html"
+          index_headers="$(curl -fsSI "$PAGES_BASE_URL/wasm/")"
+          if printf '%s' "$index_headers" | tr -d '\r' | grep -qi '^set-cookie:'; then
+            echo "The static browser preview unexpectedly sets a cookie" >&2
+            exit 1
+          fi
           curl -fsS "$PAGES_BASE_URL/wasm/samples/hello.pdf" -o "$RUNNER_TEMP/hello.pdf"
           grep -a -q '%PDF-' "$RUNNER_TEMP/hello.pdf"
           content_type="$(curl -fsSI "$PAGES_BASE_URL/wasm/$FRAMEWORK_WASM" | tr -d '\r' | awk -F': ' 'tolower($1) == "content-type" { print tolower($2) }')"

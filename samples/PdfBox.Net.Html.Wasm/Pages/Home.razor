@@ -5,6 +5,7 @@
 @using PdfBox.Net.Layout
 @using PdfBox.Net.PDModel
 @inject HttpClient Http
+@implements IDisposable
 
 <PageTitle>unpdf - PDF to HTML</PageTitle>
 
@@ -127,7 +128,7 @@
         }
         finally
         {
-            _isConverting = false;
+            EndConversion();
         }
     }
 
@@ -154,7 +155,7 @@
         }
         finally
         {
-            _isConverting = false;
+            EndConversion();
         }
     }
 
@@ -193,6 +194,13 @@
 
     private void CancelConversion() => _conversionCancellation?.Cancel();
 
+    private void EndConversion()
+    {
+        _isConverting = false;
+        _conversionCancellation?.Dispose();
+        _conversionCancellation = null;
+    }
+
     private void BeginConversion(string fileName, long inputBytes)
     {
         _isConverting = true;
@@ -208,5 +216,11 @@
         return bytes >= 1024 * 1024
             ? $"{bytes / (1024d * 1024d):0.0} MB"
             : $"{Math.Max(1, bytes / 1024d):0.0} KB";
+    }
+
+    public void Dispose()
+    {
+        _conversionCancellation?.Cancel();
+        _conversionCancellation?.Dispose();
     }
 }

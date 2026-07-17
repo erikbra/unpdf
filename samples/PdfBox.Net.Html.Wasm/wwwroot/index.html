@@ -4,6 +4,8 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta id="unpdf-csp" http-equiv="Content-Security-Policy" content="base-uri 'self'; default-src 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self' blob:; manifest-src 'self'; media-src 'none'; form-action 'none';" />
+    <meta id="unpdf-referrer" name="referrer" content="no-referrer" />
     <title>unpdf - PDF to HTML</title>
     <base href="/" />
     <link rel="preload" id="webassembly" />

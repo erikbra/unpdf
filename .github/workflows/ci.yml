@@ -28,14 +28,29 @@ jobs:
         run: python3 -m unittest discover -s tests/release -p 'test_*.py'
       - name: Test conversion quality tooling
         run: python3 -m unittest discover -s tests/conversion_quality -p 'test_*.py'
+      - name: Publish browser-wasm application
+        run: >-
+          dotnet publish
+          samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj
+          --configuration Release
+          --no-restore
+          --output artifacts/wasm-publish
+      - name: Harden browser hosting output
+        run: python3 eng/harden_wasm_site.py --root artifacts/wasm-publish/wwwroot
+      - name: Verify browser hosting policy
+        run: python3 eng/harden_wasm_site.py --root artifacts/wasm-publish/wwwroot --check
       - name: Install Playwright browser
         run: >-
           tests/PdfBox.Net.Html.Tests/bin/Release/net10.0/.playwright/node/linux-x64/node
           tests/PdfBox.Net.Html.Tests/bin/Release/net10.0/.playwright/package/cli.js
           install --with-deps chromium
       - name: Test
+        env:
+          UNPDF_WASM_PUBLISHED_ROOT: ${{ github.workspace }}/artifacts/wasm-publish/wwwroot
         run: dotnet test Unpdf.slnx --configuration Release --no-build --nologo
       - name: Test deterministic browser-wasm conversion
+        env:
+          UNPDF_WASM_PUBLISHED_ROOT: ${{ github.workspace }}/artifacts/wasm-publish/wwwroot
         run: >-
           dotnet test
           tests/PdfBox.Net.Html.Tests/PdfBox.Net.Html.Tests.csproj
@@ -49,13 +64,6 @@ jobs:
         run: eng/verify-unpdf-single-file.sh linux-x64
       - name: Verify NativeAOT CLI
         run: eng/verify-unpdf-nativeaot.sh linux-x64
-      - name: Publish browser-wasm application
-        run: >-
-          dotnet publish
-          samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj
-          --configuration Release
-          --no-restore
-          --output artifacts/wasm-publish
       - name: Check browser payload budget
         run: |
           status=0

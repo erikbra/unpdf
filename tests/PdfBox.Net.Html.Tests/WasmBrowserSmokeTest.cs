@@ -10,6 +10,8 @@ namespace PdfBox.Net.Html.Tests;
 
 public sealed class WasmBrowserSmokeTest
 {
+    private const string PublishedRootEnvironmentVariable = "UNPDF_WASM_PUBLISHED_ROOT";
+
     private readonly ITestOutputHelper _output;
 
     public WasmBrowserSmokeTest(ITestOutputHelper output)
@@ -70,6 +72,13 @@ public sealed class WasmBrowserSmokeTest
             page.Request += (_, request) => conversionRequests.Add($"{request.Method} {request.Url}");
 
             await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            WasmPerformanceBaseline performanceBaseline = ReadPerformanceBaseline(repositoryRoot);
+            double startupMilliseconds = await page.EvaluateAsync<double>(
+                "() => performance.getEntriesByType('navigation')[0].loadEventEnd");
+            Assert.InRange(
+                startupMilliseconds,
+                0.1,
+                performanceBaseline.ColdStartup.MaximumLoadMilliseconds);
             await page.GetByRole(AriaRole.Button, new PageGetByRoleOptions
             {
                 Name = "Try the built-in sample",
@@ -94,15 +103,193 @@ public sealed class WasmBrowserSmokeTest
             wallClock.Stop();
 
             Assert.Empty(conversionRequests);
+            Assert.True(
+                conversionRequests.Count <= performanceBaseline.DeterministicConversion.MaximumNetworkRequests);
             Assert.Equal("1", await page.Locator(".metrics dd").Nth(1).InnerTextAsync());
             Assert.Equal(1, await preview.Locator("[data-page-number='1']").CountAsync());
             string applicationDuration = await page.Locator(".metrics dd").Nth(2).InnerTextAsync();
+            long applicationMilliseconds = long.Parse(
+                applicationDuration.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0],
+                System.Globalization.CultureInfo.InvariantCulture);
+            Assert.InRange(
+                applicationMilliseconds,
+                0,
+                performanceBaseline.DeterministicConversion.MaximumApplicationMilliseconds);
+            Assert.InRange(
+                wallClock.ElapsedMilliseconds,
+                0,
+                performanceBaseline.DeterministicConversion.MaximumWallMilliseconds);
             _output.WriteLine(
-                $"Deterministic browser conversion duration: {applicationDuration} " +
+                $"Cold browser load: {startupMilliseconds:0} ms. " +
+                $"Deterministic conversion: {applicationDuration} " +
                 $"({wallClock.ElapsedMilliseconds} ms wall clock).");
             _output.WriteLine(
                 "Privacy assertion passed: PDF bytes stay in-browser; " +
                 "the PDF never leaves the browser during conversion.");
+        }
+        finally
+        {
+            StopServer(server);
+        }
+    }
+
+    [Fact(Timeout = 120_000)]
+    public async Task BrowserShell_EnforcesCompatibleContentSecurityPolicy()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        int port = ReservePort();
+        using Process server = StartServer(repositoryRoot, port);
+
+        try
+        {
+            Uri appUri = new($"http://127.0.0.1:{port}");
+            await WaitForServerAsync(appUri, server);
+
+            using IPlaywright playwright = await Playwright.CreateAsync();
+            await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
+            IPage page = await browser.NewPageAsync();
+            List<string> policyViolations = [];
+            page.Console += (_, message) =>
+            {
+                if (message.Text.Contains("Content Security Policy", StringComparison.OrdinalIgnoreCase) ||
+                    message.Text.Contains("Refused to", StringComparison.OrdinalIgnoreCase))
+                {
+                    policyViolations.Add(message.Text);
+                }
+            };
+
+            await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            await page.GetByRole(AriaRole.Heading, new PageGetByRoleOptions
+            {
+                Name = "PDF to HTML",
+                Exact = true
+            }).WaitForAsync();
+
+            string policy = await page.Locator("meta#unpdf-csp").GetAttributeAsync("content") ?? string.Empty;
+            Assert.Contains("default-src 'self'", policy, StringComparison.Ordinal);
+            Assert.Contains("connect-src 'self'", policy, StringComparison.Ordinal);
+            Assert.Contains("object-src 'none'", policy, StringComparison.Ordinal);
+            Assert.Contains("'wasm-unsafe-eval'", policy, StringComparison.Ordinal);
+            Assert.DoesNotContain("'unsafe-eval'", policy, StringComparison.Ordinal);
+            Assert.Equal(
+                "no-referrer",
+                await page.Locator("meta#unpdf-referrer").GetAttributeAsync("content"));
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(PublishedRootEnvironmentVariable)))
+            {
+                string scriptPolicy = policy.Split("style-src", StringSplitOptions.TrimEntries)[0];
+                Assert.DoesNotContain("'unsafe-inline'", scriptPolicy, StringComparison.Ordinal);
+                Assert.Contains("'sha256-", scriptPolicy, StringComparison.Ordinal);
+            }
+            Assert.Empty(policyViolations);
+        }
+        finally
+        {
+            StopServer(server);
+        }
+    }
+
+    [Fact(Timeout = 120_000)]
+    public async Task BrowserAdaptive_OversizedPdf_IsRejectedBeforeReadingOrSendingContent()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        int port = ReservePort();
+        using Process server = StartServer(repositoryRoot, port);
+
+        try
+        {
+            Uri appUri = new($"http://127.0.0.1:{port}");
+            await WaitForServerAsync(appUri, server);
+
+            using IPlaywright playwright = await Playwright.CreateAsync();
+            await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
+            IPage page = await browser.NewPageAsync();
+            List<string> conversionRequests = [];
+            page.Request += (_, request) => conversionRequests.Add($"{request.Method} {request.Url}");
+            await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            conversionRequests.Clear();
+
+            await page.Locator("input[type=file]").EvaluateAsync(
+                """
+                input => {
+                    const oneMiB = new Uint8Array(1024 * 1024);
+                    const file = new File(Array(33).fill(oneMiB), "oversized.pdf", { type: "application/pdf" });
+                    const transfer = new DataTransfer();
+                    transfer.items.add(file);
+                    input.files = transfer.files;
+                    input.dispatchEvent(new Event("change", { bubbles: true }));
+                }
+                """);
+
+            await page.GetByText(
+                "The browser preview currently accepts PDFs up to 32.0 MB.",
+                new PageGetByTextOptions { Exact = true }).WaitForAsync();
+            Assert.Empty(conversionRequests);
+            Assert.True(await page.Locator("input[type=file]").IsEnabledAsync());
+        }
+        finally
+        {
+            StopServer(server);
+        }
+    }
+
+    [Fact(Timeout = 120_000)]
+    public async Task BrowserAdaptive_CancelledInput_ReleasesTheConversionUi()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        int port = ReservePort();
+        using Process server = StartServer(repositoryRoot, port);
+
+        try
+        {
+            Uri appUri = new($"http://127.0.0.1:{port}");
+            await WaitForServerAsync(appUri, server);
+
+            using IPlaywright playwright = await Playwright.CreateAsync();
+            await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
+            IPage page = await browser.NewPageAsync();
+            await page.RouteAsync("**/samples/hello.pdf", async route =>
+            {
+                try
+                {
+                    await Task.Delay(5_000);
+                    await route.ContinueAsync();
+                }
+                catch (PlaywrightException)
+                {
+                    // The cancellation aborts the browser request before the delayed route resumes.
+                }
+            });
+            await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+
+            await page.GetByRole(AriaRole.Button, new PageGetByRoleOptions
+            {
+                Name = "Try the built-in sample",
+                Exact = true
+            }).ClickAsync();
+            ILocator cancel = page.GetByRole(AriaRole.Button, new PageGetByRoleOptions
+            {
+                Name = "Cancel",
+                Exact = true
+            });
+            await cancel.WaitForAsync();
+            await cancel.ClickAsync();
+
+            await page.GetByText("Conversion cancelled.", new PageGetByTextOptions { Exact = true }).WaitForAsync();
+            Assert.True(await page.Locator("input[type=file]").IsEnabledAsync());
+            Assert.True(await page.GetByRole(AriaRole.Button, new PageGetByRoleOptions
+            {
+                Name = "Try the built-in sample",
+                Exact = true
+            }).IsEnabledAsync());
         }
         finally
         {
@@ -180,15 +367,38 @@ public sealed class WasmBrowserSmokeTest
 
     private static Process StartServer(string repositoryRoot, int port)
     {
-        ProcessStartInfo startInfo = new("dotnet")
+        string? publishedRoot = Environment.GetEnvironmentVariable(PublishedRootEnvironmentVariable);
+        ProcessStartInfo startInfo;
+        if (!string.IsNullOrWhiteSpace(publishedRoot))
         {
-            Arguments = $"run --project samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj --configuration Release --no-build --no-launch-profile --urls http://127.0.0.1:{port}",
-            CreateNoWindow = true,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            WorkingDirectory = repositoryRoot
-        };
+            startInfo = new ProcessStartInfo("python3")
+            {
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                WorkingDirectory = repositoryRoot
+            };
+            startInfo.ArgumentList.Add("-m");
+            startInfo.ArgumentList.Add("http.server");
+            startInfo.ArgumentList.Add(port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("--bind");
+            startInfo.ArgumentList.Add("127.0.0.1");
+            startInfo.ArgumentList.Add("--directory");
+            startInfo.ArgumentList.Add(Path.GetFullPath(publishedRoot));
+        }
+        else
+        {
+            startInfo = new ProcessStartInfo("dotnet")
+            {
+                Arguments = $"run --project samples/PdfBox.Net.Html.Wasm/PdfBox.Net.Html.Wasm.csproj --configuration Release --no-build --no-launch-profile --urls http://127.0.0.1:{port}",
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                WorkingDirectory = repositoryRoot
+            };
+        }
         Process process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start the WASM development server.");
         process.BeginErrorReadLine();
         process.BeginOutputReadLine();
@@ -275,4 +485,24 @@ public sealed class WasmBrowserSmokeTest
         return directory?.FullName
             ?? throw new DirectoryNotFoundException("Could not locate the unpdf repository root.");
     }
+
+    private static WasmPerformanceBaseline ReadPerformanceBaseline(string repositoryRoot)
+    {
+        string path = Path.Combine(repositoryRoot, "eng", "wasm-performance-baseline.json");
+        return JsonSerializer.Deserialize<WasmPerformanceBaseline>(
+            File.ReadAllText(path),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidOperationException($"Could not parse {path}.");
+    }
+
+    private sealed record WasmPerformanceBaseline(
+        ColdStartupBudget ColdStartup,
+        DeterministicConversionBudget DeterministicConversion);
+
+    private sealed record ColdStartupBudget(double MaximumLoadMilliseconds);
+
+    private sealed record DeterministicConversionBudget(
+        long MaximumApplicationMilliseconds,
+        int MaximumNetworkRequests,
+        long MaximumWallMilliseconds);
 }

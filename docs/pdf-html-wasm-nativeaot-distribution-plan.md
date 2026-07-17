@@ -101,6 +101,14 @@ assets never leak into the WASM graph. Start with image decode/encode and only
 the drawing operations needed by HTML fallbacks. Compare fidelity and payload
 against browser lite before making it a default download.
 
+The completed comparison is recorded in the
+[browser deployment guide](pdf-html-wasm-pages.md#rendering-backends-and-loading).
+Against the last browser-lite commit, the adaptive build adds 30.6% (about
+1.17 MiB) to the Brotli framework payload, has equivalent single-run text
+conversion time, and changes the browser image fixture from omitted/degraded to
+exported and displayed. Checked-in payload and timing ratchets now guard the
+accepted tradeoff.
+
 Microsoft documents that WebAssembly native dependencies must be built for
 WebAssembly and linked with the Emscripten toolchain. NuGet packages should use
 `browser-wasm` runtime assets, and prebuilt native objects must match the SDK's
@@ -186,21 +194,28 @@ A standalone Blazor WebAssembly app is a set of static files and does not need
 a .NET server. Microsoft explicitly supports static/CDN hosting for this model.
 See the [Blazor hosting-model documentation](https://learn.microsoft.com/en-us/aspnet/core/blazor/hosting-models?view=aspnetcore-10.0).
 
-| Option | Best fit | Strengths | Risks/work |
+The limits below were checked against the linked primary documentation on
+2026-07-17. Provider pricing and quotas remain external state and must be
+rechecked before a production migration.
+
+| Option | Current limits and cost | Setup and security control | Recommendation |
 |---|---|---|---|
-| GitHub Pages | Public demo and preview | Existing repository/Actions, TLS, no new cloud account, official Blazor guidance | Repository base path, limited header control, public-site orientation |
-| Azure Static Web Apps | Managed production candidate | First-class Blazor docs, preview environments, custom domains, auth/API path if ever needed | Azure ownership and deployment-token/resource setup |
-| Cloudflare Pages | Managed production/CDN candidate | Global static delivery, Git integration, direct CI upload, preview deployments | Provider-specific configuration and header/caching validation |
-| Static object storage plus CDN or self-hosted Nginx | Vendor-neutral/control-oriented | Full headers, cache, domain, and operational control | More infrastructure, monitoring, TLS, and release ownership |
+| GitHub Pages | Free for this public repository; 1 GB published-site limit, soft 100 GB/month bandwidth limit, and a 10-minute deployment timeout. Custom Actions publication avoids the ordinary ten-builds-per-hour soft limit. | Already deployed with repository TLS and no new account. Correct WASM MIME serving is verified, but arbitrary response security/cache headers cannot be configured; the app therefore uses a verified CSP meta policy for the preview. | Keep as the zero-infrastructure public demo/preview. GitHub states that Pages is not intended to run commercial SaaS, reinforcing the preview-only boundary. |
+| Azure Static Web Apps | Free: 250 MB per environment, 500 MB total, 15,000 files, three preview environments, two custom domains, and 100 GB/month with no overage. Standard: 500 MB per environment, 2 GB total, ten preview environments, 100 GB included, then documented bandwidth overage; the base plan price is region/account dependent. | Azure resource plus deployment token or GitHub integration. `staticwebapp.config.json` supports global and route response headers; generated output includes this config. Standard supplies an SLA and additional production controls. | Viable when Azure ownership, support, or an SLA is desired. |
+| Cloudflare Pages | Free: 500 builds/month, 20,000 files/site, 25 MiB per asset, one concurrent build, 100 custom domains, and unlimited active preview deployments. Paid plans raise build and file-count limits. | Git or direct upload. A generated `_headers` file applies CSP and other response headers without a function or upload API. The current largest browser asset is below the 25 MiB per-file limit. | Preferred first production candidate for this static, client-only app because it can consume the host-neutral artifact and enforce the checked response-header policy directly. |
+| Static object storage plus CDN or self-hosted Nginx | Limits and cost depend on the selected storage, egress, CDN, TLS, and logging products. | Highest control over headers, caching, domains, logs, and regional placement, but requires infrastructure, monitoring, TLS renewal, and incident ownership. | Keep as the vendor-neutral escape hatch when operational control justifies the maintenance cost. |
 
 Recommendation:
 
-- Use GitHub Pages for the first public preview because it is low-friction and
-  keeps the demo next to the repository.
-- Compare Azure Static Web Apps and Cloudflare Pages for production once payload
-  and header requirements are measured.
+- Keep GitHub Pages for the public preview because it is low-friction and keeps
+  the demo next to the repository.
+- Use Cloudflare Pages as the first production candidate if a production public
+  service is needed; its static `_headers` support matches the generated
+  artifact without introducing server code. Azure Static Web Apps remains the
+  alternative when Azure ownership or an SLA is important.
 - Keep deployment output host-neutral: publish `wwwroot` as static files, with
   no host SDK in the application.
+- No option needs or receives a PDF upload endpoint.
 
 Relevant primary documentation:
 
@@ -208,6 +223,12 @@ Relevant primary documentation:
 - [GitHub Pages custom Actions deployment](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
 - [Blazor WebAssembly on Azure Static Web Apps](https://learn.microsoft.com/en-us/aspnet/core/blazor/host-and-deploy/webassembly/azure-static-web-apps?view=aspnetcore-10.0)
 - [Cloudflare Pages](https://developers.cloudflare.com/pages/)
+- [GitHub Pages limits](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)
+- [Azure Static Web Apps quotas](https://learn.microsoft.com/en-us/azure/static-web-apps/quotas)
+- [Azure Static Web Apps plans](https://learn.microsoft.com/en-us/azure/static-web-apps/plans)
+- [Azure Static Web Apps configuration](https://learn.microsoft.com/en-us/azure/static-web-apps/configuration)
+- [Cloudflare Pages limits](https://developers.cloudflare.com/pages/platform/limits/)
+- [Cloudflare Pages custom headers](https://developers.cloudflare.com/pages/configuration/headers/)
 
 Production hardening must verify CSP/security headers, correct WebAssembly MIME
 types and Brotli/Gzip delivery, immutable fingerprinted caching, SPA fallback,
