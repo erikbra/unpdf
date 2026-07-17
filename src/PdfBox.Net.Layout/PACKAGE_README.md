@@ -41,7 +41,22 @@ converters. Tagged-content problems are reported through stable
 Image placements can be collected without exporting image assets. When
 `IncludeImageAssets` is enabled, `ImageExportPolicy` controls whether an
 unsupported image degrades with a diagnostic, fails strictly, or requires a
-registered rendering backend.
+registered rendering backend. Browser-safe encoded assets, such as ordinary
+RGB JPEG streams, are preserved byte-for-byte in `Degraded` and `Strict` modes
+without consulting `RenderingBackend.Current`.
+
+- `Degraded` omits an unavailable asset and records a stable diagnostic.
+- `Strict` throws when any requested image asset cannot be exported.
+- `BackendRequired` rejects asset extraction before passthrough or conversion
+  when no backend is registered.
+
+Codec and color failures use the stable
+`image-asset-{cmyk,jpx,tiff,icc}-backend-required` families. Requested
+annotation appearances and transparency-group raster fallbacks report
+`annotation-appearance-backend-missing` and
+`transparency-group-rasterization-backend-missing` when no backend is
+available in degraded mode; strict and backend-required modes fail
+deterministically instead.
 
 This package does not register a rendering backend. Applications that need
 image conversion or raster fallbacks can reference `PdfBox.Net.SkiaSharp` or

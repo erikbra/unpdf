@@ -6394,6 +6394,36 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_ExplicitStrictPolicyPreservesSupportedDesktopOutput()
+    {
+        Assert.True(RenderingBackend.IsRegistered);
+        using PDDocument defaultDocument = CreateImageDocument();
+        using PDDocument strictDocument = CreateImageDocument();
+        PdfLayoutDocument defaultLayout = PdfLayoutExtractor.Extract(defaultDocument, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+        PdfLayoutDocument strictLayout = PdfLayoutExtractor.Extract(strictDocument, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true,
+            ImageExportPolicy = PdfImageExportPolicy.Strict
+        });
+
+        PdfHtmlDocument defaultHtml = PdfHtmlConverter.Convert(defaultLayout);
+        PdfHtmlDocument strictHtml = PdfHtmlConverter.Convert(strictLayout);
+
+        Assert.Empty(defaultLayout.Diagnostics);
+        Assert.Empty(strictLayout.Diagnostics);
+        Assert.Equal(defaultHtml.Html, strictHtml.Html);
+        Assert.Equal(defaultHtml.Css, strictHtml.Css);
+        PdfHtmlAsset defaultAsset = Assert.Single(defaultHtml.Assets);
+        PdfHtmlAsset strictAsset = Assert.Single(strictHtml.Assets);
+        Assert.Equal(defaultAsset.RelativePath, strictAsset.RelativePath);
+        Assert.Equal(defaultAsset.ContentType, strictAsset.ContentType);
+        Assert.Equal(defaultAsset.Data, strictAsset.Data);
+    }
+
+    [Fact]
     public void Convert_ReusedImageAssetIsDeterministicAndNotDuplicated()
     {
         using PDDocument document = CreateRepeatedImageDocument();

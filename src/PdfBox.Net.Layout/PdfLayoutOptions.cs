@@ -37,7 +37,8 @@ public sealed class PdfLayoutOptions
     public bool IncludeImageAssets { get; init; }
 
     /// <summary>
-    /// Gets or sets how unavailable browser image assets are handled.
+    /// Gets or sets how unavailable browser image assets, annotation appearances,
+    /// and transparency-group raster fallbacks are handled.
     /// </summary>
     public PdfImageExportPolicy ImageExportPolicy { get; init; } = PdfImageExportPolicy.Degraded;
 

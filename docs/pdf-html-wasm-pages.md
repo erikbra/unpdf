@@ -124,6 +124,19 @@ Image extraction uses the degraded policy by default: directly usable image
 streams are preserved, Skia converts images it supports, and an unavailable
 codec produces a stable diagnostic instead of aborting the whole document.
 Callers that require every requested image can select the strict policy.
+`BackendRequired` is available to applications that want to reject extraction
+before any passthrough or conversion when a provider is absent.
+
+The provider-free contract is verified in a dedicated test assembly that has
+no SkiaSharp or ImageMagick reference: browser-safe JPEG passthrough works in
+both degraded and strict modes, CMYK/YCCK JPEG and JPX extraction retain their
+stable diagnostics, and annotation/transparency fallbacks diagnose the missing
+backend in degraded mode or fail under strict/backend-required policy.
+TIFF and ICC diagnostics are locked at the failure-family classifier boundary;
+the backend-free matrix does not claim to decode those formats.
+Provider-backed tests compare the exact HTML, CSS, and image bytes between the
+default and explicit strict policy for a supported fixture so the policy
+surface cannot change desktop output.
 
 The Skia static archive is linked into the main application WebAssembly module,
 so Blazor managed-assembly lazy loading cannot defer its native bytes. A truly

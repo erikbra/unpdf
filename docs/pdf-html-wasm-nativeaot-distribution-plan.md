@@ -69,7 +69,7 @@ The first capability contract is:
 | Links and vector paths | Supported |
 | Semantic AcroForm controls | Supported |
 | Embedded TrueType/OpenType fonts | Supported when browser-loadable |
-| Raw browser-safe images | Planned in #781 |
+| Raw browser-safe images | Supported without a rendering backend |
 | CMYK/YCCK JPEG and ICC conversion | Diagnostic/degraded |
 | JPX/JPEG2000 and TIFF conversion | Diagnostic/degraded |
 | Annotation appearance rasterization | Requires a browser rendering backend |
@@ -77,11 +77,17 @@ The first capability contract is:
 
 ### Phase 2: browser-safe image policy
 
-Tracked by [#781](https://github.com/erikbra/pdfbox-net/issues/781).
+Completed by [unpdf #50](https://github.com/erikbra/unpdf/issues/50).
 
 Add explicit strict, degraded, and backend-required policies. Preserve encoded
 JPEG/PNG bytes when a browser can display them without decoding. Every omitted
 asset must produce a stable diagnostic code.
+
+The resulting contract preserves ordinary RGB JPEG streams byte-for-byte,
+classifies CMYK/YCCK, JPX/JPEG2000, TIFF, and ICC failures, and reports missing
+backends for requested annotation/transparency raster fallbacks. A dedicated
+provider-free test project prevents desktop test registration from masking the
+browser-lite behavior.
 
 ### Phase 3: payload and browser ratchets
 
