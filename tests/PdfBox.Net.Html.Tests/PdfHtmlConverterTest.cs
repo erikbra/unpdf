@@ -9408,22 +9408,16 @@ public class PdfHtmlConverterTest
         PDTransparencyGroup content = new(new PDStream(document));
         content.SetBBox(new PDRectangle(0, 0, includeText ? 120 : 40, 40));
         content.SetGroup(new PDTransparencyGroupAttributes());
-        using (PDPageContentStream groupContent = new(document, content))
+        if (includeText)
         {
-            if (includeText)
-            {
-                groupContent.BeginText();
-                groupContent.SetFont(new PDType1Font(PDType1Font.FontName.HELVETICA_BOLD), 20);
-                groupContent.NewLineAtOffset(2, 10);
-                groupContent.ShowText("MASKED");
-                groupContent.EndText();
-            }
-            else
-            {
-                groupContent.SetNonStrokingColor(1f, 0f, 0f);
-                groupContent.AddRect(0, 0, 40, 40);
-                groupContent.Fill();
-            }
+            SetOutlineFreeType3Text(content);
+        }
+        else
+        {
+            using PDPageContentStream groupContent = new(document, content);
+            groupContent.SetNonStrokingColor(1f, 0f, 0f);
+            groupContent.AddRect(0, 0, 40, 40);
+            groupContent.Fill();
         }
 
         using PDPageContentStream pageContent = new(document, page);
@@ -9442,6 +9436,44 @@ public class PdfHtmlConverterTest
         }
 
         return document;
+    }
+
+    private static void SetOutlineFreeType3Text(PDTransparencyGroup content)
+    {
+        COSDictionary type3Font = new();
+        type3Font.SetItem(COSName.TYPE, COSName.GetPDFName("Font"));
+        type3Font.SetName(COSName.SUBTYPE, "Type3");
+        type3Font.SetItem(COSName.GetPDFName("FontMatrix"), COSArray.Of(0.001f, 0f, 0f, 0.001f, 0f, 0f));
+        type3Font.SetItem(COSName.GetPDFName("FontBBox"), COSArray.Of(0f, 0f, 500f, 700f));
+        type3Font.SetInt(COSName.GetPDFName("FirstChar"), 65);
+        type3Font.SetInt(COSName.GetPDFName("LastChar"), 83);
+        type3Font.SetItem(
+            COSName.GetPDFName("Widths"),
+            COSArray.Of(Enumerable.Repeat(500f, 19).ToArray()));
+        type3Font.SetName(COSName.GetPDFName("Encoding"), "WinAnsiEncoding");
+
+        COSDictionary charProcs = new();
+        foreach (char letter in "ADEKMS")
+        {
+            charProcs.SetItem(
+                COSName.GetPDFName(letter.ToString()),
+                CreateContentStream("""
+                    500 0 0 0 500 700 d1
+                    0 0 500 700 re
+                    f
+                    """));
+        }
+
+        type3Font.SetItem(COSName.GetPDFName("CharProcs"), charProcs);
+        COSDictionary fonts = new();
+        fonts.SetItem(COSName.GetPDFName("FMask"), type3Font);
+        COSDictionary resources = new();
+        resources.SetItem(COSName.GetPDFName("Font"), fonts);
+        COSDictionary contentDictionary = content.GetCOSObject() ??
+            throw new InvalidOperationException("Transparency group must have a COS dictionary.");
+        contentDictionary.SetItem(COSName.RESOURCES, resources);
+        using Stream output = content.GetContentStream().CreateOutputStream();
+        output.Write(Encoding.ASCII.GetBytes("BT /FMask 20 Tf 2 10 Td (MASKED) Tj ET"));
     }
 
     private static PDDocument CreateImageMaskDocument(bool invertedDecode)

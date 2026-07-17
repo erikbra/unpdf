@@ -2971,7 +2971,7 @@ public static class PdfLayoutExtractor
             RenderingMode renderingMode = GetGraphicsState().GetTextState().GetRenderingModeInstance();
             if ((renderingMode.IsFill() || renderingMode.IsStroke()) &&
                 _vectorGroupContentBounds.Count > 0 &&
-                TryGetGlyphBounds(textRenderingMatrix, font, code) is PdfLayoutRectangle bounds)
+                TryGetGlyphBounds(textRenderingMatrix, font, code, displacement) is PdfLayoutRectangle bounds)
             {
                 foreach (List<PdfLayoutRectangle> groupContentBounds in _vectorGroupContentBounds)
                 {
@@ -2993,49 +2993,116 @@ public static class PdfLayoutExtractor
             base.ShowGlyph(textRenderingMatrix, font, code, displacement);
         }
 
-        private PdfLayoutRectangle? TryGetGlyphBounds(Matrix textRenderingMatrix, PDFont font, int code)
+        private PdfLayoutRectangle? TryGetGlyphBounds(
+            Matrix textRenderingMatrix,
+            PDFont font,
+            int code,
+            Vector displacement)
         {
-            if (_rotation != 0 || font is not PDVectorFont vectorFont)
+            if (_rotation != 0)
             {
                 return null;
             }
 
-            try
+            if (font is PDVectorFont vectorFont)
             {
-                GeneralPath path = vectorFont.GetNormalizedPath(code);
-                if (path.Segments.Count == 0)
+                try
                 {
-                    return null;
-                }
-
-                Matrix glyphMatrix = Matrix.Concatenate(textRenderingMatrix, font.GetFontMatrix());
-                List<PdfLayoutRectangle> points = new(path.Segments.Count * 3);
-                foreach (GeneralPath.Segment segment in path.Segments)
-                {
-                    switch (segment.Type)
+                    GeneralPath path = vectorFont.GetNormalizedPath(code);
+                    if (path.Segments.Count > 0)
                     {
-                        case GeneralPath.SegmentType.MoveTo:
-                        case GeneralPath.SegmentType.LineTo:
-                            points.Add(NormalizeGlyphPoint(segment.X1, segment.Y1, glyphMatrix));
-                            break;
-                        case GeneralPath.SegmentType.QuadTo:
-                            points.Add(NormalizeGlyphPoint(segment.X1, segment.Y1, glyphMatrix));
-                            points.Add(NormalizeGlyphPoint(segment.X2, segment.Y2, glyphMatrix));
-                            break;
-                        case GeneralPath.SegmentType.CurveTo:
-                            points.Add(NormalizeGlyphPoint(segment.X1, segment.Y1, glyphMatrix));
-                            points.Add(NormalizeGlyphPoint(segment.X2, segment.Y2, glyphMatrix));
-                            points.Add(NormalizeGlyphPoint(segment.X3, segment.Y3, glyphMatrix));
-                            break;
+                        Matrix glyphMatrix = Matrix.Concatenate(textRenderingMatrix, font.GetFontMatrix());
+                        List<PdfLayoutRectangle> points = new(path.Segments.Count * 3);
+                        foreach (GeneralPath.Segment segment in path.Segments)
+                        {
+                            switch (segment.Type)
+                            {
+                                case GeneralPath.SegmentType.MoveTo:
+                                case GeneralPath.SegmentType.LineTo:
+                                    points.Add(NormalizeGlyphPoint(segment.X1, segment.Y1, glyphMatrix));
+                                    break;
+                                case GeneralPath.SegmentType.QuadTo:
+                                    points.Add(NormalizeGlyphPoint(segment.X1, segment.Y1, glyphMatrix));
+                                    points.Add(NormalizeGlyphPoint(segment.X2, segment.Y2, glyphMatrix));
+                                    break;
+                                case GeneralPath.SegmentType.CurveTo:
+                                    points.Add(NormalizeGlyphPoint(segment.X1, segment.Y1, glyphMatrix));
+                                    points.Add(NormalizeGlyphPoint(segment.X2, segment.Y2, glyphMatrix));
+                                    points.Add(NormalizeGlyphPoint(segment.X3, segment.Y3, glyphMatrix));
+                                    break;
+                            }
+                        }
+
+                        if (points.Count > 0)
+                        {
+                            return PdfLayoutRectangle.Union(points);
+                        }
                     }
                 }
+                catch (Exception ex) when (ex is IOException or ArgumentException or NotSupportedException)
+                {
+                }
+            }
 
-                return points.Count == 0 ? null : PdfLayoutRectangle.Union(points);
+            return TryGetGlyphMetricBounds(textRenderingMatrix, font, displacement);
+        }
+
+        private PdfLayoutRectangle? TryGetGlyphMetricBounds(
+            Matrix textRenderingMatrix,
+            PDFont font,
+            Vector displacement)
+        {
+            List<Vector> textSpacePoints = [];
+            try
+            {
+                var fontBounds = font.GetBoundingBox();
+                Matrix fontMatrix = font.GetFontMatrix();
+                Vector[] candidates =
+                [
+                    fontMatrix.Transform(fontBounds.GetLowerLeftX(), fontBounds.GetLowerLeftY()),
+                    fontMatrix.Transform(fontBounds.GetLowerLeftX(), fontBounds.GetUpperRightY()),
+                    fontMatrix.Transform(fontBounds.GetUpperRightX(), fontBounds.GetLowerLeftY()),
+                    fontMatrix.Transform(fontBounds.GetUpperRightX(), fontBounds.GetUpperRightY())
+                ];
+                float width = candidates.Max(static point => point.GetX()) -
+                    candidates.Min(static point => point.GetX());
+                float height = candidates.Max(static point => point.GetY()) -
+                    candidates.Min(static point => point.GetY());
+                if (candidates.All(static point =>
+                        float.IsFinite(point.GetX()) && float.IsFinite(point.GetY())) &&
+                    width is > 0.001f and <= 10f &&
+                    height is > 0.001f and <= 10f)
+                {
+                    textSpacePoints.AddRange(candidates);
+                }
             }
             catch (Exception ex) when (ex is IOException or ArgumentException or NotSupportedException)
             {
-                return null;
             }
+
+            textSpacePoints.Add(new Vector(0, 0));
+            textSpacePoints.Add(displacement);
+            if (textSpacePoints.Count == 2)
+            {
+                if (font.IsVertical())
+                {
+                    textSpacePoints.Add(new Vector(-0.5f, -0.5f));
+                    textSpacePoints.Add(new Vector(0.5f, 0.5f));
+                }
+                else
+                {
+                    float right = MathF.Max(0.5f, displacement.GetX());
+                    textSpacePoints.Add(new Vector(0, -0.25f));
+                    textSpacePoints.Add(new Vector(right, 0.9f));
+                }
+            }
+
+            PdfLayoutRectangle bounds = PdfLayoutRectangle.Union(textSpacePoints.Select(point =>
+            {
+                (float x, float y) = NormalizePoint(point.GetX(), point.GetY(), textRenderingMatrix);
+                return new PdfLayoutRectangle(x, y, 0, 0);
+            }));
+            return bounds.Width > 0.001f && bounds.Height > 0.001f ? bounds : null;
         }
 
         private PdfLayoutRectangle NormalizeGlyphPoint(float x, float y, Matrix glyphMatrix)
