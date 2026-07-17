@@ -48,8 +48,9 @@ public sealed class PdfLayoutOptions
     public bool IncludeFontAssets { get; init; }
 
     /// <summary>
-    /// Gets or sets whether compact knockout transparency groups should be rasterized as image fallbacks when a
-    /// rendering backend is registered. Disabled by default so normal HTML conversion continues to preserve vectors.
+    /// Gets or sets whether compact knockout, complex blend, and soft-masked vector or text transparency groups
+    /// should be rasterized as image fallbacks when a rendering backend is registered. Disabled by default so
+    /// normal HTML conversion continues to preserve directly representable vectors and text.
     /// </summary>
     public bool IncludeTransparencyGroupFallbacks { get; init; }
 

@@ -552,6 +552,10 @@ public static class PdfLayoutExtractor
         private readonly List<PdfLayoutDiagnostic> _diagnostics = new();
         private readonly List<PdfLayoutPaintOperation> _paintOperations = new();
         private readonly List<SoftMaskedTransparencyGroup> _softMaskedTransparencyGroups = new();
+        private readonly List<PdfLayoutRectangle> _transparencyGroupFallbackBounds = new();
+        private readonly List<PdfLayoutRectangle> _softMaskedTransparencyGroupFallbackBounds = new();
+        private readonly HashSet<PdfLayoutRectangle> _representedSoftMaskedTransparencyGroupBounds = [];
+        private bool _transparencyGroupFallbacksCollected;
 
         private const float AnnotationAppearanceScale = 2f;
         private const float TransparencyGroupRasterScale = 3f;
@@ -620,7 +624,9 @@ public static class PdfLayoutExtractor
             _glyphs.AddRange(textPositions.Select(position => CreateGlyph(position, textColors, textPaintStates, fontAssets)));
             _lines.AddRange(CreateLines(_glyphs, options));
             _runs.AddRange(_lines.SelectMany(line => line.Runs));
-            ApplyTextShadows(_runs, _softMaskedTransparencyGroups);
+            _representedSoftMaskedTransparencyGroupBounds.Clear();
+            _representedSoftMaskedTransparencyGroupBounds.UnionWith(
+                ApplyTextShadows(_runs, _softMaskedTransparencyGroups));
             _textHighlights.AddRange(DetectTextHighlights(_paths, _glyphs, _formControls));
 
             if (_lines.Count > 0)
@@ -634,10 +640,11 @@ public static class PdfLayoutExtractor
             InferFormLabels();
         }
 
-        private static void ApplyTextShadows(
+        private static IReadOnlyList<PdfLayoutRectangle> ApplyTextShadows(
             IReadOnlyList<PdfTextRun> runs,
             IReadOnlyList<SoftMaskedTransparencyGroup> groups)
         {
+            List<PdfLayoutRectangle> representedGroups = [];
             foreach (SoftMaskedTransparencyGroup group in groups)
             {
                 PdfTextRun? run = runs
@@ -661,7 +668,10 @@ public static class PdfLayoutExtractor
                     0.5f,
                     MathF.Min(leftExpansion + rightExpansion, topExpansion + bottomExpansion) / 4f);
                 run.Shadow = new PdfTextShadow(offsetX, offsetY, blurRadius, group.Color);
+                representedGroups.Add(group.Bounds);
             }
+
+            return representedGroups;
         }
 
         private static bool CanRepresentAsTextShadow(
@@ -799,6 +809,7 @@ public static class PdfLayoutExtractor
 
         public PdfLayoutPage Build()
         {
+            CollectPendingTransparencyGroupFallbacks();
             return new PdfLayoutPage(
                 _pageNumber,
                 _mediaBox,
@@ -1275,16 +1286,36 @@ public static class PdfLayoutExtractor
 
             if (options.IncludeImageAssets && options.IncludeTransparencyGroupFallbacks)
             {
-                CollectTransparencyGroupFallbacks(
-                    collector.KnockoutTransparencyGroupBounds
-                        .Select(ExpandKnockoutTransparencyGroupBounds)
-                        .Concat(collector.IsolatedDeviceCmykBlendGroupBounds.Select(
-                            ExpandIsolatedDeviceCmykBlendGroupBounds))
-                        .ToArray());
+                _transparencyGroupFallbackBounds.AddRange(
+                    collector.KnockoutTransparencyGroupBounds.Select(ExpandKnockoutTransparencyGroupBounds));
+                _transparencyGroupFallbackBounds.AddRange(
+                    collector.IsolatedDeviceCmykBlendGroupBounds.Select(
+                        ExpandIsolatedDeviceCmykBlendGroupBounds));
+                _softMaskedTransparencyGroupFallbackBounds.AddRange(
+                    collector.SoftMaskedTransparencyGroupFallbackBounds);
             }
         }
 
-        private void CollectTransparencyGroupFallbacks(IReadOnlyList<PdfLayoutRectangle> groupBounds)
+        private void CollectPendingTransparencyGroupFallbacks()
+        {
+            if (_transparencyGroupFallbacksCollected)
+            {
+                return;
+            }
+
+            _transparencyGroupFallbacksCollected = true;
+            PdfLayoutRectangle[] softMaskedBounds = _softMaskedTransparencyGroupFallbackBounds
+                .Where(bounds => !_representedSoftMaskedTransparencyGroupBounds.Contains(bounds))
+                .Select(ExpandSoftMaskedTransparencyGroupBounds)
+                .ToArray();
+            CollectTransparencyGroupFallbacks(
+                _transparencyGroupFallbackBounds.Concat(softMaskedBounds).ToArray(),
+                renderFullPage: softMaskedBounds.Length > 0);
+        }
+
+        private void CollectTransparencyGroupFallbacks(
+            IReadOnlyList<PdfLayoutRectangle> groupBounds,
+            bool renderFullPage = false)
         {
             PdfLayoutRectangle[] fallbackBounds = MergeTransparencyGroupBounds(groupBounds)
                 .Where(IsCompactTransparencyGroup)
@@ -1317,6 +1348,27 @@ public static class PdfLayoutExtractor
             try
             {
                 PDFRenderer renderer = new(_document);
+                if (renderFullPage)
+                {
+                    using BufferedImage pageImage = renderer.RenderImage(
+                        _pageIndex,
+                        TransparencyGroupRasterScale,
+                        ImageType.RGB);
+                    PdfLayoutRectangle pageBounds = new(0, 0, _width, _height);
+                    for (int fallbackIndex = 0; fallbackIndex < fallbackBounds.Length; fallbackIndex++)
+                    {
+                        PdfLayoutRectangle bounds = fallbackBounds[fallbackIndex];
+                        using BufferedImage image = CropRenderedRegion(
+                            pageImage,
+                            pageBounds,
+                            bounds,
+                            TransparencyGroupRasterScale);
+                        AddTransparencyGroupFallback(image, bounds, fallbackIndex);
+                    }
+
+                    return;
+                }
+
                 foreach (TransparencyGroupRenderBatch batch in CreateTransparencyGroupRenderBatches(fallbackBounds))
                 {
                     using BufferedImage renderedRegion = RenderPageRegion(
@@ -1363,6 +1415,16 @@ public static class PdfLayoutExtractor
         }
 
         private PdfLayoutRectangle ExpandIsolatedDeviceCmykBlendGroupBounds(PdfLayoutRectangle bounds)
+        {
+            const float padding = 1f;
+            float left = MathF.Max(0, bounds.X - padding);
+            float top = MathF.Max(0, bounds.Y - padding);
+            float right = MathF.Min(_width, bounds.Right + padding);
+            float bottom = MathF.Min(_height, bounds.Bottom + padding);
+            return new PdfLayoutRectangle(left, top, right - left, bottom - top);
+        }
+
+        private PdfLayoutRectangle ExpandSoftMaskedTransparencyGroupBounds(PdfLayoutRectangle bounds)
         {
             const float padding = 1f;
             float left = MathF.Max(0, bounds.X - padding);
@@ -2416,10 +2478,11 @@ public static class PdfLayoutExtractor
         private readonly List<PdfLayoutVectorGroup> _vectorGroups = new();
         private readonly List<PdfLayoutDiagnostic> _diagnostics = new();
         private readonly List<PdfLayoutPaintOperation> _paintOperations = new();
-        private readonly Stack<List<PdfLayoutRectangle>> _vectorGroupPathBounds = new();
+        private readonly Stack<List<PdfLayoutRectangle>> _vectorGroupContentBounds = new();
         private readonly Stack<VectorGroupBuilder> _activeVectorGroups = new();
         private readonly List<PdfLayoutRectangle> _knockoutTransparencyGroupBounds = new();
         private readonly List<PdfLayoutRectangle> _isolatedDeviceCmykBlendGroupBounds = new();
+        private readonly List<PdfLayoutRectangle> _softMaskedTransparencyGroupFallbackBounds = new();
         private readonly List<SoftMaskedTransparencyGroup> _softMaskedTransparencyGroups = new();
         private bool _reportedShapeAlphaPath;
         private int _nextVectorGroupIndex;
@@ -2468,6 +2531,9 @@ public static class PdfLayoutExtractor
         public IReadOnlyList<PdfLayoutRectangle> IsolatedDeviceCmykBlendGroupBounds =>
             _isolatedDeviceCmykBlendGroupBounds;
 
+        public IReadOnlyList<PdfLayoutRectangle> SoftMaskedTransparencyGroupFallbackBounds =>
+            _softMaskedTransparencyGroupFallbackBounds;
+
         public IReadOnlyList<SoftMaskedTransparencyGroup> SoftMaskedTransparencyGroups => _softMaskedTransparencyGroups;
 
         public override void XObject(PDXObject xobject)
@@ -2486,6 +2552,7 @@ public static class PdfLayoutExtractor
             {
                 PDGraphicsState graphicsState = GetGraphicsState();
                 bool isTransparencyGroup = xobject is PDTransparencyGroup;
+                bool hasSoftMask = isTransparencyGroup && graphicsState.GetSoftMask() is not null;
                 bool hasLuminositySoftMask = isTransparencyGroup &&
                     string.Equals(
                         graphicsState.GetSoftMask()?.GetSubType()?.GetName(),
@@ -2533,21 +2600,26 @@ public static class PdfLayoutExtractor
                     CurrentClipPaths(graphicsState, skipCount: 1),
                     graphicsState.GetCurrentClippingPaths().Count);
                 _activeVectorGroups.Push(group);
-                _vectorGroupPathBounds.Push([]);
+                _vectorGroupContentBounds.Push([]);
                 try
                 {
                     base.XObject(xobject);
                 }
                 finally
                 {
-                    List<PdfLayoutRectangle> pathBounds = _vectorGroupPathBounds.Pop();
+                    List<PdfLayoutRectangle> contentBounds = _vectorGroupContentBounds.Pop();
                     VectorGroupBuilder completedGroup = _activeVectorGroups.Pop();
-                    if (pathBounds.Count > 0)
+                    if (contentBounds.Count > 0)
                     {
-                        PdfLayoutRectangle bounds = PdfLayoutRectangle.Union(pathBounds);
-                        FlattenSimpleNonKnockoutDeviceCmykBlends(completedGroup, blendColorSpaceName);
-                        FlattenNativeBlendResultIndicator(completedGroup, blendColorSpaceName);
-                        _vectorGroups.Add(completedGroup.Build(_paths.Count - 1, bounds));
+                        PdfLayoutRectangle bounds = PdfLayoutRectangle.Union(contentBounds);
+                        bool containsPaths = _paths.Count > completedGroup.FirstPathIndex;
+                        if (containsPaths)
+                        {
+                            FlattenSimpleNonKnockoutDeviceCmykBlends(completedGroup, blendColorSpaceName);
+                            FlattenNativeBlendResultIndicator(completedGroup, blendColorSpaceName);
+                            _vectorGroups.Add(completedGroup.Build(_paths.Count - 1, bounds));
+                        }
+
                         if (isTransparencyGroup && attributes?.IsKnockout() == true)
                         {
                             _knockoutTransparencyGroupBounds.Add(bounds);
@@ -2563,7 +2635,13 @@ public static class PdfLayoutExtractor
                             _isolatedDeviceCmykBlendGroupBounds.Add(bounds);
                         }
 
-                        if (hasLuminositySoftMask &&
+                        if (hasSoftMask)
+                        {
+                            _softMaskedTransparencyGroupFallbackBounds.Add(bounds);
+                        }
+
+                        if (containsPaths &&
+                            hasLuminositySoftMask &&
                             DominantGroupFillColor(completedGroup.FirstPathIndex, _paths.Count - 1) is PdfLayoutColor shadowColor)
                         {
                             _softMaskedTransparencyGroups.Add(new SoftMaskedTransparencyGroup(bounds, shadowColor));
@@ -2890,8 +2968,19 @@ public static class PdfLayoutExtractor
 
         protected override void ShowGlyph(Matrix textRenderingMatrix, PDFont font, int code, Vector displacement)
         {
+            RenderingMode renderingMode = GetGraphicsState().GetTextState().GetRenderingModeInstance();
+            if ((renderingMode.IsFill() || renderingMode.IsStroke()) &&
+                _vectorGroupContentBounds.Count > 0 &&
+                TryGetGlyphBounds(textRenderingMatrix, font, code) is PdfLayoutRectangle bounds)
+            {
+                foreach (List<PdfLayoutRectangle> groupContentBounds in _vectorGroupContentBounds)
+                {
+                    groupContentBounds.Add(bounds);
+                }
+            }
+
             if (!_reportedUnsupportedTextClipping &&
-                GetGraphicsState().GetTextState().GetRenderingModeInstance().IsClip())
+                renderingMode.IsClip())
             {
                 _diagnostics.Add(new PdfLayoutDiagnostic(
                     PdfLayoutDiagnosticSeverity.Warning,
@@ -2902,6 +2991,57 @@ public static class PdfLayoutExtractor
             }
 
             base.ShowGlyph(textRenderingMatrix, font, code, displacement);
+        }
+
+        private PdfLayoutRectangle? TryGetGlyphBounds(Matrix textRenderingMatrix, PDFont font, int code)
+        {
+            if (_rotation != 0 || font is not PDVectorFont vectorFont)
+            {
+                return null;
+            }
+
+            try
+            {
+                GeneralPath path = vectorFont.GetNormalizedPath(code);
+                if (path.Segments.Count == 0)
+                {
+                    return null;
+                }
+
+                Matrix glyphMatrix = Matrix.Concatenate(textRenderingMatrix, font.GetFontMatrix());
+                List<PdfLayoutRectangle> points = new(path.Segments.Count * 3);
+                foreach (GeneralPath.Segment segment in path.Segments)
+                {
+                    switch (segment.Type)
+                    {
+                        case GeneralPath.SegmentType.MoveTo:
+                        case GeneralPath.SegmentType.LineTo:
+                            points.Add(NormalizeGlyphPoint(segment.X1, segment.Y1, glyphMatrix));
+                            break;
+                        case GeneralPath.SegmentType.QuadTo:
+                            points.Add(NormalizeGlyphPoint(segment.X1, segment.Y1, glyphMatrix));
+                            points.Add(NormalizeGlyphPoint(segment.X2, segment.Y2, glyphMatrix));
+                            break;
+                        case GeneralPath.SegmentType.CurveTo:
+                            points.Add(NormalizeGlyphPoint(segment.X1, segment.Y1, glyphMatrix));
+                            points.Add(NormalizeGlyphPoint(segment.X2, segment.Y2, glyphMatrix));
+                            points.Add(NormalizeGlyphPoint(segment.X3, segment.Y3, glyphMatrix));
+                            break;
+                    }
+                }
+
+                return points.Count == 0 ? null : PdfLayoutRectangle.Union(points);
+            }
+            catch (Exception ex) when (ex is IOException or ArgumentException or NotSupportedException)
+            {
+                return null;
+            }
+        }
+
+        private PdfLayoutRectangle NormalizeGlyphPoint(float x, float y, Matrix glyphMatrix)
+        {
+            (float normalizedX, float normalizedY) = NormalizePoint(x, y, glyphMatrix);
+            return new PdfLayoutRectangle(normalizedX, normalizedY, 0, 0);
         }
 
         protected override void OnStrokePath(IReadOnlyList<PathSegment> path, PDGraphicsState graphicsState)
@@ -3088,9 +3228,9 @@ public static class PdfLayoutExtractor
                     _pageNumber));
                 _reportedShapeAlphaPath = true;
             }
-            foreach (List<PdfLayoutRectangle> groupPathBounds in _vectorGroupPathBounds)
+            foreach (List<PdfLayoutRectangle> groupContentBounds in _vectorGroupContentBounds)
             {
-                groupPathBounds.Add(bounds);
+                groupContentBounds.Add(bounds);
             }
         }
 
@@ -4591,7 +4731,7 @@ public static class PdfLayoutExtractor
             string assetId = $"page-{_pageNumber.ToString(CultureInfo.InvariantCulture)}-image-{index.ToString(CultureInfo.InvariantCulture)}";
             if (_includeImageAssets)
             {
-                assetId = ExportXObjectImageAsset(image, assetId, index);
+                assetId = ExportXObjectImageAsset(image, assetId, index, GetGraphicsState());
             }
 
             PdfLayoutColor? overprintCompositeColor = ResolveUniformIndexedDeviceNOverprint(
@@ -4990,7 +5130,7 @@ public static class PdfLayoutExtractor
             string assetId = $"page-{_pageNumber.ToString(CultureInfo.InvariantCulture)}-image-{index.ToString(CultureInfo.InvariantCulture)}";
             if (_includeImageAssets)
             {
-                assetId = ExportInlineImageAsset(image, assetId, index);
+                assetId = ExportInlineImageAsset(image, assetId, index, GetGraphicsState());
             }
 
             _images.Add(new PdfLayoutImage(
@@ -5075,11 +5215,31 @@ public static class PdfLayoutExtractor
             };
         }
 
-        private string ExportXObjectImageAsset(PDImageXObject image, string assetId, int index)
+        private string ExportXObjectImageAsset(
+            PDImageXObject image,
+            string assetId,
+            int index,
+            PDGraphicsState graphicsState)
         {
             EnsureImageExportBackendIfRequired(index);
             try
             {
+                if (image.GetCOSObject()?.GetBoolean(COSName.GetPDFName("ImageMask"), false) == true)
+                {
+                    PdfLayoutColor color = ResolveColor(
+                        graphicsState.GetNonStrokingColor(),
+                        graphicsState.GetNonStrokeAlphaConstant(),
+                        index,
+                        "image mask");
+                    byte[] stencilData = ExportStencilImagePng(
+                        image.GetImageData(),
+                        image.GetWidth(),
+                        image.GetHeight(),
+                        image.GetCOSObject()?.GetCOSArray(COSName.DECODE),
+                        color);
+                    return _imageAssets.Add(assetId, "png", "image/png", stencilData).AssetId;
+                }
+
                 if (TryExportOneBitGrayscalePng(image, out byte[]? pngData, out PdfLayoutColor? uniformColor))
                 {
                     return _imageAssets.Add(assetId, "png", "image/png", pngData, uniformColor).AssetId;
@@ -5334,11 +5494,31 @@ public static class PdfLayoutExtractor
             return crc;
         }
 
-        private string ExportInlineImageAsset(PDImage image, string assetId, int index)
+        private string ExportInlineImageAsset(
+            PDImage image,
+            string assetId,
+            int index,
+            PDGraphicsState graphicsState)
         {
             EnsureImageExportBackendIfRequired(index);
             try
             {
+                if (image.IsStencil())
+                {
+                    PdfLayoutColor color = ResolveColor(
+                        graphicsState.GetNonStrokingColor(),
+                        graphicsState.GetNonStrokeAlphaConstant(),
+                        index,
+                        "inline image mask");
+                    byte[] stencilData = ExportStencilImagePng(
+                        image.GetData(),
+                        image.GetWidth(),
+                        image.GetHeight(),
+                        image.GetDecode(),
+                        color);
+                    return _imageAssets.Add(assetId, "png", "image/png", stencilData).AssetId;
+                }
+
                 PdfImageExportResult result = PdfImageExporter.ExportPng(image, _colorManagementContext);
                 return _imageAssets.Add(
                     assetId,
@@ -5350,6 +5530,59 @@ public static class PdfLayoutExtractor
             {
                 return HandleImageExportFailure(assetId, index, ex);
             }
+        }
+
+        private static byte[] ExportStencilImagePng(
+            byte[] samples,
+            int width,
+            int height,
+            COSArray? decode,
+            PdfLayoutColor color)
+        {
+            if (width <= 0 || height <= 0)
+            {
+                throw new IOException("Image-mask width and height must be positive.");
+            }
+
+            int rowBytes = (width + 7) / 8;
+            int expectedLength = checked(rowBytes * height);
+            if (samples.Length < expectedLength)
+            {
+                throw new IOException("Image-mask stream ended before all one-bit samples were available.");
+            }
+
+            if (!TryGetOneBitDecodeInversion(decode, out bool invert))
+            {
+                throw new NotSupportedException("Image-mask Decode must be [0 1] or [1 0].");
+            }
+
+            byte red = (byte)MathF.Round(Math.Clamp(color.Red, 0f, 1f) * byte.MaxValue);
+            byte green = (byte)MathF.Round(Math.Clamp(color.Green, 0f, 1f) * byte.MaxValue);
+            byte blue = (byte)MathF.Round(Math.Clamp(color.Blue, 0f, 1f) * byte.MaxValue);
+            byte opaqueAlpha = (byte)MathF.Round(Math.Clamp(color.Alpha, 0f, 1f) * byte.MaxValue);
+            int transparentSample = invert ? 0 : 1;
+            byte[] rgba = GC.AllocateUninitializedArray<byte>(checked(width * height * 4));
+            int destination = 0;
+            for (int row = 0; row < height; row++)
+            {
+                int rowOffset = row * rowBytes;
+                for (int x = 0; x < width; x++)
+                {
+                    int sample = (samples[rowOffset + (x / 8)] >> (7 - (x % 8))) & 1;
+                    rgba[destination++] = red;
+                    rgba[destination++] = green;
+                    rgba[destination++] = blue;
+                    rgba[destination++] = sample == transparentSample ? (byte)0 : opaqueAlpha;
+                }
+            }
+
+            return RenderingBackend.Current.ImageCodec.EncodePng(
+                new InterleavedPixelData(
+                    rgba,
+                    width,
+                    height,
+                    checked(width * 4),
+                    InterleavedPixelFormat.Rgba32));
         }
 
         private void EnsureImageExportBackendIfRequired(int index)

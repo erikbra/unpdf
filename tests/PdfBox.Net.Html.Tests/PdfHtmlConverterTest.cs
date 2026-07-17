@@ -1150,6 +1150,86 @@ public class PdfHtmlConverterTest
         }
     }
 
+    [Theory]
+    [InlineData("Alpha")]
+    [InlineData("Luminosity")]
+    public void Extract_TransparencyGroupFallback_SelectsCompactSoftMaskedVectorGroups(string subtype)
+    {
+        const float scale = 3f;
+        using PDDocument document = CreateSoftMaskedTransparencyGroupDocument(subtype, includeText: false);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true,
+            IncludeTransparencyGroupFallbacks = true
+        });
+
+        PdfLayoutImage fallback = Assert.Single(
+            Assert.Single(layout.Pages).Images,
+            image => image.Kind == PdfLayoutImageKind.TransparencyGroupFallback);
+        Assert.InRange(fallback.Bounds.Width, 40.9f, 42.1f);
+        Assert.InRange(fallback.Bounds.Height, 40.9f, 42.1f);
+        using BufferedImage fullPage = new PDFRenderer(document).RenderImage(0, scale, ImageType.RGB);
+        AssertFallbackMatchesFullPageCrop(layout, fallback, fullPage, scale);
+    }
+
+    [Fact]
+    public void Convert_TransparencyGroupFallback_SelectsSoftMaskedTextWithoutFlatteningSurroundingText()
+    {
+        using PDDocument document = CreateSoftMaskedTransparencyGroupDocument("Luminosity", includeText: true);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true,
+            IncludeTransparencyGroupFallbacks = true
+        });
+
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        PdfTextRun masked = Assert.Single(page.Runs, run => run.Text.Contains("MASKED", StringComparison.Ordinal));
+        PdfTextRun surrounding = Assert.Single(
+            page.Runs,
+            run => run.Text.Contains("Selectable outside", StringComparison.Ordinal));
+        PdfLayoutImage fallback = Assert.Single(
+            page.Images,
+            image => image.Kind == PdfLayoutImageKind.TransparencyGroupFallback);
+        Assert.True(RectanglesOverlap(masked.PageBounds, fallback.Bounds));
+        Assert.False(RectanglesOverlap(surrounding.PageBounds, fallback.Bounds));
+
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(layout).Html);
+        string visibleText = string.Concat(dom.DescendantNodes().OfType<XText>().Select(static text => text.Value));
+        Assert.Contains("Selectable outside", visibleText, StringComparison.Ordinal);
+        Assert.DoesNotContain("MASKED", visibleText, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false, 255, 0)]
+    [InlineData(true, 0, 255)]
+    public void Extract_ImageMask_ExportsTintedTransparentPng(
+        bool invertedDecode,
+        int expectedFirstAlpha,
+        int expectedSecondAlpha)
+    {
+        using PDDocument document = CreateImageMaskDocument(invertedDecode);
+
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+
+        PdfLayoutImage image = Assert.Single(Assert.Single(layout.Pages).Images);
+        PdfLayoutImageAsset asset = Assert.Single(layout.ImageAssets, candidate => candidate.AssetId == image.AssetId);
+        Assert.Equal("image/png", asset.ContentType);
+        using BufferedImage decoded = DecodePng(asset.Data);
+        Assert.Equal(2, decoded.Width);
+        Assert.Equal(1, decoded.Height);
+        Assert.Equal(expectedFirstAlpha, (int)((uint)decoded.GetRgb(0, 0) >> 24));
+        Assert.Equal(expectedSecondAlpha, (int)((uint)decoded.GetRgb(1, 0) >> 24));
+        int opaquePixel = expectedFirstAlpha == 255 ? decoded.GetRgb(0, 0) : decoded.GetRgb(1, 0);
+        Assert.InRange((opaquePixel >> 16) & 0xff, 50, 52);
+        Assert.InRange((opaquePixel >> 8) & 0xff, 101, 103);
+        Assert.InRange(opaquePixel & 0xff, 152, 154);
+    }
+
     [Fact]
     public void Extract_TransparencyGroupFallback_MatchesFullPageRenderCrop()
     {
@@ -1191,6 +1271,14 @@ public class PdfHtmlConverterTest
         {
             AssertFallbackMatchesFullPageCrop(layout, fallback, fullPage, scale);
         }
+    }
+
+    private static bool RectanglesOverlap(PdfLayoutRectangle first, PdfLayoutRectangle second)
+    {
+        return first.Right >= second.X &&
+            second.Right >= first.X &&
+            first.Bottom >= second.Y &&
+            second.Bottom >= first.Y;
     }
 
     [Fact]
@@ -9292,6 +9380,95 @@ public class PdfHtmlConverterTest
         pageContent.Transform(new Matrix(1, 0, 0, 1, 100, 300));
         pageContent.DrawForm(group);
         pageContent.RestoreGraphicsState();
+        return document;
+    }
+
+    private static PDDocument CreateSoftMaskedTransparencyGroupDocument(string subtype, bool includeText)
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+
+        PDTransparencyGroup mask = new(new PDStream(document));
+        mask.SetBBox(new PDRectangle(0, 0, includeText ? 120 : 40, 40));
+        mask.SetGroup(new PDTransparencyGroupAttributes());
+        using (PDPageContentStream maskContent = new(document, mask))
+        {
+            maskContent.SetNonStrokingColor(0.55f);
+            maskContent.AddRect(0, 0, includeText ? 120 : 40, 40);
+            maskContent.Fill();
+        }
+
+        COSDictionary softMaskDictionary = new();
+        softMaskDictionary.SetItem(COSName.GetPDFName("S"), COSName.GetPDFName(subtype));
+        softMaskDictionary.SetItem(COSName.GetPDFName("G"), mask);
+        PDExtendedGraphicsState maskedState = new();
+        maskedState.SetSoftMask(new PDSoftMask(softMaskDictionary));
+
+        PDTransparencyGroup content = new(new PDStream(document));
+        content.SetBBox(new PDRectangle(0, 0, includeText ? 120 : 40, 40));
+        content.SetGroup(new PDTransparencyGroupAttributes());
+        using (PDPageContentStream groupContent = new(document, content))
+        {
+            if (includeText)
+            {
+                groupContent.BeginText();
+                groupContent.SetFont(new PDType1Font(PDType1Font.FontName.HELVETICA_BOLD), 20);
+                groupContent.NewLineAtOffset(2, 10);
+                groupContent.ShowText("MASKED");
+                groupContent.EndText();
+            }
+            else
+            {
+                groupContent.SetNonStrokingColor(1f, 0f, 0f);
+                groupContent.AddRect(0, 0, 40, 40);
+                groupContent.Fill();
+            }
+        }
+
+        using PDPageContentStream pageContent = new(document, page);
+        pageContent.SaveGraphicsState();
+        pageContent.SetGraphicsStateParameters(maskedState);
+        pageContent.Transform(new Matrix(1, 0, 0, 1, 100, 300));
+        pageContent.DrawForm(content);
+        pageContent.RestoreGraphicsState();
+        if (includeText)
+        {
+            pageContent.BeginText();
+            pageContent.SetFont(new PDType1Font(PDType1Font.FontName.HELVETICA), 12);
+            pageContent.NewLineAtOffset(100, 200);
+            pageContent.ShowText("Selectable outside");
+            pageContent.EndText();
+        }
+
+        return document;
+    }
+
+    private static PDDocument CreateImageMaskDocument(bool invertedDecode)
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+        PDStream stream = new(document);
+        COSStream dictionary = stream.GetCOSObject();
+        dictionary.SetInt(COSName.WIDTH, 2);
+        dictionary.SetInt(COSName.HEIGHT, 1);
+        dictionary.SetInt(COSName.BITS_PER_COMPONENT, 1);
+        dictionary.SetBoolean(COSName.GetPDFName("ImageMask"), true);
+        if (invertedDecode)
+        {
+            dictionary.SetItem(COSName.DECODE, COSArray.Of(1f, 0f));
+        }
+
+        using (Stream output = stream.CreateOutputStream())
+        {
+            output.WriteByte(0b0100_0000);
+        }
+
+        PDImageXObject image = new(stream, null);
+        using PDPageContentStream content = new(document, page);
+        content.SetNonStrokingColor(0.2f, 0.4f, 0.6f);
+        content.DrawImage(image, 100, 300, 40, 20);
         return document;
     }
 

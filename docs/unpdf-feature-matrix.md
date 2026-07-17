@@ -15,8 +15,8 @@ not make semantic HTML structurally identical to the source PDF.
 | CMYK/YCCK, ICC and unusual color spaces | Provider conversion where supported | Diagnostic/degraded | Planned |
 | JPX/JPEG2000 and TIFF | Provider decode where supported | Diagnostic/degraded | Planned |
 | Annotation appearances | Raster fallback where supported | Disabled | Planned |
-| Image masks and soft masks | Partial; remaining work in #41 | Diagnostic/degraded | Planned |
-| Transparency groups and blend modes | Partial localized raster fallback | Diagnostic/degraded | Planned |
+| Image masks and soft masks | Stencil and soft-mask image assets | Diagnostic/degraded | Planned |
+| Transparency groups and blend modes | Localized raster fallback for compact knockout, complex-blend, and soft-masked vector/text groups | Diagnostic/degraded | Planned |
 | Complex clipping, shadings and overprint | Partial with fallback for some cases | Partial with diagnostics | Planned |
 | Tagged structure and accessible semantics | Inferred/preserved where supported | Same | Planned |
 | Encryption | Supported where PdfBox.Net can open the document | Same | Planned |
