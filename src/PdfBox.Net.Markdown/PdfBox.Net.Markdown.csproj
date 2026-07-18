@@ -8,6 +8,7 @@
     <PackageId>PdfBox.Net.Markdown</PackageId>
     <Description>Tagged-first Markdown conversion for PdfBox.Net layout documents.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>pdf;pdfbox;markdown;conversion;tagged-pdf</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

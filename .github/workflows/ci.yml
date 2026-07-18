@@ -24,6 +24,13 @@ jobs:
         run: dotnet restore Unpdf.slnx
       - name: Build
         run: dotnet build Unpdf.slnx --configuration Release --no-restore
+      - name: Verify conversion NuGet packages
+        run: >-
+          python3 eng/validate_conversion_packages.py
+          --configuration Release
+          --version "4.0.0-ci.${{ github.run_id }}"
+          --artifacts-dir artifacts/conversion-packages
+          --no-build
       - name: Test release tooling
         run: python3 -m unittest discover -s tests/release -p 'test_*.py'
       - name: Test conversion quality tooling
