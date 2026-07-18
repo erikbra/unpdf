@@ -13,6 +13,7 @@ dotnet add package PdfBox.Net.Layout
 ## Basic usage
 
 ```csharp
+using PdfBox.Net;
 using PdfBox.Net.Layout;
 using PdfBox.Net.PDModel;
 
@@ -62,8 +63,9 @@ This package does not register a rendering backend. Applications that need
 image conversion or raster fallbacks can reference `PdfBox.Net.SkiaSharp` or
 `PdfBox.Net.ImageMagick` and register that provider during startup.
 
-Use `PdfBox.Net.Html` when the desired result is HTML rather than the layout
-model itself.
+Use `PdfBox.Net.Html` or `PdfBox.Net.Markdown` when the desired result is a
+document format rather than the layout model itself. Those packages depend on
+Layout; they do not depend on each other.
 
 Source and issues are available at
 [github.com/erikbra/unpdf](https://github.com/erikbra/unpdf).

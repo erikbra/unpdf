@@ -8,6 +8,7 @@
     <PackageId>PdfBox.Net.Layout</PackageId>
     <Description>Shared page layout extraction model for PdfBox.Net conversion packages.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>pdf;pdfbox;layout;extraction;conversion</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

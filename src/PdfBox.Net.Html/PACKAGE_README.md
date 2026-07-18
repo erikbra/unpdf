@@ -12,6 +12,7 @@ dotnet add package PdfBox.Net.Html
 ## Convert a PDF
 
 ```csharp
+using PdfBox.Net;
 using PdfBox.Net.Html;
 using PdfBox.Net.Layout;
 using PdfBox.Net.PDModel;
@@ -47,6 +48,10 @@ assets degrade with diagnostics or fail conversion.
 
 PDF-to-HTML conversion is approximate; inspect `PdfLayoutDocument.Diagnostics`
 when fidelity matters.
+
+This package depends on `PdfBox.Net.Layout` and does not reference
+`PdfBox.Net.Markdown`. OCR and lossless reconstruction of arbitrary PDF
+semantics are outside its scope.
 
 Source and issues are available at
 [github.com/erikbra/unpdf](https://github.com/erikbra/unpdf).

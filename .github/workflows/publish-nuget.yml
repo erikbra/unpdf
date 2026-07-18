@@ -36,12 +36,20 @@ jobs:
           tests/PdfBox.Net.Html.Tests/bin/Release/net10.0/.playwright/package/cli.js
           install --with-deps chromium
       - run: dotnet test Unpdf.slnx --configuration Release --no-build --nologo
-      - name: Pack conversion libraries
-        run: |
-          dotnet pack src/PdfBox.Net.Layout/PdfBox.Net.Layout.csproj --configuration Release --no-build --output artifacts/packages -p:Version="${{ inputs.version }}"
-          dotnet pack src/PdfBox.Net.Html/PdfBox.Net.Html.csproj --configuration Release --no-build --output artifacts/packages -p:Version="${{ inputs.version }}"
-          dotnet pack src/PdfBox.Net.Markdown/PdfBox.Net.Markdown.csproj --configuration Release --no-build --output artifacts/packages -p:Version="${{ inputs.version }}"
-          dotnet pack apps/PdfBox.Net.Unpdf/PdfBox.Net.Unpdf.csproj --configuration Release --no-build --output artifacts/packages -p:Version="${{ inputs.version }}"
+      - name: Pack and validate conversion libraries
+        run: >-
+          python3 eng/validate_conversion_packages.py
+          --configuration Release
+          --version "${{ inputs.version }}"
+          --artifacts-dir artifacts/packages
+          --no-build
+      - name: Pack .NET tool
+        run: >-
+          dotnet pack apps/PdfBox.Net.Unpdf/PdfBox.Net.Unpdf.csproj
+          --configuration Release
+          --no-build
+          --output artifacts/packages
+          -p:Version="${{ inputs.version }}"
       - name: Install and smoke-test .NET tool package
         run: |
           dotnet tool install unpdf.tool --tool-path artifacts/tool-smoke --version "${{ inputs.version }}" --add-source artifacts/packages --ignore-failed-sources

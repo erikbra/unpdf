@@ -38,5 +38,10 @@ Library consumers can reference `PdfBox.Net.Html` for HTML conversion,
 reference `PdfBox.Net.SkiaSharp` and `PdfBox.Net.ImageMagick` and register those
 providers before requesting image or raster-fallback output.
 
+The HTML and Markdown packages depend on Layout, not on each other. See
+[Conversion NuGet packages](docs/pdf-conversion-packages.md) for package
+boundaries, supported modes, limitations, package-only consumer samples, and
+validation commands.
+
 See [the CLI documentation](apps/PdfBox.Net.Unpdf/README.md) and
 [release process](docs/unpdf-release-process.md) for distribution details.

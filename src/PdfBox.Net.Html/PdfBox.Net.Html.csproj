@@ -6,8 +6,9 @@
     <Nullable>enable</Nullable>
 
     <PackageId>PdfBox.Net.Html</PackageId>
-    <Description>Fixed-layout HTML conversion for PdfBox.Net layout documents.</Description>
+    <Description>Fixed-layout and semantic HTML conversion for PdfBox.Net layout documents.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>pdf;pdfbox;html;conversion;semantic-html</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
