@@ -1666,6 +1666,27 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_SemanticContinuousFlow_PreservesMixedRegionsWithAuthoredStructure()
+    {
+        PdfLayoutDocument layout = WithTaggedParagraphs(CreateMixedDiagramAndTextLayoutFixture());
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(html.Html);
+
+        XElement grid = Assert.Single(ElementsByClass(dom, "pdf-semantic-mixed-regions"));
+        XElement[] columns = grid.Elements()
+            .Where(element => HasClass(element, "pdf-semantic-column"))
+            .ToArray();
+        Assert.Equal(2, columns.Length);
+        Assert.Contains("LOOP CORE", columns[0].Value, StringComparison.Ordinal);
+        Assert.Contains("Instruction row 01", columns[1].Value, StringComparison.Ordinal);
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-layout-fallback-page"));
+    }
+
+    [Fact]
     public async Task Convert_UnetPageTwo_KeepsLabelsAndCaptionWithFigure()
     {
         using PDDocument document = Loader.LoadPDF(FixturePath("arxiv-unet-page-2-issue-19.pdf"));
@@ -8367,6 +8388,44 @@ public class PdfHtmlConverterTest
             new PdfLayoutRectangle(60f, 88f, 160f, 430f),
             diagramFill);
         return CreateSemanticHtmlFixture(lines, [diagram]);
+    }
+
+    private static PdfLayoutDocument WithTaggedParagraphs(PdfLayoutDocument layout)
+    {
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        PdfTaggedStructureKid[] paragraphs = page.Runs
+            .Select((run, index) => new PdfTaggedElementKid(new PdfTaggedStructureElement(
+                "P",
+                "P",
+                PdfTaggedStructureKind.Paragraph,
+                actualText: null,
+                alternateDescription: null,
+                language: null,
+                title: null,
+                new PdfTaggedStructureAttributes(),
+                [new PdfTaggedContentKid(new PdfTaggedContentReference(
+                    page.PageNumber,
+                    index,
+                    [run],
+                    []))])))
+            .Cast<PdfTaggedStructureKid>()
+            .ToArray();
+        PdfTaggedStructureElement document = new(
+            "Document",
+            "Document",
+            PdfTaggedStructureKind.Document,
+            actualText: null,
+            alternateDescription: null,
+            language: null,
+            title: null,
+            new PdfTaggedStructureAttributes(),
+            paragraphs);
+        return new PdfLayoutDocument(
+            layout.Pages,
+            layout.ImageAssets,
+            layout.FontAssets,
+            layout.Diagnostics,
+            new PdfTaggedStructureDocument([document]));
     }
 
     private static PdfLayoutDocument CreateSideBySideSemanticRuleLayoutFixture()
