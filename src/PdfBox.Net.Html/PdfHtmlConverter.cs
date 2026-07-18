@@ -4393,7 +4393,9 @@ public static class PdfHtmlConverter
             : TryCreateSemanticLineGrid(page, semanticPage);
         PdfSemanticColumns? columns = lineGrid == null
             ? hasAuthoredStructure
-                ? null
+                ? TryCreateMixedGraphicTextColumns(page, semanticPage) is { } mixedRegions
+                    ? AddColumnSpanningFigures(mixedRegions)
+                    : null
                 : TryCreateSemanticColumns(page, semanticPage)
             : null;
         PdfLayoutRectangle[] figureRegions = SemanticFigureRegions(page, semanticPage).ToArray();
@@ -8870,6 +8872,14 @@ public static class PdfHtmlConverter
         string? rootAdditionalClass = null,
         string? rootStyle = null)
     {
+        PdfSemanticListItem[] renderableItems = list.Items
+            .Where(SemanticListItemHasRenderableContent)
+            .ToArray();
+        if (renderableItems.Length == 0)
+        {
+            return;
+        }
+
         string tagName = list.Kind == PdfSemanticListKind.Ordered ? "ol" : "ul";
         html.Append(' ', indentation)
             .Append('<')
@@ -8919,7 +8929,7 @@ public static class PdfHtmlConverter
         }
 
         html.Append('>').AppendLine();
-        foreach (PdfSemanticListItem item in list.Items)
+        foreach (PdfSemanticListItem item in renderableItems)
         {
             WriteSemanticListItem(html, item, element, footnotes, page, indentation + 2);
         }
@@ -9008,6 +9018,23 @@ public static class PdfHtmlConverter
         }
 
         html.AppendLine("</li>");
+    }
+
+    private static bool SemanticListItemHasRenderableContent(PdfSemanticListItem item)
+    {
+        string text = string.Concat(item.Lines.Select(static line => line.Text));
+        if (item.MarkerLength > 0 && text.Length >= item.MarkerLength)
+        {
+            text = text[item.MarkerLength..];
+        }
+
+        if (string.Equals(text.Trim(), item.Marker.Trim(), StringComparison.Ordinal))
+        {
+            text = "";
+        }
+
+        return !string.IsNullOrWhiteSpace(text) ||
+            item.NestedLists.Any(static nested => nested.Items.Any(SemanticListItemHasRenderableContent));
     }
 
     private static void WriteSemanticBibliographyFragment(

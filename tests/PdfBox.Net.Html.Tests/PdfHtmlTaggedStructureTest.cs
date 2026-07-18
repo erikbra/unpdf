@@ -84,6 +84,28 @@ public sealed class PdfHtmlTaggedStructureTest
     }
 
     [Fact]
+    public void Convert_SemanticMode_OmitsMarkerOnlyTaggedLists()
+    {
+        using TaggedFixture fixture = new();
+        PDStructureElement document = fixture.AddElement(fixture.Root, StandardStructureTypes.Document);
+        PDStructureElement emptyList = fixture.AddElement(document, StandardStructureTypes.L);
+        PDStructureElement emptyItem = fixture.AddElement(emptyList, StandardStructureTypes.LI);
+        fixture.WriteText(fixture.AddElement(emptyItem, StandardStructureTypes.Lbl), "•", 700);
+        fixture.AddElement(emptyItem, StandardStructureTypes.LBody);
+        PDStructureElement markerOnlyList = fixture.AddElement(document, StandardStructureTypes.L);
+        PDStructureElement markerOnlyItem = fixture.AddElement(markerOnlyList, StandardStructureTypes.LI);
+        fixture.WriteText(fixture.AddElement(markerOnlyItem, StandardStructureTypes.Lbl), "•", 690);
+
+        PDStructureElement populatedList = fixture.AddElement(document, StandardStructureTypes.L);
+        AddListItem(fixture, populatedList, "•", "Visible item", 675);
+
+        XDocument dom = Convert(fixture);
+
+        XElement list = Assert.Single(dom.Descendants("ul"));
+        Assert.Equal("Visible item", Assert.Single(list.Elements("li")).Value.Trim());
+    }
+
+    [Fact]
     public void Convert_Figure_UsesAuthoredAlternateDescription()
     {
         using TaggedFixture fixture = new();
