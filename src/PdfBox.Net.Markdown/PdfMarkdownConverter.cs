@@ -110,6 +110,28 @@ public static partial class PdfMarkdownConverter
             blocks.Add(new MarkdownBlock(element.Bounds, sourceOrder, tagged, elementMarkdown));
         }
 
+        if (semanticPage.Elements.Any(static element =>
+            element.TaggedStructure == null &&
+            element.Kind is PdfSemanticElementKind.Header or PdfSemanticElementKind.Footer))
+        {
+            diagnostics.Add(new PdfMarkdownDiagnostic(
+                "markdown-running-marginalia-removed",
+                "Repeated untagged header or footer text was omitted from Markdown flow.",
+                PdfMarkdownDiagnosticSeverity.Information,
+                page.PageNumber,
+                PdfMarkdownOutputSource.HeuristicFallback));
+        }
+
+        if (HasAmbiguousColumnFlow(page, semanticPage))
+        {
+            diagnostics.Add(new PdfMarkdownDiagnostic(
+                "markdown-untagged-multicolumn-ambiguous",
+                "Concurrent untagged column flow used geometric reading order and may require review.",
+                PdfMarkdownDiagnosticSeverity.Warning,
+                page.PageNumber,
+                PdfMarkdownOutputSource.HeuristicFallback));
+        }
+
         if (options.IncludeImages && taggedDocument != null)
         {
             foreach (PdfTaggedStructureElement figure in taggedDocument.Elements
@@ -218,9 +240,33 @@ public static partial class PdfMarkdownConverter
         PdfLayoutPage page,
         List<PdfMarkdownDiagnostic> diagnostics)
     {
+        PdfSemanticTableRow[] rows = element.TableRows.ToArray();
+        int columnCount = rows.Select(static row => row.Cells.Count).DefaultIfEmpty(0).Max();
+        bool rectangular = IsRectangularTable(rows, columnCount);
+        bool hasUsefulGrid = rectangular &&
+            rows.Length >= 2 &&
+            columnCount >= 2 &&
+            rows.All(static row => row.Cells.Count(static cell =>
+                !string.IsNullOrWhiteSpace(cell.Text)) >= 2);
+        if (hasUsefulGrid)
+        {
+            diagnostics.Add(new PdfMarkdownDiagnostic(
+                "markdown-untagged-table-inferred",
+                "A rectangular untagged table was emitted from conservative layout inference.",
+                PdfMarkdownDiagnosticSeverity.Information,
+                page.PageNumber,
+                PdfMarkdownOutputSource.HeuristicFallback));
+            return RenderRectangularTable(
+                element,
+                page,
+                rows,
+                columnCount,
+                inferFirstRowAsHeader: true);
+        }
+
         diagnostics.Add(new PdfMarkdownDiagnostic(
             "markdown-untagged-table-degraded",
-            "An inferred untagged table was emitted as plain text because heuristic Markdown tables are out of scope.",
+            "An inferred untagged table was emitted as plain text because its grid was ambiguous.",
             PdfMarkdownDiagnosticSeverity.Warning,
             page.PageNumber,
             PdfMarkdownOutputSource.HeuristicFallback));
@@ -300,12 +346,7 @@ public static partial class PdfMarkdownConverter
     {
         PdfSemanticTableRow[] rows = element.TableRows.ToArray();
         int columnCount = rows.Select(static row => row.Cells.Count).DefaultIfEmpty(0).Max();
-        bool rectangular = rows.Length > 0 &&
-            columnCount > 0 &&
-            rows.All(row => row.Cells.Count == columnCount) &&
-            rows.SelectMany(static row => row.Cells)
-                .All(static cell => cell.RowSpan == 1 && cell.ColumnSpan == 1 && !cell.IsPlaceholder);
-        if (!rectangular)
+        if (!IsRectangularTable(rows, columnCount))
         {
             diagnostics.Add(new PdfMarkdownDiagnostic(
                 "markdown-table-not-rectangular",
@@ -316,10 +357,41 @@ public static partial class PdfMarkdownConverter
             return RenderParagraph(element, page);
         }
 
+        return RenderRectangularTable(
+            element,
+            page,
+            rows,
+            columnCount,
+            inferFirstRowAsHeader: false);
+    }
+
+    private static bool IsRectangularTable(
+        IReadOnlyList<PdfSemanticTableRow> rows,
+        int columnCount)
+    {
+        return rows.Count > 0 &&
+            columnCount > 0 &&
+            rows.All(row => row.Cells.Count == columnCount) &&
+            rows.SelectMany(static row => row.Cells)
+                .All(static cell => cell.RowSpan == 1 && cell.ColumnSpan == 1 && !cell.IsPlaceholder);
+    }
+
+    private static string RenderRectangularTable(
+        PdfSemanticElement element,
+        PdfLayoutPage page,
+        IReadOnlyList<PdfSemanticTableRow> rows,
+        int columnCount,
+        bool inferFirstRowAsHeader)
+    {
         PdfSemanticTableRow? header = rows.FirstOrDefault(static row => row.IsHeader);
-        PdfSemanticTableRow[] bodyRows = header == null
+        if (header == null && inferFirstRowAsHeader)
+        {
+            header = rows[0];
+        }
+
+        IEnumerable<PdfSemanticTableRow> bodyRows = header == null
             ? rows
-            : rows.Where(row => !ReferenceEquals(row, header)).ToArray();
+            : rows.Where(row => !ReferenceEquals(row, header));
         string[] headerCells = header?.Cells
             .Select(cell => RenderTableCell(cell, element, page))
             .ToArray() ?? Enumerable.Repeat("", columnCount).ToArray();
@@ -334,6 +406,39 @@ public static partial class PdfMarkdownConverter
         }
 
         return markdown.ToString().TrimEnd();
+    }
+
+    private static bool HasAmbiguousColumnFlow(
+        PdfLayoutPage page,
+        PdfSemanticPage semanticPage)
+    {
+        PdfSemanticElement[] flow = semanticPage.Elements
+            .Where(static element =>
+                element.TaggedStructure == null &&
+                element.Kind is PdfSemanticElementKind.Heading or PdfSemanticElementKind.Paragraph)
+            .Where(element => element.Bounds.Width < page.Width * 0.55f)
+            .ToArray();
+        if (flow.Length < 4)
+        {
+            return false;
+        }
+
+        PdfSemanticElement[] left = flow
+            .Where(element => element.Bounds.X + element.Bounds.Width / 2f < page.Width * 0.45f)
+            .ToArray();
+        PdfSemanticElement[] right = flow
+            .Where(element => element.Bounds.X + element.Bounds.Width / 2f > page.Width * 0.55f)
+            .ToArray();
+        if (left.Length < 2 || right.Length < 2)
+        {
+            return false;
+        }
+
+        float leftTop = left.Min(static element => element.Bounds.Y);
+        float leftBottom = left.Max(static element => element.Bounds.Bottom);
+        float rightTop = right.Min(static element => element.Bounds.Y);
+        float rightBottom = right.Max(static element => element.Bounds.Bottom);
+        return MathF.Min(leftBottom, rightBottom) - MathF.Max(leftTop, rightTop) > 0f;
     }
 
     private static string RenderTableCell(

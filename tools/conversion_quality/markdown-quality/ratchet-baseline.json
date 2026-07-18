@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "description": "Ratchet baseline for generated Markdown semantic and heuristic PDF fixtures.",
+  "maxStatus": {
+    "failed": 0,
+    "known": 0
+  },
+  "maxCategories": {
+    "crash": 0,
+    "diagnostics": 0,
+    "markdown-heuristic": 0,
+    "markdown-structure": 0,
+    "required-files": 0,
+    "required-substrings": 0,
+    "text-coverage": 0
+  },
+  "minMetrics": {
+    "minimumTextCoverage": 1.0,
+    "minimumMarkdownStructureMatch": 1.0,
+    "minimumMarkdownReadingOrderAccuracy": 1.0,
+    "minimumMarkdownHeadingF1": 1.0,
+    "minimumMarkdownListF1": 1.0,
+    "minimumMarkdownTableCellAccuracy": 1.0,
+    "minimumMarkdownLinkAccuracy": 1.0
+  },
+  "minMarkdownProfiles": {
+    "tagged": {
+      "minimumMarkdownReadingOrderAccuracy": 1.0,
+      "minimumMarkdownHeadingF1": 1.0
+    },
+    "simple-untagged": {
+      "minimumMarkdownReadingOrderAccuracy": 1.0,
+      "minimumMarkdownHeadingF1": 1.0,
+      "minimumMarkdownListF1": 1.0,
+      "minimumMarkdownTableCellAccuracy": 1.0,
+      "minimumMarkdownLinkAccuracy": 1.0
+    },
+    "ambiguous-untagged": {
+      "minimumMarkdownReadingOrderAccuracy": 1.0
+    }
+  }
+}

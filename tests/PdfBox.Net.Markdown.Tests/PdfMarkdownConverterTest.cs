@@ -178,6 +178,73 @@ public sealed class PdfMarkdownConverterTest
     }
 
     [Fact]
+    public void Convert_RectangularUntaggedTable_EmitsMeasuredMarkdownGrid()
+    {
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+        using (PDPageContentStream content = new(document, page))
+        {
+            WriteUntaggedText(
+                content,
+                "A short introduction establishes ordinary page text.",
+                72,
+                700);
+            foreach (float y in new[] { 630f, 600f, 570f, 540f })
+            {
+                content.MoveTo(72, y);
+                content.LineTo(360, y);
+                content.Stroke();
+            }
+
+            foreach (float x in new[] { 72f, 210f, 360f })
+            {
+                content.MoveTo(x, 540);
+                content.LineTo(x, 630);
+                content.Stroke();
+            }
+
+            WriteUntaggedText(content, "Name", 84, 610, bold: true);
+            WriteUntaggedText(content, "Value", 222, 610, bold: true);
+            WriteUntaggedText(content, "Alpha", 84, 580);
+            WriteUntaggedText(content, "42", 222, 580);
+            WriteUntaggedText(content, "Beta", 84, 550);
+            WriteUntaggedText(content, "84", 222, 550);
+        }
+
+        PdfMarkdownDocument result = PdfMarkdownConverter.Convert(PdfLayoutExtractor.Extract(document));
+
+        Assert.Contains("| Name | Value |", result.Markdown, StringComparison.Ordinal);
+        Assert.Contains("| Alpha | 42 |", result.Markdown, StringComparison.Ordinal);
+        Assert.Contains("| Beta | 84 |", result.Markdown, StringComparison.Ordinal);
+        Assert.Contains(result.Diagnostics, static diagnostic =>
+            diagnostic.Code == "markdown-untagged-table-inferred" &&
+            diagnostic.Source == PdfMarkdownOutputSource.HeuristicFallback);
+    }
+
+    [Fact]
+    public void Convert_UntaggedConcurrentColumns_ReportsLowConfidenceReadingOrder()
+    {
+        using PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+        using (PDPageContentStream content = new(document, page))
+        {
+            WriteUntaggedText(content, "Left column first passage.", 72, 700);
+            WriteUntaggedText(content, "Right column first passage.", 330, 690);
+            WriteUntaggedText(content, "Left column second passage.", 72, 630);
+            WriteUntaggedText(content, "Right column second passage.", 330, 620);
+        }
+
+        PdfMarkdownDocument result = PdfMarkdownConverter.Convert(PdfLayoutExtractor.Extract(document));
+
+        Assert.Equal(PdfMarkdownConfidence.Low, result.Confidence);
+        Assert.Contains(result.Diagnostics, static diagnostic =>
+            diagnostic.Code == "markdown-untagged-multicolumn-ambiguous" &&
+            diagnostic.Severity == PdfMarkdownDiagnosticSeverity.Warning);
+    }
+
+    [Fact]
     public void Convert_IrregularTaggedTable_ReportsDeterministicFallbackDiagnostic()
     {
         using TaggedFixture fixture = new();
@@ -230,6 +297,25 @@ public sealed class PdfMarkdownConverterTest
     private static string NormalizeNewlines(string value)
     {
         return value.Replace("\r\n", "\n", StringComparison.Ordinal);
+    }
+
+    private static void WriteUntaggedText(
+        PDPageContentStream content,
+        string text,
+        float x,
+        float y,
+        bool bold = false)
+    {
+        content.BeginText();
+        content.SetFont(
+            new PDType1Font(
+                bold
+                    ? PDType1Font.FontName.HELVETICA_BOLD
+                    : PDType1Font.FontName.HELVETICA),
+            12);
+        content.NewLineAtOffset(x, y);
+        content.ShowText(text);
+        content.EndText();
     }
 
     private sealed class TaggedFixture : IDisposable

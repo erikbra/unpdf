@@ -35,6 +35,25 @@ MARKDOWN_STRUCTURE_KEYS = (
     "images",
     "tableRows",
 )
+MARKDOWN_PROFILES = ("tagged", "simple-untagged", "ambiguous-untagged")
+MARKDOWN_HEURISTIC_METRIC_KEYS = (
+    "readingOrderAccuracy",
+    "headingPrecision",
+    "headingRecall",
+    "headingF1",
+    "listPrecision",
+    "listRecall",
+    "listF1",
+    "tableCellAccuracy",
+    "linkAccuracy",
+)
+MARKDOWN_SUMMARY_METRICS = {
+    "readingOrderAccuracy": "MarkdownReadingOrderAccuracy",
+    "headingF1": "MarkdownHeadingF1",
+    "listF1": "MarkdownListF1",
+    "tableCellAccuracy": "MarkdownTableCellAccuracy",
+    "linkAccuracy": "MarkdownLinkAccuracy",
+}
 
 
 @dataclass(frozen=True)
@@ -145,6 +164,12 @@ def extract_html_text(path: Path) -> str:
 def extract_markdown_text(path: Path) -> str:
     text = path.read_text(encoding="utf-8", errors="replace")
     text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    text = re.sub(
+        r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$",
+        " ",
+        text,
+        flags=re.MULTILINE,
+    )
     text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
     text = re.sub(r"^[#>*+\-\d.\s]+", " ", text, flags=re.MULTILINE)
@@ -227,6 +252,250 @@ def markdown_structure_counts(path: Path) -> dict[str, int]:
         "images": images,
         "tableRows": table_rows,
     }
+
+
+def normalized_markdown_label(value: str) -> str:
+    value = re.sub(r"[*_`~]", "", value)
+    return normalize_text(value).casefold()
+
+
+def markdown_labels(text: str) -> dict[str, Any]:
+    text = markdown_without_fenced_code(text)
+    lines = text.splitlines()
+    headings = [
+        match.group("text")
+        for line in lines
+        if (match := re.match(r"^ {0,3}#{1,6}\s+(?P<text>\S.*?)(?:\s+#+)?\s*$", line))
+    ]
+    list_items = [
+        match.group("text")
+        for line in lines
+        if (match := re.match(r"^\s*(?:\d+[.)]|[-+*])\s+(?P<text>\S.*)$", line))
+    ]
+    links = [
+        {"text": match.group("text"), "target": match.group("target")}
+        for match in re.finditer(
+            r"(?<!!)\[(?P<text>[^\]]+)\]\((?P<target>[^)\s]+)(?:\s+['\"][^'\"]*['\"])?\)",
+            text,
+        )
+    ]
+
+    table_cells: list[str] = []
+    for index, line in enumerate(lines):
+        delimiter = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if not delimiter or not all(re.fullmatch(r":?-{3,}:?", cell) for cell in delimiter):
+            continue
+        if index == 0 or "|" not in lines[index - 1]:
+            continue
+        table_cells.extend(cell.strip() for cell in lines[index - 1].strip().strip("|").split("|"))
+        row_index = index + 1
+        while row_index < len(lines) and lines[row_index].strip() and "|" in lines[row_index]:
+            table_cells.extend(
+                cell.strip() for cell in lines[row_index].strip().strip("|").split("|")
+            )
+            row_index += 1
+
+    return {
+        "headings": headings,
+        "listItems": list_items,
+        "tableCells": table_cells,
+        "links": links,
+    }
+
+
+def sequence_edit_distance(expected: list[str], actual: list[str]) -> int:
+    previous = list(range(len(actual) + 1))
+    for expected_index, expected_value in enumerate(expected, start=1):
+        current = [expected_index]
+        for actual_index, actual_value in enumerate(actual, start=1):
+            current.append(
+                min(
+                    current[-1] + 1,
+                    previous[actual_index] + 1,
+                    previous[actual_index - 1] + (expected_value != actual_value),
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def precision_recall(expected: list[str], actual: list[str]) -> dict[str, Any]:
+    expected_counts = Counter(expected)
+    actual_counts = Counter(actual)
+    true_positives = sum(
+        min(expected_counts[label], actual_counts[label]) for label in expected_counts
+    )
+    false_positives = len(actual) - true_positives
+    false_negatives = len(expected) - true_positives
+    precision = true_positives / len(actual) if actual else (1.0 if not expected else 0.0)
+    recall = true_positives / len(expected) if expected else (1.0 if not actual else 0.0)
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    return {
+        "truePositives": true_positives,
+        "falsePositives": false_positives,
+        "falseNegatives": false_negatives,
+        "precision": round(precision, 6),
+        "recall": round(recall, 6),
+        "f1": round(f1, 6),
+    }
+
+
+def validate_string_array(fixture_id: str, name: str, value: Any) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(entry, str) for entry in value):
+        raise ValueError(f"Fixture {fixture_id} {name} must be an array of strings")
+    return value
+
+
+def evaluate_markdown_heuristics(
+    fixture: dict[str, Any],
+    *,
+    primary_path: Path,
+    expectations: dict[str, Any],
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    expected = expectations.get("markdownHeuristics")
+    if expected is None:
+        return None, []
+    if not isinstance(expected, dict):
+        raise ValueError(f"Fixture {fixture['id']} markdownHeuristics must be an object")
+
+    fixture_id = fixture["id"]
+    profile = fixture.get("markdownProfile")
+    if profile not in MARKDOWN_PROFILES:
+        raise ValueError(
+            f"Fixture {fixture_id} markdownProfile must be one of: {', '.join(MARKDOWN_PROFILES)}"
+        )
+
+    markdown = primary_path.read_text(encoding="utf-8", errors="replace")
+    actual_text = extract_markdown_text(primary_path)
+    labels = markdown_labels(markdown)
+    metrics: dict[str, Any] = {
+        "profile": profile,
+        "readingOrderEditDistance": None,
+        "readingOrderAccuracy": None,
+        "headingPrecision": None,
+        "headingRecall": None,
+        "headingF1": None,
+        "listPrecision": None,
+        "listRecall": None,
+        "listF1": None,
+        "tableCellAccuracy": None,
+        "linkAccuracy": None,
+        "labels": labels,
+    }
+
+    reading_order = expected.get("readingOrder")
+    if reading_order is not None:
+        expected_text = (
+            " ".join(validate_string_array(fixture_id, "markdownHeuristics.readingOrder", reading_order))
+            if isinstance(reading_order, list)
+            else reading_order
+        )
+        if not isinstance(expected_text, str):
+            raise ValueError(
+                f"Fixture {fixture_id} markdownHeuristics.readingOrder must be a string or array of strings"
+            )
+        expected_tokens = [match.group(0).casefold() for match in TOKEN_RE.finditer(normalize_text(expected_text))]
+        actual_tokens = [match.group(0).casefold() for match in TOKEN_RE.finditer(normalize_text(actual_text))]
+        distance = sequence_edit_distance(expected_tokens, actual_tokens)
+        denominator = max(len(expected_tokens), len(actual_tokens), 1)
+        metrics["readingOrderEditDistance"] = distance
+        metrics["readingOrderAccuracy"] = round(1.0 - distance / denominator, 6)
+
+    for expected_key, actual_key, prefix in (
+        ("headings", "headings", "heading"),
+        ("listItems", "listItems", "list"),
+    ):
+        if expected_key not in expected:
+            continue
+        expected_labels = [
+            normalized_markdown_label(value)
+            for value in validate_string_array(
+                fixture_id, f"markdownHeuristics.{expected_key}", expected[expected_key]
+            )
+        ]
+        actual_labels = [normalized_markdown_label(value) for value in labels[actual_key]]
+        score = precision_recall(expected_labels, actual_labels)
+        metrics[f"{prefix}Precision"] = score["precision"]
+        metrics[f"{prefix}Recall"] = score["recall"]
+        metrics[f"{prefix}F1"] = score["f1"]
+        metrics[f"{prefix}Counts"] = score
+
+    if "tableCells" in expected:
+        raw_cells = expected["tableCells"]
+        if not isinstance(raw_cells, list):
+            raise ValueError(
+                f"Fixture {fixture_id} markdownHeuristics.tableCells must be an array"
+            )
+        expected_cells: list[str] = []
+        for entry in raw_cells:
+            if isinstance(entry, str):
+                expected_cells.append(entry)
+            elif isinstance(entry, list) and all(isinstance(cell, str) for cell in entry):
+                expected_cells.extend(entry)
+            else:
+                raise ValueError(
+                    f"Fixture {fixture_id} markdownHeuristics.tableCells entries must be strings or string arrays"
+                )
+        expected_cells = [normalized_markdown_label(cell) for cell in expected_cells]
+        actual_cells = [normalized_markdown_label(cell) for cell in labels["tableCells"]]
+        cell_count = max(len(expected_cells), len(actual_cells), 1)
+        correct = sum(
+            expected_cell == actual_cell
+            for expected_cell, actual_cell in zip(expected_cells, actual_cells)
+        )
+        metrics["tableCellAccuracy"] = round(correct / cell_count, 6)
+        metrics["tableCellCounts"] = {
+            "expected": len(expected_cells),
+            "actual": len(actual_cells),
+            "correct": correct,
+        }
+
+    if "links" in expected:
+        raw_links = expected["links"]
+        if not isinstance(raw_links, list):
+            raise ValueError(f"Fixture {fixture_id} markdownHeuristics.links must be an array")
+        expected_links: list[str] = []
+        for link in raw_links:
+            if not isinstance(link, dict) or not isinstance(link.get("text"), str) or not isinstance(
+                link.get("target"), str
+            ):
+                raise ValueError(
+                    f"Fixture {fixture_id} markdownHeuristics.links entries need text and target strings"
+                )
+            expected_links.append(
+                normalized_markdown_label(link["text"]) + "\0" + link["target"]
+            )
+        actual_links = [
+            normalized_markdown_label(link["text"]) + "\0" + link["target"]
+            for link in labels["links"]
+        ]
+        score = precision_recall(expected_links, actual_links)
+        metrics["linkAccuracy"] = score["recall"]
+        metrics["linkCounts"] = score
+
+    minimums = expected.get("minMetrics", {})
+    if not isinstance(minimums, dict):
+        raise ValueError(f"Fixture {fixture_id} markdownHeuristics.minMetrics must be an object")
+    unknown = sorted(set(minimums) - set(MARKDOWN_HEURISTIC_METRIC_KEYS))
+    if unknown:
+        raise ValueError(
+            f"Fixture {fixture_id} markdownHeuristics.minMetrics contains unknown keys: {', '.join(unknown)}"
+        )
+    failures: list[dict[str, Any]] = []
+    for metric, minimum in minimums.items():
+        actual = metrics.get(metric)
+        if actual is None or float(actual) + 1e-12 < float(minimum):
+            failures.append(
+                {
+                    "category": "markdown-heuristic",
+                    "message": f"{metric} {actual} is below required {minimum}",
+                    "metric": metric,
+                    "expected": minimum,
+                    "actual": actual,
+                }
+            )
+
+    return metrics, failures
 
 
 def extract_output_text(path: Path, target: str) -> str:
@@ -616,6 +885,9 @@ def build_quality_checks(
     markdown_structure_failures = [
         failure for failure in failures if failure["category"] == "markdown-structure"
     ]
+    markdown_heuristic_failures = [
+        failure for failure in failures if failure["category"] == "markdown-heuristic"
+    ]
 
     dom_status = "skipped"
     if target == "html" or metrics.get("domSelectors"):
@@ -631,6 +903,11 @@ def build_quality_checks(
         "skipped"
         if target != "markdown" or metrics.get("markdownStructures") is None
         else quality_check_status(markdown_structure_failures)
+    )
+    markdown_heuristic_status = (
+        "skipped"
+        if target != "markdown" or metrics.get("markdownHeuristics") is None
+        else quality_check_status(markdown_heuristic_failures)
     )
 
     return [
@@ -658,6 +935,12 @@ def build_quality_checks(
             "status": markdown_structure_status,
             "metrics": metrics.get("markdownStructures"),
             "failures": markdown_structure_failures,
+        },
+        {
+            "category": "markdown-heuristic",
+            "status": markdown_heuristic_status,
+            "metrics": metrics.get("markdownHeuristics"),
+            "failures": markdown_heuristic_failures,
         },
         {
             "category": "visual",
@@ -712,6 +995,7 @@ def evaluate_fixture(
         "visualChecks": 0,
         "visualFailures": 0,
         "markdownStructures": None,
+        "markdownHeuristics": None,
         "diagnosticCodes": {},
         "diagnosticSources": {},
         "diagnosticSource": None,
@@ -812,6 +1096,13 @@ def evaluate_fixture(
             )
             metrics["markdownStructures"] = markdown_metrics
             failures.extend(markdown_failures)
+            heuristic_metrics, heuristic_failures = evaluate_markdown_heuristics(
+                fixture,
+                primary_path=primary_path,
+                expectations=expectations,
+            )
+            metrics["markdownHeuristics"] = heuristic_metrics
+            failures.extend(heuristic_failures)
 
         required_substrings = expectations.get("requiredSubstrings", [])
         if not isinstance(required_substrings, list):
@@ -857,6 +1148,37 @@ def evaluate_fixture(
             }
         )
 
+    heuristic_expectations = expectations.get("markdownHeuristics")
+    if isinstance(heuristic_expectations, dict):
+        required_codes = heuristic_expectations.get("requiredDiagnosticCodes", [])
+        if not isinstance(required_codes, list) or not all(
+            isinstance(code, str) for code in required_codes
+        ):
+            raise ValueError(
+                f"Fixture {fixture_id} markdownHeuristics.requiredDiagnosticCodes must be an array of strings"
+            )
+        missing_codes = [
+            code for code in required_codes if metrics["diagnosticCodes"].get(code, 0) == 0
+        ]
+        required_confidence = heuristic_expectations.get("requiredConfidence")
+        if required_confidence is not None and not isinstance(required_confidence, str):
+            raise ValueError(
+                f"Fixture {fixture_id} markdownHeuristics.requiredConfidence must be a string"
+            )
+        if missing_codes or (
+            required_confidence is not None
+            and metrics["diagnosticConfidence"] != required_confidence
+        ):
+            failures.append(
+                {
+                    "category": "markdown-heuristic",
+                    "message": "Required Markdown diagnostic evidence was not emitted",
+                    "missingDiagnosticCodes": missing_codes,
+                    "expectedConfidence": required_confidence,
+                    "actualConfidence": metrics["diagnosticConfidence"],
+                }
+            )
+
     if command_failure is None:
         visual_checks, visual_failures = evaluate_visual_checks(
             fixture,
@@ -894,6 +1216,7 @@ def evaluate_fixture(
         "id": fixture_id,
         "title": fixture.get("title", fixture_id),
         "target": target,
+        "markdownProfile": fixture.get("markdownProfile"),
         "categories": fixture.get("categories", []),
         "status": status,
         "metrics": metrics,
@@ -955,6 +1278,9 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     check_category_counts: dict[str, dict[str, int]] = {}
     coverage_values: list[float] = []
     markdown_structure_values: list[float] = []
+    heuristic_values: dict[str, list[float]] = {
+        metric: [] for metric in MARKDOWN_SUMMARY_METRICS
+    }
 
     for result in results:
         status_counts[result["status"]] += 1
@@ -966,6 +1292,12 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
             ratio = markdown_structures.get("matchRatio")
             if isinstance(ratio, (int, float)):
                 markdown_structure_values.append(float(ratio))
+        markdown_heuristics = result["metrics"].get("markdownHeuristics")
+        if isinstance(markdown_heuristics, dict):
+            for metric in heuristic_values:
+                value = markdown_heuristics.get(metric)
+                if isinstance(value, (int, float)):
+                    heuristic_values[metric].append(float(value))
         for failure in result["failures"]:
             category_counts[failure["category"]] += 1
         for check in result.get("qualityChecks", []):
@@ -991,6 +1323,42 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
             else None
         ),
     }
+    for metric, summary_name in MARKDOWN_SUMMARY_METRICS.items():
+        values = heuristic_values[metric]
+        metrics[f"minimum{summary_name}"] = round(min(values), 6) if values else None
+        metrics[f"average{summary_name}"] = (
+            round(sum(values) / len(values), 6) if values else None
+        )
+
+    markdown_profiles: dict[str, Any] = {}
+    for profile in MARKDOWN_PROFILES:
+        profile_results = [
+            result for result in results if result.get("markdownProfile") == profile
+        ]
+        if not profile_results:
+            continue
+        profile_status = {status: 0 for status in STATUS_ORDER}
+        for result in profile_results:
+            profile_status[result["status"]] += 1
+        profile_metrics: dict[str, Any] = {}
+        for metric, summary_name in MARKDOWN_SUMMARY_METRICS.items():
+            values = [
+                float(result["metrics"]["markdownHeuristics"][metric])
+                for result in profile_results
+                if isinstance(result["metrics"].get("markdownHeuristics"), dict)
+                and isinstance(result["metrics"]["markdownHeuristics"].get(metric), (int, float))
+            ]
+            profile_metrics[f"minimum{summary_name}"] = (
+                round(min(values), 6) if values else None
+            )
+            profile_metrics[f"average{summary_name}"] = (
+                round(sum(values) / len(values), 6) if values else None
+            )
+        markdown_profiles[profile] = {
+            "fixtures": len(profile_results),
+            "status": profile_status,
+            "metrics": profile_metrics,
+        }
 
     return {
         "fixtures": len(results),
@@ -998,6 +1366,7 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "categories": dict(sorted(category_counts.items())),
         "checkCategories": dict(sorted(check_category_counts.items())),
         "metrics": metrics,
+        "markdownProfiles": markdown_profiles,
     }
 
 
@@ -1022,6 +1391,23 @@ def check_ratchet(summary: dict[str, Any], baseline: dict[str, Any] | None) -> d
             failures.append(f"metric {metric} is missing")
         elif float(actual) + 1e-12 < float(minimum):
             failures.append(f"metric {metric} value {actual} is below ratchet minimum {minimum}")
+
+    for profile, minimums in baseline.get("minMarkdownProfiles", {}).items():
+        profile_summary = summary.get("markdownProfiles", {}).get(profile)
+        if not isinstance(profile_summary, dict):
+            failures.append(f"Markdown profile {profile} is missing")
+            continue
+        if not isinstance(minimums, dict):
+            raise ValueError(f"Ratchet Markdown profile {profile} must be an object")
+        for metric, minimum in minimums.items():
+            actual = profile_summary.get("metrics", {}).get(metric)
+            if actual is None:
+                failures.append(f"Markdown profile {profile} metric {metric} is missing")
+            elif float(actual) + 1e-12 < float(minimum):
+                failures.append(
+                    f"Markdown profile {profile} metric {metric} value {actual} "
+                    f"is below ratchet minimum {minimum}"
+                )
 
     return {"passed": not failures, "failures": failures}
 
@@ -1075,6 +1461,11 @@ def render_summary_markdown(comparison: dict[str, Any]) -> str:
         f"- Average text coverage: {summary['metrics'].get('averageTextCoverage')}",
         f"- Minimum Markdown structure match: {summary['metrics'].get('minimumMarkdownStructureMatch')}",
         f"- Average Markdown structure match: {summary['metrics'].get('averageMarkdownStructureMatch')}",
+        f"- Minimum Markdown reading-order accuracy: {summary['metrics'].get('minimumMarkdownReadingOrderAccuracy')}",
+        f"- Minimum Markdown heading F1: {summary['metrics'].get('minimumMarkdownHeadingF1')}",
+        f"- Minimum Markdown list F1: {summary['metrics'].get('minimumMarkdownListF1')}",
+        f"- Minimum Markdown table-cell accuracy: {summary['metrics'].get('minimumMarkdownTableCellAccuracy')}",
+        f"- Minimum Markdown link accuracy: {summary['metrics'].get('minimumMarkdownLinkAccuracy')}",
         f"- Ratchet: {'passed' if comparison['ratchet']['passed'] else 'failed'}",
         "",
     ]
@@ -1105,12 +1496,41 @@ def render_summary_markdown(comparison: dict[str, Any]) -> str:
             )
         lines.append("")
 
+    if summary.get("markdownProfiles"):
+        lines.extend(
+            [
+                "## Markdown Profiles",
+                "",
+                "| Profile | Fixtures | Passed | Known | Failed | Reading Order | Heading F1 | List F1 | Table Cells | Links |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for profile, profile_summary in summary["markdownProfiles"].items():
+            status = profile_summary["status"]
+            metrics = profile_summary["metrics"]
+            lines.append(
+                "| {profile} | {fixtures} | {passed} | {known} | {failed} | {reading} | "
+                "{heading} | {listing} | {table} | {links} |".format(
+                    profile=profile,
+                    fixtures=profile_summary["fixtures"],
+                    passed=status.get("passed", 0),
+                    known=status.get("known", 0),
+                    failed=status.get("failed", 0),
+                    reading=metrics.get("minimumMarkdownReadingOrderAccuracy"),
+                    heading=metrics.get("minimumMarkdownHeadingF1"),
+                    listing=metrics.get("minimumMarkdownListF1"),
+                    table=metrics.get("minimumMarkdownTableCellAccuracy"),
+                    links=metrics.get("minimumMarkdownLinkAccuracy"),
+                )
+            )
+        lines.append("")
+
     lines.extend(
         [
             "## Fixtures",
             "",
-            "| Fixture | Target | Status | Quality Checks | Text Coverage | Broken References | Diagnostics | Failure Categories |",
-            "| --- | --- | --- | --- | ---: | ---: | ---: | --- |",
+            "| Fixture | Target | Profile | Status | Quality Checks | Text Coverage | Reading Order | Broken References | Diagnostics | Failure Categories |",
+            "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
         ]
     )
     for result in comparison["fixtures"]:
@@ -1120,13 +1540,21 @@ def render_summary_markdown(comparison: dict[str, Any]) -> str:
             for check in result.get("qualityChecks", [])
         ) or "-"
         coverage = result["metrics"].get("textCoverage")
+        heuristic_metrics = result["metrics"].get("markdownHeuristics")
+        reading_order = (
+            heuristic_metrics.get("readingOrderAccuracy")
+            if isinstance(heuristic_metrics, dict)
+            else None
+        )
         lines.append(
-            "| {id} | {target} | {status} | {checks} | {coverage} | {broken} | {diagnostics} | {categories} |".format(
+            "| {id} | {target} | {profile} | {status} | {checks} | {coverage} | {reading} | {broken} | {diagnostics} | {categories} |".format(
                 id=result["id"],
                 target=result["target"],
+                profile=result.get("markdownProfile") or "-",
                 status=result["status"],
                 checks=quality_checks,
                 coverage="-" if coverage is None else coverage,
+                reading="-" if reading_order is None else reading_order,
                 broken=result["metrics"].get("brokenLocalReferences", 0),
                 diagnostics=result["metrics"].get("diagnostics", 0),
                 categories=categories,

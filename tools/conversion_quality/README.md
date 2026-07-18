@@ -27,6 +27,29 @@ The command writes:
 - `summary.md`, with the same result in a compact table suitable for CI step
   summaries.
 
+## Markdown Heuristic Suite
+
+After a Release build, generate seven small tagged and untagged PDFs and run
+them through the real Markdown converter:
+
+```bash
+dotnet tools/conversion_quality/PdfBox.Net.ConversionQuality/bin/Release/net10.0/PdfBox.Net.ConversionQuality.dll \
+  --markdown-quality-out artifacts/markdown-quality-results
+python3 tools/conversion_quality/run_conversion_quality.py \
+  --manifest tools/conversion_quality/markdown-quality/manifest.json \
+  --results-dir artifacts/markdown-quality-results \
+  --out-dir artifacts/markdown-quality-report \
+  --ratchet-baseline tools/conversion_quality/markdown-quality/ratchet-baseline.json \
+  --fail-on-unexpected \
+  --fail-on-regression
+```
+
+The generated corpus covers headings, paragraphs, lists, links, a rectangular
+table, ambiguous columns, an irregular table, and repeated header/footer
+noise. Every result directory includes its `source.pdf`, `document.md`, and
+`diagnostics.json`. The report separates `tagged`, `simple-untagged`, and
+`ambiguous-untagged` profiles.
+
 CI also writes and uploads `artifacts/conversion-quality-smoke/html-examples`.
 That directory is a human review bundle for real PDF fixtures: each example
 contains the original `source.pdf`, generated `index.html`, CSS/assets,
@@ -130,19 +153,27 @@ expectations. Current gates cover:
 - exact Markdown structure counts through `expectations.markdownStructures`
   (`headings`, `paragraphs`, ordered and unordered list items, links, images,
   and table rows)
+- labeled Markdown expectations through `markdownProfile` and
+  `expectations.markdownHeuristics`: expected reading order, headings, list
+  items, table cells, links, required diagnostic codes/confidence, and
+  per-fixture metric floors
 - visual check reports through an optional `outputs.visual` JSON file with a
   `checks` array
 
 Markdown fixtures report a `markdown-structure` quality check with expected and
 actual counts, a match ratio, and aggregate minimum/average match metrics.
+Labeled fixtures also report a `markdown-heuristic` quality check with
+token-level reading-order edit distance/accuracy, heading and list
+precision/recall/F1, positional table-cell accuracy, and exact link accuracy.
 Diagnostic reports may also include top-level `source` and `confidence`; the
 harness retains those fields plus diagnostic code/source histograms.
 
 Known divergences are listed separately and must include an owning issue and
 reason. Ratchet baselines cap the number of accepted `failed` and `known`
 fixtures, cap failure categories, and can set aggregate metric floors such as
-`minimumTextCoverage`.
+`minimumTextCoverage`. `minMarkdownProfiles` adds profile-specific floors so a
+gain in simple fixtures cannot hide a regression in ambiguous fixtures.
 
-The checked-in smoke corpus includes synthetic HTML and tagged-first Markdown
-outputs. Converter work should add real PDF fixtures and expected result folders
-as stable vertical slices become available.
+The lightweight smoke corpus keeps converter-independent synthetic outputs.
+The Markdown heuristic suite complements it with freshly generated PDFs and
+real converter output on every CI run.

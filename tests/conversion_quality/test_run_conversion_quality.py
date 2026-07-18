@@ -394,6 +394,275 @@ Intro [link](https://example.com).
             checks = {check["category"]: check for check in fixture["qualityChecks"]}
             self.assertEqual("failed", checks["markdown-structure"]["status"])
 
+    def test_markdown_heuristic_profiles_report_labeled_metrics_and_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manifest = root / "manifest.json"
+            results = root / "results"
+            out_dir = root / "out"
+            baseline = root / "ratchet.json"
+            write_json(
+                manifest,
+                {
+                    "schema": 1,
+                    "fixtures": [
+                        {
+                            "id": "tagged",
+                            "target": "markdown",
+                            "markdownProfile": "tagged",
+                            "outputs": {
+                                "markdown": "tagged/document.md",
+                                "diagnostics": "tagged/diagnostics.json",
+                            },
+                            "expectedText": "Title Intro",
+                            "expectations": {
+                                "minTextCoverage": 1.0,
+                                "maxDiagnostics": 1,
+                                "markdownHeuristics": {
+                                    "readingOrder": ["Title", "Intro"],
+                                    "headings": ["Title"],
+                                    "requiredDiagnosticCodes": [
+                                        "markdown-semantic-structure-used"
+                                    ],
+                                    "requiredConfidence": "High",
+                                    "minMetrics": {
+                                        "readingOrderAccuracy": 1.0,
+                                        "headingF1": 1.0,
+                                    },
+                                },
+                            },
+                        },
+                        {
+                            "id": "simple-list-link",
+                            "target": "markdown",
+                            "markdownProfile": "simple-untagged",
+                            "outputs": {
+                                "markdown": "simple-list-link/document.md",
+                                "diagnostics": "simple-list-link/diagnostics.json",
+                            },
+                            "expectedText": "First Second Docs",
+                            "expectations": {
+                                "minTextCoverage": 1.0,
+                                "maxDiagnostics": 1,
+                                "markdownHeuristics": {
+                                    "readingOrder": "First Second Docs",
+                                    "listItems": ["First", "Second"],
+                                    "links": [
+                                        {
+                                            "text": "Docs",
+                                            "target": "https://example.test",
+                                        }
+                                    ],
+                                    "requiredDiagnosticCodes": [
+                                        "markdown-layout-fallback-used"
+                                    ],
+                                    "requiredConfidence": "Low",
+                                    "minMetrics": {
+                                        "readingOrderAccuracy": 1.0,
+                                        "listF1": 1.0,
+                                        "linkAccuracy": 1.0,
+                                    },
+                                },
+                            },
+                        },
+                        {
+                            "id": "simple-table",
+                            "target": "markdown",
+                            "markdownProfile": "simple-untagged",
+                            "outputs": {"markdown": "simple-table/document.md"},
+                            "expectedText": "Name Value Alpha 42",
+                            "expectations": {
+                                "minTextCoverage": 1.0,
+                                "markdownHeuristics": {
+                                    "readingOrder": "Name Value Alpha 42",
+                                    "tableCells": [
+                                        ["Name", "Value"],
+                                        ["Alpha", "42"],
+                                    ],
+                                    "minMetrics": {
+                                        "readingOrderAccuracy": 1.0,
+                                        "tableCellAccuracy": 1.0,
+                                    },
+                                },
+                            },
+                        },
+                        {
+                            "id": "ambiguous-columns",
+                            "target": "markdown",
+                            "markdownProfile": "ambiguous-untagged",
+                            "outputs": {
+                                "markdown": "ambiguous-columns/document.md",
+                                "diagnostics": "ambiguous-columns/diagnostics.json",
+                            },
+                            "expectedText": "Left one Right one Left two Right two",
+                            "expectations": {
+                                "minTextCoverage": 1.0,
+                                "maxDiagnostics": 2,
+                                "markdownHeuristics": {
+                                    "readingOrder": "Left one Right one Left two Right two",
+                                    "requiredDiagnosticCodes": [
+                                        "markdown-untagged-multicolumn-ambiguous"
+                                    ],
+                                    "requiredConfidence": "Low",
+                                    "minMetrics": {"readingOrderAccuracy": 1.0},
+                                },
+                            },
+                        },
+                    ],
+                },
+            )
+            write_text(results / "tagged/document.md", "# Title\n\nIntro\n")
+            write_json(
+                results / "tagged/diagnostics.json",
+                {
+                    "source": "SemanticStructure",
+                    "confidence": "High",
+                    "diagnostics": [
+                        {
+                            "code": "markdown-semantic-structure-used",
+                            "source": "SemanticStructure",
+                        }
+                    ],
+                },
+            )
+            write_text(
+                results / "simple-list-link/document.md",
+                "- First\n- Second\n\n[Docs](https://example.test)\n",
+            )
+            write_json(
+                results / "simple-list-link/diagnostics.json",
+                {
+                    "source": "HeuristicFallback",
+                    "confidence": "Low",
+                    "diagnostics": [
+                        {
+                            "code": "markdown-layout-fallback-used",
+                            "source": "HeuristicFallback",
+                        }
+                    ],
+                },
+            )
+            write_text(
+                results / "simple-table/document.md",
+                "| Name | Value |\n| --- | --- |\n| Alpha | 42 |\n",
+            )
+            write_text(
+                results / "ambiguous-columns/document.md",
+                "Left one\n\nRight one\n\nLeft two\n\nRight two\n",
+            )
+            write_json(
+                results / "ambiguous-columns/diagnostics.json",
+                {
+                    "source": "HeuristicFallback",
+                    "confidence": "Low",
+                    "diagnostics": [
+                        {
+                            "code": "markdown-untagged-multicolumn-ambiguous",
+                            "source": "HeuristicFallback",
+                        },
+                        {
+                            "code": "markdown-layout-fallback-used",
+                            "source": "HeuristicFallback",
+                        },
+                    ],
+                },
+            )
+            write_json(
+                baseline,
+                {
+                    "schema": 1,
+                    "maxStatus": {"failed": 0, "known": 0},
+                    "maxCategories": {"markdown-heuristic": 0},
+                    "minMetrics": {
+                        "minimumMarkdownReadingOrderAccuracy": 1.0,
+                        "minimumMarkdownHeadingF1": 1.0,
+                        "minimumMarkdownListF1": 1.0,
+                        "minimumMarkdownTableCellAccuracy": 1.0,
+                        "minimumMarkdownLinkAccuracy": 1.0,
+                    },
+                    "minMarkdownProfiles": {
+                        "tagged": {
+                            "minimumMarkdownReadingOrderAccuracy": 1.0,
+                            "minimumMarkdownHeadingF1": 1.0,
+                        },
+                        "simple-untagged": {
+                            "minimumMarkdownReadingOrderAccuracy": 1.0,
+                            "minimumMarkdownListF1": 1.0,
+                            "minimumMarkdownTableCellAccuracy": 1.0,
+                            "minimumMarkdownLinkAccuracy": 1.0,
+                        },
+                        "ambiguous-untagged": {
+                            "minimumMarkdownReadingOrderAccuracy": 1.0,
+                        },
+                    },
+                },
+            )
+
+            exit_code = harness.main(
+                [
+                    "--manifest",
+                    str(manifest),
+                    "--results-dir",
+                    str(results),
+                    "--out-dir",
+                    str(out_dir),
+                    "--ratchet-baseline",
+                    str(baseline),
+                    "--fail-on-unexpected",
+                    "--fail-on-regression",
+                ]
+            )
+
+            self.assertEqual(0, exit_code)
+            comparison = json.loads((out_dir / "comparison.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                {"tagged", "simple-untagged", "ambiguous-untagged"},
+                set(comparison["summary"]["markdownProfiles"]),
+            )
+            self.assertEqual(
+                1.0,
+                comparison["summary"]["metrics"]["minimumMarkdownReadingOrderAccuracy"],
+            )
+            simple = comparison["fixtures"][1]["metrics"]["markdownHeuristics"]
+            self.assertEqual(1.0, simple["listF1"])
+            self.assertEqual(1.0, simple["linkAccuracy"])
+            table = comparison["fixtures"][2]["metrics"]["markdownHeuristics"]
+            self.assertEqual(1.0, table["tableCellAccuracy"])
+            checks = {
+                check["category"]: check
+                for check in comparison["fixtures"][3]["qualityChecks"]
+            }
+            self.assertEqual("passed", checks["markdown-heuristic"]["status"])
+            summary_markdown = (out_dir / "summary.md").read_text(encoding="utf-8")
+            self.assertIn("## Markdown Profiles", summary_markdown)
+            self.assertIn("ambiguous-untagged", summary_markdown)
+
+    def test_markdown_profile_ratchet_fails_when_reading_order_regresses(self) -> None:
+        summary = {
+            "status": {"passed": 1, "known": 0, "failed": 0},
+            "categories": {},
+            "metrics": {"minimumMarkdownReadingOrderAccuracy": 0.75},
+            "markdownProfiles": {
+                "simple-untagged": {
+                    "metrics": {"minimumMarkdownReadingOrderAccuracy": 0.75}
+                }
+            },
+        }
+        ratchet = harness.check_ratchet(
+            summary,
+            {
+                "minMetrics": {"minimumMarkdownReadingOrderAccuracy": 0.9},
+                "minMarkdownProfiles": {
+                    "simple-untagged": {
+                        "minimumMarkdownReadingOrderAccuracy": 1.0
+                    }
+                },
+            },
+        )
+
+        self.assertFalse(ratchet["passed"])
+        self.assertEqual(2, len(ratchet["failures"]))
+
     @staticmethod
     def _manifest() -> dict:
         return {
