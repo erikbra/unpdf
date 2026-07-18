@@ -1,0 +1,355 @@
+{
+  "schema": 1,
+  "description": "Generated tagged and untagged PDF fixtures for Markdown heuristic quality tracking.",
+  "fixtures": [
+    {
+      "id": "tagged-reference",
+      "title": "Tagged semantic reference",
+      "target": "markdown",
+      "markdownProfile": "tagged",
+      "categories": [
+        "markdown",
+        "tagged",
+        "heading",
+        "paragraph"
+      ],
+      "outputs": {
+        "markdown": "tagged-reference/document.md",
+        "diagnostics": "tagged-reference/diagnostics.json"
+      },
+      "expectedText": "Tagged reference Authored paragraph",
+      "expectations": {
+        "minTextCoverage": 1.0,
+        "maxDiagnostics": 1,
+        "markdownStructures": {
+          "headings": 1,
+          "paragraphs": 1
+        },
+        "markdownHeuristics": {
+          "readingOrder": [
+            "Tagged reference",
+            "Authored paragraph"
+          ],
+          "headings": [
+            "Tagged reference"
+          ],
+          "requiredDiagnosticCodes": [
+            "markdown-semantic-structure-used"
+          ],
+          "requiredConfidence": "High",
+          "minMetrics": {
+            "readingOrderAccuracy": 1.0,
+            "headingF1": 1.0
+          }
+        },
+        "requiredFiles": [
+          "tagged-reference/source.pdf",
+          "tagged-reference/document.md",
+          "tagged-reference/diagnostics.json"
+        ]
+      }
+    },
+    {
+      "id": "simple-heading-paragraph",
+      "title": "Untagged heading and paragraphs",
+      "target": "markdown",
+      "markdownProfile": "simple-untagged",
+      "categories": [
+        "markdown",
+        "untagged",
+        "heading",
+        "paragraph"
+      ],
+      "outputs": {
+        "markdown": "simple-heading-paragraph/document.md",
+        "diagnostics": "simple-heading-paragraph/diagnostics.json"
+      },
+      "expectedText": "Untagged quality heading First paragraph follows the heading. Second paragraph remains in reading order.",
+      "expectations": {
+        "minTextCoverage": 1.0,
+        "maxDiagnostics": 1,
+        "markdownStructures": {
+          "headings": 1,
+          "paragraphs": 2
+        },
+        "markdownHeuristics": {
+          "readingOrder": [
+            "Untagged quality heading",
+            "First paragraph follows the heading.",
+            "Second paragraph remains in reading order."
+          ],
+          "headings": [
+            "Untagged quality heading"
+          ],
+          "requiredDiagnosticCodes": [
+            "markdown-layout-fallback-used"
+          ],
+          "requiredConfidence": "Low",
+          "minMetrics": {
+            "readingOrderAccuracy": 1.0,
+            "headingF1": 1.0
+          }
+        },
+        "requiredFiles": [
+          "simple-heading-paragraph/source.pdf",
+          "simple-heading-paragraph/document.md",
+          "simple-heading-paragraph/diagnostics.json"
+        ]
+      }
+    },
+    {
+      "id": "simple-list-link",
+      "title": "Untagged list and link",
+      "target": "markdown",
+      "markdownProfile": "simple-untagged",
+      "categories": [
+        "markdown",
+        "untagged",
+        "list",
+        "link"
+      ],
+      "outputs": {
+        "markdown": "simple-list-link/document.md",
+        "diagnostics": "simple-list-link/diagnostics.json"
+      },
+      "expectedText": "Opening prose establishes ordinary body text. A second line establishes the normal vertical rhythm. First checklist item Second checklist item Third checklist item Project documentation",
+      "expectations": {
+        "minTextCoverage": 1.0,
+        "maxDiagnostics": 1,
+        "markdownStructures": {
+          "paragraphs": 2,
+          "unorderedListItems": 3,
+          "links": 1
+        },
+        "markdownHeuristics": {
+          "readingOrder": [
+            "Opening prose establishes ordinary body text. A second line establishes the normal vertical rhythm.",
+            "First checklist item",
+            "Second checklist item",
+            "Third checklist item",
+            "Project documentation"
+          ],
+          "listItems": [
+            "First checklist item",
+            "Second checklist item",
+            "Third checklist item"
+          ],
+          "links": [
+            {
+              "text": "Project documentation",
+              "target": "https://example.test/docs"
+            }
+          ],
+          "requiredDiagnosticCodes": [
+            "markdown-layout-fallback-used"
+          ],
+          "requiredConfidence": "Low",
+          "minMetrics": {
+            "readingOrderAccuracy": 1.0,
+            "listF1": 1.0,
+            "linkAccuracy": 1.0
+          }
+        },
+        "requiredFiles": [
+          "simple-list-link/source.pdf",
+          "simple-list-link/document.md",
+          "simple-list-link/diagnostics.json"
+        ]
+      }
+    },
+    {
+      "id": "simple-table",
+      "title": "Rectangular untagged table",
+      "target": "markdown",
+      "markdownProfile": "simple-untagged",
+      "categories": [
+        "markdown",
+        "untagged",
+        "table"
+      ],
+      "outputs": {
+        "markdown": "simple-table/document.md",
+        "diagnostics": "simple-table/diagnostics.json"
+      },
+      "expectedText": "Table quality introduction. Name Value Alpha 42 Beta 84",
+      "expectations": {
+        "minTextCoverage": 1.0,
+        "maxDiagnostics": 2,
+        "markdownStructures": {
+          "paragraphs": 1,
+          "tableRows": 3
+        },
+        "markdownHeuristics": {
+          "readingOrder": [
+            "Table quality introduction.",
+            "Name Value",
+            "Alpha 42",
+            "Beta 84"
+          ],
+          "tableCells": [
+            [
+              "Name",
+              "Value"
+            ],
+            [
+              "Alpha",
+              "42"
+            ],
+            [
+              "Beta",
+              "84"
+            ]
+          ],
+          "requiredDiagnosticCodes": [
+            "markdown-untagged-table-inferred",
+            "markdown-layout-fallback-used"
+          ],
+          "requiredConfidence": "Low",
+          "minMetrics": {
+            "readingOrderAccuracy": 1.0,
+            "tableCellAccuracy": 1.0
+          }
+        },
+        "requiredFiles": [
+          "simple-table/source.pdf",
+          "simple-table/document.md",
+          "simple-table/diagnostics.json"
+        ]
+      }
+    },
+    {
+      "id": "ambiguous-multicolumn",
+      "title": "Concurrent untagged columns",
+      "target": "markdown",
+      "markdownProfile": "ambiguous-untagged",
+      "categories": [
+        "markdown",
+        "untagged",
+        "multi-column",
+        "ambiguous"
+      ],
+      "outputs": {
+        "markdown": "ambiguous-multicolumn/document.md",
+        "diagnostics": "ambiguous-multicolumn/diagnostics.json"
+      },
+      "expectedText": "Left column first passage. Right column first passage. Left column second passage. Right column second passage.",
+      "expectations": {
+        "minTextCoverage": 1.0,
+        "maxDiagnostics": 2,
+        "markdownStructures": {
+          "paragraphs": 4
+        },
+        "markdownHeuristics": {
+          "readingOrder": [
+            "Left column first passage.",
+            "Right column first passage.",
+            "Left column second passage.",
+            "Right column second passage."
+          ],
+          "requiredDiagnosticCodes": [
+            "markdown-untagged-multicolumn-ambiguous",
+            "markdown-layout-fallback-used"
+          ],
+          "requiredConfidence": "Low",
+          "minMetrics": {
+            "readingOrderAccuracy": 1.0
+          }
+        },
+        "requiredFiles": [
+          "ambiguous-multicolumn/source.pdf",
+          "ambiguous-multicolumn/document.md",
+          "ambiguous-multicolumn/diagnostics.json"
+        ]
+      }
+    },
+    {
+      "id": "ambiguous-table",
+      "title": "Irregular untagged table",
+      "target": "markdown",
+      "markdownProfile": "ambiguous-untagged",
+      "categories": [
+        "markdown",
+        "untagged",
+        "table",
+        "ambiguous"
+      ],
+      "outputs": {
+        "markdown": "ambiguous-table/document.md",
+        "diagnostics": "ambiguous-table/diagnostics.json"
+      },
+      "expectedText": "Ambiguous table introduction. Name Value Alpha spans an uncertain row Beta 84",
+      "expectations": {
+        "minTextCoverage": 1.0,
+        "maxDiagnostics": 2,
+        "markdownStructures": {
+          "paragraphs": 2,
+          "tableRows": 0
+        },
+        "markdownHeuristics": {
+          "readingOrder": [
+            "Ambiguous table introduction.",
+            "Name Value Alpha spans an uncertain row Beta 84"
+          ],
+          "requiredDiagnosticCodes": [
+            "markdown-untagged-table-degraded",
+            "markdown-layout-fallback-used"
+          ],
+          "requiredConfidence": "Low",
+          "minMetrics": {
+            "readingOrderAccuracy": 1.0
+          }
+        },
+        "requiredFiles": [
+          "ambiguous-table/source.pdf",
+          "ambiguous-table/document.md",
+          "ambiguous-table/diagnostics.json"
+        ]
+      }
+    },
+    {
+      "id": "header-footer-noise",
+      "title": "Repeated untagged headers and footers",
+      "target": "markdown",
+      "markdownProfile": "ambiguous-untagged",
+      "categories": [
+        "markdown",
+        "untagged",
+        "header-footer",
+        "noise"
+      ],
+      "outputs": {
+        "markdown": "header-footer-noise/document.md",
+        "diagnostics": "header-footer-noise/diagnostics.json"
+      },
+      "expectedText": "Page 1 body first paragraph. Page 1 body second paragraph. Page 2 body first paragraph. Page 2 body second paragraph.",
+      "expectations": {
+        "minTextCoverage": 1.0,
+        "maxDiagnostics": 4,
+        "markdownStructures": {
+          "paragraphs": 4
+        },
+        "markdownHeuristics": {
+          "readingOrder": [
+            "Page 1 body first paragraph.",
+            "Page 1 body second paragraph.",
+            "Page 2 body first paragraph.",
+            "Page 2 body second paragraph."
+          ],
+          "requiredDiagnosticCodes": [
+            "markdown-running-marginalia-removed",
+            "markdown-layout-fallback-used"
+          ],
+          "requiredConfidence": "Low",
+          "minMetrics": {
+            "readingOrderAccuracy": 1.0
+          }
+        },
+        "requiredFiles": [
+          "header-footer-noise/source.pdf",
+          "header-footer-noise/document.md",
+          "header-footer-noise/diagnostics.json"
+        ]
+      }
+    }
+  ]
+}

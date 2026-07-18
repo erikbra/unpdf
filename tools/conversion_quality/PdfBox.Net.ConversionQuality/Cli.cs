@@ -6,13 +6,30 @@ public static class Cli
     {
         if (args.Length == 0 || args.Contains("--help", StringComparer.Ordinal))
         {
-            Console.WriteLine("Usage: PdfBox.Net.ConversionQuality --manifest <path> --out-dir <path>");
+            Console.WriteLine(
+                "Usage: PdfBox.Net.ConversionQuality --manifest <path> --out-dir <path>\n" +
+                "   or: PdfBox.Net.ConversionQuality --markdown-quality-out <path>");
             return args.Length == 0 ? 1 : 0;
         }
 
         try
         {
             Dictionary<string, string> options = ParseOptions(args);
+            if (options.TryGetValue("--markdown-quality-out", out string? markdownOut) &&
+                !string.IsNullOrWhiteSpace(markdownOut))
+            {
+                IReadOnlyList<MarkdownQualityFixtureResult> fixtures =
+                    MarkdownQualityFixtureGenerator.Generate(markdownOut);
+                Console.WriteLine(
+                    $"Wrote {fixtures.Count} Markdown quality fixture(s) to {Path.GetFullPath(markdownOut)}");
+                foreach (MarkdownQualityFixtureResult fixture in fixtures)
+                {
+                    Console.WriteLine($"- {fixture.Id}: {fixture.Directory}");
+                }
+
+                return 0;
+            }
+
             string manifestPath = Required(options, "--manifest");
             string outDir = Required(options, "--out-dir");
             HtmlReviewArtifactResult result = HtmlReviewArtifactGenerator.Generate(manifestPath, outDir);

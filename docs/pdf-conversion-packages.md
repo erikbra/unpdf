@@ -19,7 +19,7 @@ must not restore or bundle the other.
 | --- | --- | --- |
 | `PdfBox.Net.Layout` | Page geometry, text, reading order, paths, links, forms, images, tagged structure, diagnostics | Describes PDF content but does not choose an HTML or Markdown representation. Image conversion and raster fallbacks may require a separately registered rendering backend. |
 | `PdfBox.Net.Html` | Fixed-layout pages and semantic/tagged or heuristic HTML | Conversion is approximate. Unsupported image codecs, transparency, annotations, and semantic inference use documented policies and diagnostics; OCR is not included. |
-| `PdfBox.Net.Markdown` | Tagged-first headings, paragraphs, lists, links, figures, rectangular tables, and conservative untagged fallback | Untagged tables, complex multi-column reconstruction, and OCR are excluded from the MVP. Low-confidence output and degradation are reported explicitly. |
+| `PdfBox.Net.Markdown` | Tagged-first headings, paragraphs, lists, links, figures, rectangular tables, and conservative untagged heading/list/simple-table fallback | Ambiguous tables degrade to text; complex multi-column reconstruction and OCR are excluded from the MVP. Low-confidence output and degradation are reported explicitly. |
 
 The package READMEs contain the smallest extraction and conversion examples.
 Checked consumers under `samples/PdfBox.Net.Html.Consumer` and
@@ -81,3 +81,24 @@ structure-match ratios are higher-is-better; failure-category counts,
 diagnostics beyond the declared allowance, and broken references are
 lower-is-better. A ratchet failure means the current aggregate crossed a
 checked-in baseline even when an individual fixture remains understandable.
+
+The generated Markdown heuristic suite exercises actual tagged and untagged
+PDFs through the converter:
+
+```console
+dotnet tools/conversion_quality/PdfBox.Net.ConversionQuality/bin/Release/net10.0/PdfBox.Net.ConversionQuality.dll \
+  --markdown-quality-out artifacts/markdown-quality-results
+python3 tools/conversion_quality/run_conversion_quality.py \
+  --manifest tools/conversion_quality/markdown-quality/manifest.json \
+  --results-dir artifacts/markdown-quality-results \
+  --out-dir artifacts/markdown-quality-report \
+  --ratchet-baseline tools/conversion_quality/markdown-quality/ratchet-baseline.json \
+  --fail-on-unexpected \
+  --fail-on-regression
+```
+
+Its summary separates tagged, simple untagged, and ambiguous untagged
+fixtures. Reading-order accuracy, heading/list F1, table-cell accuracy, and
+link accuracy are higher-is-better. Ambiguous multi-column and table fixtures
+must retain explicit low-confidence diagnostic evidence even when their
+current text order meets the baseline.

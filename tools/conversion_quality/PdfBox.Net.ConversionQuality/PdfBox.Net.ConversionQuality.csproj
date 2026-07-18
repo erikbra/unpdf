@@ -12,6 +12,7 @@
     <PackageReference Include="Microsoft.Playwright" />
     <ProjectReference Include="..\..\..\src\PdfBox.Net.Html\PdfBox.Net.Html.csproj" />
     <ProjectReference Include="..\..\..\src\PdfBox.Net.Layout\PdfBox.Net.Layout.csproj" />
+    <ProjectReference Include="..\..\..\src\PdfBox.Net.Markdown\PdfBox.Net.Markdown.csproj" />
     <PackageReference Include="PdfBox.Net.Core" />
     <PackageReference Include="PdfBox.Net.ImageMagick" />
     <PackageReference Include="PdfBox.Net.SkiaSharp" />

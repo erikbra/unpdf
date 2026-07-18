@@ -45,6 +45,29 @@ jobs:
           --ratchet-baseline tools/conversion_quality/smoke/ratchet-baseline.json
           --fail-on-unexpected
           --fail-on-regression
+      - name: Generate Markdown heuristic quality fixtures
+        run: >-
+          dotnet
+          tools/conversion_quality/PdfBox.Net.ConversionQuality/bin/Release/net10.0/PdfBox.Net.ConversionQuality.dll
+          --markdown-quality-out artifacts/markdown-quality-results
+      - name: Run Markdown heuristic quality ratchet
+        run: >-
+          python3 tools/conversion_quality/run_conversion_quality.py
+          --manifest tools/conversion_quality/markdown-quality/manifest.json
+          --results-dir artifacts/markdown-quality-results
+          --out-dir artifacts/markdown-quality-report
+          --ratchet-baseline tools/conversion_quality/markdown-quality/ratchet-baseline.json
+          --fail-on-unexpected
+          --fail-on-regression
+      - name: Upload Markdown heuristic quality report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: markdown-quality-report
+          path: |
+            artifacts/markdown-quality-results
+            artifacts/markdown-quality-report
+          if-no-files-found: warn
       - name: Publish browser-wasm application
         run: >-
           dotnet publish
