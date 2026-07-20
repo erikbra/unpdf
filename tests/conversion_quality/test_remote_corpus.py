@@ -91,6 +91,10 @@ class RemoteCorpusTest(unittest.TestCase):
             {"2": [3]},
             uscis.expectations["semanticUnorderedListItemCountsByPage"],
         )
+        self.assertEqual(
+            [1, 3, 4],
+            uscis.expectations["semanticFixedLayoutPageNumbers"],
+        )
         bert = next(item for item in documents if item.id == "acl-bert")
         self.assertEqual(2, bert.quality_pages)
         unet = next(item for item in documents if item.id == "arxiv-unet")
@@ -311,6 +315,12 @@ class RemoteCorpusTest(unittest.TestCase):
             entry["expectations"]["semanticRuledGridSourceBorderCountsByPage"] = {"2": 0}
             self._write_manifest(manifest, [entry])
             with self.assertRaisesRegex(ValueError, "positive integers"):
+                remote_corpus.load_manifest(manifest)
+
+            entry["expectations"]["semanticRuledGridSourceBorderCountsByPage"] = {"2": 26}
+            entry["expectations"]["semanticFixedLayoutPageNumbers"] = [1, 1]
+            self._write_manifest(manifest, [entry])
+            with self.assertRaisesRegex(ValueError, "unique positive page numbers"):
                 remote_corpus.load_manifest(manifest)
 
     def test_fetch_document_retries_verifies_hash_and_installs_atomically(self) -> None:
