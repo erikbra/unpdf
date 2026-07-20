@@ -38,7 +38,10 @@ The default text mode preserves source positioning. Semantic mode infers
 reading order and document structure and can use fixed pages or a continuous
 flow. For tagged PDFs, authored headings, paragraphs, nested lists, rectangular
 tables, reading order, `ActualText`, language/title metadata, and figure alt
-text take precedence over geometric inference. The generated `PdfHtmlDocument`
+text take precedence over geometric inference. Stable authored two-column text
+pages use measured CSS grid tracks when every body element has unambiguous
+column ownership; forms, spanning ruled tables, and mixed diagram/prose pages
+remain on their conservative layout paths. The generated `PdfHtmlDocument`
 exposes the HTML, CSS, and binary assets directly as well as `WriteToDirectory`.
 
 For images and raster fallbacks, register a rendering provider such as

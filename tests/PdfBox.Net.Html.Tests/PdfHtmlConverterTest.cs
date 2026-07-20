@@ -1576,6 +1576,83 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_SemanticContinuousFlow_PreservesTaggedTwoColumnElementOrder()
+    {
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(
+            CreateTaggedTwoColumnInstructionLayoutFixture(),
+            new PdfHtmlOptions
+            {
+                TextMode = PdfHtmlTextMode.Semantic,
+                SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+            });
+        XDocument dom = ParseHtml(html.Html);
+
+        XElement grid = Assert.Single(ElementsByClass(dom, "pdf-semantic-authored-columns"));
+        Assert.Equal("1", grid.Attribute("data-source-page")?.Value);
+        Assert.Equal("2", grid.Attribute("data-column-count")?.Value);
+        XElement[] columns = grid.Elements()
+            .Where(static element => HasClass(element, "pdf-semantic-column"))
+            .ToArray();
+        Assert.Equal(2, columns.Length);
+        XElement heading = Assert.Single(columns[0].Descendants("h2"));
+        Assert.Equal("H2", heading.Attribute("data-pdf-structure-type")?.Value);
+        Assert.Contains("Tagged two-column guidance", heading.Value, StringComparison.Ordinal);
+        Assert.True(
+            columns[0].Value.IndexOf("Left instruction 01", StringComparison.Ordinal) <
+            columns[0].Value.IndexOf("Left instruction 14", StringComparison.Ordinal));
+        Assert.True(
+            columns[1].Value.IndexOf("Right instruction 01", StringComparison.Ordinal) <
+            columns[1].Value.IndexOf("Right instruction 15", StringComparison.Ordinal));
+        Assert.True(
+            dom.Root!.Value.IndexOf("Left instruction 14", StringComparison.Ordinal) <
+            dom.Root.Value.IndexOf("Right instruction 01", StringComparison.Ordinal));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-layout-fallback-page"));
+    }
+
+    [Fact]
+    public async Task Convert_SemanticContinuousFlow_RendersTaggedTwoColumnGeometryInBrowser()
+    {
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(
+            CreateTaggedTwoColumnInstructionLayoutFixture(),
+            new PdfHtmlOptions
+            {
+                TextMode = PdfHtmlTextMode.Semantic,
+                SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+            });
+        XDocument dom = ParseHtml(html.Html);
+        Dictionary<string, string> style = ParseStyle(
+            Assert.Single(ElementsByClass(dom, "pdf-semantic-authored-columns"))
+                .Attribute("style")?.Value ?? "");
+        float expectedWidthRatio = ParsePoints(style["--pdf-semantic-column-width-2"]) /
+            ParsePoints(style["--pdf-semantic-column-width-1"]);
+
+        using TempDirectory tempDirectory = new();
+        html.WriteToDirectory(tempDirectory.Path);
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage page = await browser.NewPageAsync(new BrowserNewPageOptions
+        {
+            ViewportSize = new ViewportSize { Width = 1000, Height = 900 }
+        });
+        await page.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+
+        ColumnGridRenderMetrics metrics = await ReadColumnGridRenderMetrics(page);
+        Assert.Equal(2, metrics.ColumnCount);
+        Assert.Equal(2, metrics.Lefts.Length);
+        Assert.Equal(2, metrics.Rights.Length);
+        Assert.Equal(2, metrics.Widths.Length);
+        Assert.True(metrics.Widths[0] > 0);
+        Assert.True(metrics.Widths[1] > 0);
+        Assert.True(metrics.Lefts[0] >= metrics.GridLeft - 0.5);
+        Assert.True(metrics.Rights[1] <= metrics.GridRight + 0.5);
+        Assert.True(metrics.Rights[0] < metrics.Lefts[1]);
+        AssertWithin(0.03f, expectedWidthRatio, (float)(metrics.Widths[1] / metrics.Widths[0]));
+    }
+
+    [Fact]
     public void Convert_SemanticContinuousFlow_RejectsRuledThreeBandTableAsColumns()
     {
         using PDDocument document = CreateThreeColumnDocument(includeRuledTable: true);
@@ -1605,6 +1682,7 @@ public class PdfHtmlConverterTest
         XDocument dom = ParseHtml(html.Html);
 
         XElement grid = Assert.Single(ElementsByClass(dom, "pdf-semantic-ruled-grid"));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-authored-columns"));
         Assert.Equal("ruled-grid", grid.Attribute("data-layout")?.Value);
         Assert.Equal("3", grid.Attribute("data-column-count")?.Value);
         Assert.Equal("3", grid.Attribute("data-source-border-count")?.Value);
@@ -1859,6 +1937,7 @@ public class PdfHtmlConverterTest
         XDocument dom = ParseHtml(html.Html);
 
         XElement grid = Assert.Single(ElementsByClass(dom, "pdf-semantic-mixed-regions"));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-authored-columns"));
         Assert.Equal("1", grid.Attribute("data-source-page")?.Value);
         XElement[] columns = grid.Elements()
             .Where(element => HasClass(element, "pdf-semantic-column"))
@@ -1893,6 +1972,7 @@ public class PdfHtmlConverterTest
         XDocument dom = ParseHtml(html.Html);
 
         XElement grid = Assert.Single(ElementsByClass(dom, "pdf-semantic-mixed-regions"));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-authored-columns"));
         XElement[] columns = grid.Elements()
             .Where(element => HasClass(element, "pdf-semantic-column"))
             .ToArray();
@@ -8606,10 +8686,46 @@ public class PdfHtmlConverterTest
         return CreateSemanticHtmlFixture(lines, [diagram]);
     }
 
+    private static PdfLayoutDocument CreateTaggedTwoColumnInstructionLayoutFixture()
+    {
+        List<PdfTextLine> lines =
+        [
+            CreateScientificFixtureLine(
+                "Tagged two-column guidance",
+                54f,
+                72f,
+                210f,
+                12f,
+                "Helvetica-Bold")
+        ];
+        for (int index = 0; index < 14; index++)
+        {
+            lines.Add(CreateScientificFixtureLine(
+                $"Left instruction {index + 1:00} remains in authored order.",
+                54f,
+                96f + index * 18f,
+                210f));
+        }
+
+        for (int index = 0; index < 15; index++)
+        {
+            lines.Add(CreateScientificFixtureLine(
+                $"Right instruction {index + 1:00} remains in authored order.",
+                334f,
+                72f + index * 18f,
+                220f));
+        }
+
+        return WithTaggedParagraphs(
+            CreateSemanticHtmlFixture(lines),
+            promoteFirstRunToHeading: true);
+    }
+
     private static PdfLayoutDocument WithTaggedParagraphs(
         PdfLayoutDocument layout,
         bool groupReceiptGuidance = false,
-        bool groupRuledHeadings = false)
+        bool groupRuledHeadings = false,
+        bool promoteFirstRunToHeading = false)
     {
         PdfLayoutPage page = Assert.Single(layout.Pages);
         PdfTextRun[] pageRuns = page.Runs.ToArray();
@@ -8698,10 +8814,11 @@ public class PdfHtmlConverterTest
                 continue;
             }
 
+            bool isHeading = promoteFirstRunToHeading && index == 0;
             paragraphs.Add(new PdfTaggedElementKid(new PdfTaggedStructureElement(
-                "P",
-                "P",
-                PdfTaggedStructureKind.Paragraph,
+                isHeading ? "H2" : "P",
+                isHeading ? "H2" : "P",
+                isHeading ? PdfTaggedStructureKind.Heading : PdfTaggedStructureKind.Paragraph,
                 actualText: null,
                 alternateDescription: null,
                 language: null,

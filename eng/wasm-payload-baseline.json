@@ -69,19 +69,19 @@
       "rawBytes": 497941
     },
     "PdfBox.Net.Html.Wasm.wasm": {
-      "brotliBytes": 9901,
+      "brotliBytes": 9880,
       "rawBytes": 24341
     },
     "PdfBox.Net.Html.wasm": {
-      "brotliBytes": 162963,
-      "rawBytes": 709397
+      "brotliBytes": 165427,
+      "rawBytes": 721685
     },
     "PdfBox.Net.IO.wasm": {
       "brotliBytes": 14685,
       "rawBytes": 36629
     },
     "PdfBox.Net.Layout.wasm": {
-      "brotliBytes": 191876,
+      "brotliBytes": 192259,
       "rawBytes": 631573
     },
     "PdfBox.Net.SkiaSharp.wasm": {
@@ -137,7 +137,7 @@
       "rawBytes": 5909
     },
     "System.Linq.wasm": {
-      "brotliBytes": 34321,
+      "brotliBytes": 34319,
       "rawBytes": 97045
     },
     "System.Memory.wasm": {
@@ -213,7 +213,7 @@
       "rawBytes": 60576
     },
     "dotnet.js": {
-      "brotliBytes": 14337,
+      "brotliBytes": 14291,
       "rawBytes": 53840
     },
     "dotnet.native.js": {
@@ -248,7 +248,7 @@
   },
   "schemaVersion": 1,
   "totals": {
-    "brotliBytes": 5263105,
-    "rawBytes": 18597320
+    "brotliBytes": 5265883,
+    "rawBytes": 18609608
   }
 }

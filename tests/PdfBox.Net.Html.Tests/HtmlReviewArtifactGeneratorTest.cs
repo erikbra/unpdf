@@ -301,6 +301,48 @@ public sealed class HtmlReviewArtifactGeneratorTest
     }
 
     [Fact]
+    public void ValidateSemanticExpectations_RequiresColumnCountByPage()
+    {
+        HtmlReviewManifestExample example = new()
+        {
+            Id = "authored-columns",
+            Expectations = new HtmlReviewExpectations
+            {
+                SemanticColumnCountsByPage = new Dictionary<int, int>
+                {
+                    [2] = 2
+                }
+            }
+        };
+        PdfHtmlDocument accepted = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-columns" data-source-page="2" data-column-count="2">
+                <div class="pdf-semantic-column"></div>
+                <div class="pdf-semantic-column"></div>
+              </div>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+        PdfHtmlDocument rejected = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-columns" data-source-page="2" data-column-count="1">
+                <div class="pdf-semantic-column"></div>
+              </div>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+
+        HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, accepted);
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, rejected));
+        Assert.Contains("semantic column counts on page 2 were [1], expected [2]", exception.Message);
+    }
+
+    [Fact]
     public void ValidateSemanticExpectations_RequiresRuledGridColumnCountByPage()
     {
         HtmlReviewManifestExample example = new()
