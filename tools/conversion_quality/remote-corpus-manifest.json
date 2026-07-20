@@ -53,7 +53,29 @@
         "minTextRuns": 4000,
         "minImagePlacements": 5,
         "minVectorPaths": 100,
-        "minLinks": 50
+        "minLinks": 50,
+        "semanticHeadingOutline": [
+          "h1|BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+          "h2|Jacob Devlin Ming-Wei Chang Kenton Lee Kristina Toutanova",
+          "h2|1 Introduction",
+          "h2|2 Related Work",
+          "h3|2.2 Unsupervised Fine-tuning Approaches",
+          "h3|2.1 Unsupervised Feature-based Approaches",
+          "h3|3.2 Fine-tuning BERT sults on 11 NLP tasks.",
+          "h3|4.2 SQuAD v1.1",
+          "h3|4.4 SWAG",
+          "h3|4.3 SQuAD v2.0",
+          "h2|5 Ablation Studies",
+          "h3|5.2 Effect of Model Size",
+          "h3|5.3 Feature-based Approach with BERT",
+          "h2|6 Conclusion",
+          "h3|A.1 Illustration of the Pre-training Tasks",
+          "h2|Appendix for “BERT: Pre-training of",
+          "h3|Deep Bidirectional Transformers for",
+          "h3|Language Understanding”",
+          "h2|B Detailed Experimental Setup",
+          "h3|B.1 Detailed Descriptions for the GLUE"
+        ]
       }
     },
     {
@@ -104,7 +126,19 @@
         "minTextRuns": 2000,
         "minImagePlacements": 8,
         "minVectorPaths": 100,
-        "minLinks": 20
+        "minLinks": 20,
+        "semanticHeadingOutline": [
+          "h1|U-Net: Convolutional Networks for Biomedical Image Segmentation",
+          "h2|1 Introduction",
+          "h2|1 million training images. Since then, even larger and deeper networks have been",
+          "h2|2 Network Architecture",
+          "h2|3 Training",
+          "h3|3.1 Data Augmentation",
+          "h2|4 Experiments",
+          "h2|5 Conclusion",
+          "h2|Acknowlegements",
+          "h2|References"
+        ]
       }
     },
     {

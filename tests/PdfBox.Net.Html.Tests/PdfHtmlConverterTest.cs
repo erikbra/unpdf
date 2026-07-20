@@ -3922,7 +3922,7 @@ public class PdfHtmlConverterTest
         Assert.InRange(ParsePercent(abstractStyle["--pdf-semantic-width"]), 80f, 84f);
         Assert.Equal("center", abstractStyle["--pdf-semantic-align-self"]);
 
-        XElement introductionHeading = Assert.Single(dom.Descendants("h1"), heading => heading.Value == "1 Introduction");
+        XElement introductionHeading = Assert.Single(dom.Descendants("h2"), heading => heading.Value == "1 Introduction");
         Assert.DoesNotContain("pdf-semantic-align-center", introductionHeading.Attribute("class")?.Value ?? "");
         XElement pageNumberFooter = Assert.Single(ElementsByClass(dom, "pdf-semantic-footer"), footer => footer.Value == "2");
         Assert.Contains("pdf-semantic-align-center", pageNumberFooter.Attribute("class")?.Value);
@@ -4946,8 +4946,8 @@ public class PdfHtmlConverterTest
         Assert.DoesNotContain("A DAM", titleHeading.Value, StringComparison.Ordinal);
         Assert.DoesNotContain("S TOCHASTIC", titleHeading.Value, StringComparison.Ordinal);
         Assert.DoesNotContain("O PTIMIZATION", titleHeading.Value, StringComparison.Ordinal);
-        Assert.Single(dom.Descendants("h1"), heading => heading.Value == "STACKED HEADING ONE");
-        Assert.Single(dom.Descendants("h1"), heading => heading.Value == "STACKED HEADING TWO");
+        Assert.Single(dom.Descendants("h2"), heading => heading.Value == "STACKED HEADING ONE");
+        Assert.Single(dom.Descendants("h2"), heading => heading.Value == "STACKED HEADING TWO");
     }
 
     [Fact]
@@ -5063,9 +5063,13 @@ public class PdfHtmlConverterTest
         XElement[] articleContent = article.Descendants().ToArray();
         int pageTwoBreakIndex = Array.IndexOf(articleContent, pageBreaks[1]);
         int introductionIndex = Array.FindIndex(articleContent, element =>
-            element.Name.LocalName == "h1" &&
+            element.Name.LocalName == "h2" &&
             element.Value == "1 Introduction");
         Assert.True(pageTwoBreakIndex >= 0 && introductionIndex > pageTwoBreakIndex);
+        XElement primaryTitle = Assert.Single(
+            ElementsByClass(dom, "pdf-semantic-heading"),
+            static element => element.Name.LocalName == "h1");
+        Assert.Contains("Attention Is All You Need", primaryTitle.Value, StringComparison.Ordinal);
 
         XElement introductionSection = Assert.Single(article.Descendants("section"), element =>
             element.Attribute("id")?.Value == "section-1-introduction");
@@ -5077,12 +5081,12 @@ public class PdfHtmlConverterTest
         Assert.Same(article, backgroundSection.Parent);
         Assert.Same(article, architectureSection.Parent);
         Assert.Equal("heading-1-introduction", introductionSection.Attribute("aria-labelledby")?.Value);
-        Assert.Equal("heading-1-introduction", introductionSection.Element("h1")?.Attribute("id")?.Value);
+        Assert.Equal("heading-1-introduction", introductionSection.Element("h2")?.Attribute("id")?.Value);
         Assert.Contains(pageBreaks[1].Ancestors(), ancestor => ReferenceEquals(ancestor, introductionSection));
         XElement encoderSection = Assert.Single(architectureSection.Descendants("section"), element =>
             element.Attribute("id")?.Value == "section-3-1-encoder-and-decoder-stacks");
         Assert.Same(architectureSection, encoderSection.Parent);
-        Assert.Equal("h2", encoderSection.Elements().First().Name.LocalName);
+        Assert.Equal("h3", encoderSection.Elements().First().Name.LocalName);
 
         XElement abstractHeading = Assert.Single(article.Descendants("h2"), element => element.Value == "Abstract");
         Assert.Contains("pdf-semantic-align-center", abstractHeading.Attribute("class")?.Value);
@@ -5690,7 +5694,7 @@ public class PdfHtmlConverterTest
               const documentFlow = document.querySelector(".pdf-semantic-document-flow");
               const flow = document.querySelector(".pdf-semantic-continuous-flow");
               const markers = Array.from(document.querySelectorAll(".pdf-semantic-page-break"));
-              const introduction = Array.from(document.querySelectorAll("h1"))
+              const introduction = Array.from(document.querySelectorAll("h2"))
                 .find(element => element.textContent === "1 Introduction");
               const pageThreeFooter = Array.from(document.querySelectorAll(".pdf-semantic-page-spanning > .pdf-semantic-footer"))
                 .find(element => element.textContent.trim() === "3");

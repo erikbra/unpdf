@@ -354,6 +354,22 @@ def _validate_expectations(
                     f"{prefix} expectations.{expectation_name} values must be non-negative integers"
                 )
 
+    semantic_heading_outline = expectations.get("semanticHeadingOutline")
+    if semantic_heading_outline is not None:
+        if (
+            not isinstance(semantic_heading_outline, list)
+            or not semantic_heading_outline
+            or any(
+                not isinstance(heading, str)
+                or not re.fullmatch(r"h[1-6]\|.+", heading)
+                for heading in semantic_heading_outline
+            )
+        ):
+            raise ValueError(
+                f"{prefix} expectations.semanticHeadingOutline must be a non-empty "
+                "array of 'hN|Heading text' strings"
+            )
+
     semantic_fixed_layout_pages = expectations.get("semanticFixedLayoutPageNumbers")
     if semantic_fixed_layout_pages is not None:
         if (

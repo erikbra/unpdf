@@ -10,14 +10,14 @@ namespace PdfBox.Net.Layout;
 /// </summary>
 public sealed class PdfSemanticSectionTree
 {
-    private static readonly Regex TerminalNumberedHeadingPattern = new(
-        @"^(?<number>\d{1,2}(?:\.\d+)*)\.\s+\p{L}",
+    private static readonly Regex NumberedHeadingPattern = new(
+        @"^(?<number>\d{1,2}(?:\.\d+)*)(?<terminal>\.)?\s+\p{L}",
         RegexOptions.Compiled);
     private static readonly Regex LeadingNumberedHeadingPattern = new(
         @"^\d{1,2}(?:\.\d+)*(?:\.)?\s+\p{L}",
         RegexOptions.Compiled);
-    private static readonly Regex AppendixHeadingPattern = new(
-        @"^Appendix\s+[A-Z]\.",
+    private static readonly Regex LetteredHeadingPattern = new(
+        @"^(?<letter>[A-Z])(?:\.(?<number>\d+(?:\.\d+)*))?(?:\.)?\s+\p{L}",
         RegexOptions.Compiled);
     private readonly Dictionary<PdfSemanticElement, PdfSemanticHeading> _headingsByElement;
     private readonly Dictionary<PdfSemanticElement, PdfSemanticSection> _sectionsByHeading;
@@ -66,9 +66,11 @@ public sealed class PdfSemanticSectionTree
         List<PdfSemanticSection> roots = [];
         List<PdfSemanticSection> stack = [];
         Dictionary<string, int> slugOccurrences = new(StringComparer.Ordinal);
-        PdfSemanticElement? canonicalDocumentTitle = pages.FirstOrDefault()?.Elements
+        PdfSemanticElement? canonicalDocumentTitle = pages
+            .SelectMany(static page => page.Elements)
             .FirstOrDefault(static element =>
                 element.Kind == PdfSemanticElementKind.Heading && element.IsDocumentTitle);
+        int rootLevel = canonicalDocumentTitle == null ? 1 : 2;
 
         foreach (PdfSemanticPage page in pages)
         {
@@ -93,7 +95,7 @@ public sealed class PdfSemanticSectionTree
                     continue;
                 }
 
-                int level = SectionLevel(element, page.PageNumber, stack);
+                int level = SectionLevel(element, page.PageNumber, stack, rootLevel);
                 while (stack.Count > 0 && stack[^1].Level >= level)
                 {
                     stack.RemoveAt(stack.Count - 1);
@@ -121,15 +123,14 @@ public sealed class PdfSemanticSectionTree
         PdfSemanticElement element,
         PdfSemanticElement? canonicalDocumentTitle)
     {
-        return element.IsDocumentTitle &&
-            canonicalDocumentTitle != null &&
-            string.Equals(element.Text, canonicalDocumentTitle.Text, StringComparison.Ordinal);
+        return ReferenceEquals(element, canonicalDocumentTitle);
     }
 
     private static int SectionLevel(
         PdfSemanticElement heading,
         int pageNumber,
-        IReadOnlyList<PdfSemanticSection> stack)
+        IReadOnlyList<PdfSemanticSection> stack,
+        int rootLevel)
     {
         int visualLevel = Math.Clamp(heading.HeadingLevel, 1, 6);
         if (heading.TaggedStructure != null)
@@ -138,11 +139,6 @@ public sealed class PdfSemanticSectionTree
         }
 
         string text = heading.Text.Trim();
-        if (text == "References" || AppendixHeadingPattern.IsMatch(text))
-        {
-            return 1;
-        }
-
         if (text is "DISCUSSION" or "REFERENCES")
         {
             PdfSemanticSection? owningControl = stack.LastOrDefault(section =>
@@ -154,7 +150,21 @@ public sealed class PdfSemanticSectionTree
             }
         }
 
-        Match numbered = TerminalNumberedHeadingPattern.Match(text);
+        if (IsRootPeerHeading(text))
+        {
+            return rootLevel;
+        }
+
+        Match lettered = LetteredHeadingPattern.Match(text);
+        if (lettered.Success)
+        {
+            int letteredDepth = lettered.Groups["number"].Success
+                ? lettered.Groups["number"].Value.Count(static character => character == '.') + 2
+                : 1;
+            return Math.Clamp(rootLevel + letteredDepth - 1, 1, 6);
+        }
+
+        Match numbered = NumberedHeadingPattern.Match(text);
         if (!numbered.Success)
         {
             return visualLevel;
@@ -163,19 +173,39 @@ public sealed class PdfSemanticSectionTree
         int numberedDepth = numbered.Groups["number"].Value.Count(static character => character == '.') + 1;
         PdfSemanticSection? previousNumberedSection = stack.LastOrDefault(section =>
             HasTerminalSectionNumber(section.Heading.Element.Text));
-        PdfSemanticSection? visualParent = previousNumberedSection?.Parent is { } numberedParent &&
-            !HasTerminalSectionNumber(numberedParent.Heading.Element.Text)
-                ? numberedParent
-                : stack.LastOrDefault(section =>
+        PdfSemanticSection? visualParent = null;
+        if (numbered.Groups["terminal"].Success)
+        {
+            if (previousNumberedSection?.Parent is { } numberedParent &&
+                !HasTerminalSectionNumber(numberedParent.Heading.Element.Text))
+            {
+                visualParent = numberedParent;
+            }
+            else if (previousNumberedSection == null)
+            {
+                visualParent = stack.LastOrDefault(section =>
                     section.Level < visualLevel &&
                     pageNumber - section.Heading.PageNumber <= 2 &&
                     !HasTerminalSectionNumber(section.Heading.Element.Text));
-        return Math.Clamp((visualParent?.Level ?? 0) + numberedDepth, 1, 6);
+            }
+        }
+
+        return Math.Clamp((visualParent?.Level ?? rootLevel - 1) + numberedDepth, 1, 6);
     }
 
     private static bool HasTerminalSectionNumber(string text)
     {
-        return TerminalNumberedHeadingPattern.IsMatch(text.TrimStart());
+        return NumberedHeadingPattern.IsMatch(text.TrimStart());
+    }
+
+    private static bool IsRootPeerHeading(string text)
+    {
+        return text.Equals("References", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Bibliography", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Acknowledgements", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Acknowledgments", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Acknowlegements", StringComparison.OrdinalIgnoreCase) ||
+            text.StartsWith("Appendix", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsFigureCaption(string text)

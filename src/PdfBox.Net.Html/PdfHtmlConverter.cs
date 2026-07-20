@@ -4475,7 +4475,10 @@ public static class PdfHtmlConverter
             PdfSemanticElement? pageOpeningSectionHeading = isCoverPage
                 ? context.SemanticPage.Elements.FirstOrDefault(element =>
                     IsTitleElement(element) && semantic.SectionTree.FindSection(element) != null)
-                : FindPageOpeningSectionHeading(context.FlowElements, semantic.SectionTree);
+                : FindPageOpeningSectionHeading(
+                    context.FlowElements,
+                    context.FigureRegions,
+                    semantic.SectionTree);
             if (pageOpeningSectionHeading != null)
             {
                 sectionWriter!.BeginElement(pageOpeningSectionHeading);
@@ -8953,11 +8956,13 @@ public static class PdfHtmlConverter
 
     private static PdfSemanticElement? FindPageOpeningSectionHeading(
         IReadOnlyList<PdfSemanticElement> flowElements,
+        IReadOnlyList<PdfLayoutRectangle> figureRegions,
         PdfSemanticSectionTree sectionTree)
     {
         foreach (PdfSemanticElement element in flowElements)
         {
-            if (element.Kind is PdfSemanticElementKind.Header or PdfSemanticElementKind.Footer)
+            if (element.Kind is PdfSemanticElementKind.Header or PdfSemanticElementKind.Footer ||
+                IsFigureLabelFlowElement(element, figureRegions))
             {
                 continue;
             }

@@ -265,6 +265,8 @@ public static class HtmlReviewArtifactGenerator
             example.Expectations?.SemanticHeadingCountsByPage ?? [];
         Dictionary<int, int> expectedTableCountsByPage =
             example.Expectations?.SemanticTableCountsByPage ?? [];
+        List<string> expectedHeadingOutline =
+            example.Expectations?.SemanticHeadingOutline ?? [];
         List<int> expectedFixedLayoutPages =
             example.Expectations?.SemanticFixedLayoutPageNumbers ?? [];
         if (expectedOrderedByPage.Count == 0 &&
@@ -275,6 +277,7 @@ public static class HtmlReviewArtifactGenerator
             expectedRuledGridSourceBordersByPage.Count == 0 &&
             expectedHeadingCountsByPage.Count == 0 &&
             expectedTableCountsByPage.Count == 0 &&
+            expectedHeadingOutline.Count == 0 &&
             expectedFixedLayoutPages.Count == 0)
         {
             return;
@@ -335,6 +338,10 @@ public static class HtmlReviewArtifactGenerator
             "table",
             static element => element.Name.LocalName == "table",
             failures);
+        ValidateSemanticHeadingOutline(
+            dom,
+            expectedHeadingOutline,
+            failures);
         ValidateSemanticFixedLayoutPageExpectations(
             example,
             dom,
@@ -345,6 +352,60 @@ public static class HtmlReviewArtifactGenerator
         {
             throw new InvalidOperationException(
                 $"HTML review semantic expectations failed for '{example.Id}': {string.Join("; ", failures)}.");
+        }
+    }
+
+    private static void ValidateSemanticHeadingOutline(
+        XDocument dom,
+        IReadOnlyList<string> expectedOutline,
+        List<string> failures)
+    {
+        if (expectedOutline.Count == 0)
+        {
+            return;
+        }
+
+        XElement[] headings = dom
+            .Descendants()
+            .Where(static element => HasClass(element, "pdf-semantic-heading"))
+            .Where(static element => element.Name.LocalName is "h1" or "h2" or "h3" or "h4" or "h5" or "h6")
+            .ToArray();
+        string[] actualOutline = headings
+            .Select(static heading =>
+                heading.Name.LocalName + "|" + NormalizeWhitespace(string.Join(
+                    ' ',
+                    heading
+                        .DescendantNodes()
+                        .OfType<XText>()
+                        .Select(static text => text.Value))))
+            .ToArray();
+        if (!actualOutline.SequenceEqual(expectedOutline, StringComparer.Ordinal))
+        {
+            failures.Add(
+                $"semantic heading outline was [{string.Join("; ", actualOutline)}], " +
+                $"expected [{string.Join("; ", expectedOutline)}]");
+        }
+
+        string[] headingIds = headings
+            .Select(static heading => heading.Attribute("id")?.Value ?? "")
+            .ToArray();
+        if (headingIds.Any(string.IsNullOrWhiteSpace) ||
+            headingIds.Distinct(StringComparer.Ordinal).Count() != headingIds.Length)
+        {
+            failures.Add("semantic heading ids were missing or duplicated");
+        }
+
+        HashSet<string> headingIdSet = headingIds.ToHashSet(StringComparer.Ordinal);
+        string[] danglingSectionLabels = dom
+            .Descendants()
+            .Where(static element => HasClass(element, "pdf-semantic-section"))
+            .Select(static section => section.Attribute("aria-labelledby")?.Value ?? "")
+            .Where(label => !headingIdSet.Contains(label))
+            .ToArray();
+        if (danglingSectionLabels.Length > 0)
+        {
+            failures.Add(
+                $"semantic sections referenced missing headings [{string.Join(", ", danglingSectionLabels)}]");
         }
     }
 
@@ -1206,6 +1267,8 @@ public sealed class HtmlReviewExpectations
     public Dictionary<int, int> SemanticHeadingCountsByPage { get; set; } = [];
 
     public Dictionary<int, int> SemanticTableCountsByPage { get; set; } = [];
+
+    public List<string> SemanticHeadingOutline { get; set; } = [];
 
     public List<int> SemanticFixedLayoutPageNumbers { get; set; } = [];
 
