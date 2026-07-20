@@ -387,6 +387,47 @@ public sealed class HtmlReviewArtifactGeneratorTest
     }
 
     [Fact]
+    public void ValidateSemanticExpectations_RequiresExactFixedLayoutFallbackPages()
+    {
+        HtmlReviewManifestExample example = new()
+        {
+            Id = "hybrid-form",
+            Expectations = new HtmlReviewExpectations
+            {
+                SemanticFixedLayoutPageNumbers = [1, 3, 4]
+            }
+        };
+        PdfHtmlDocument accepted = new(
+            """
+            <html><body>
+              <section class="pdf-page pdf-semantic-layout-fallback-page" data-page-number="1"></section>
+              <div class="pdf-semantic-page-break" data-page-number="2"></div>
+              <section class="pdf-page pdf-semantic-layout-fallback-page" data-page-number="3"></section>
+              <section class="pdf-page pdf-semantic-layout-fallback-page" data-page-number="4"></section>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+        PdfHtmlDocument rejected = new(
+            """
+            <html><body>
+              <section class="pdf-page pdf-semantic-layout-fallback-page" data-page-number="1"></section>
+              <section class="pdf-page pdf-semantic-layout-fallback-page" data-page-number="2"></section>
+              <section class="pdf-page pdf-semantic-layout-fallback-page" data-page-number="4"></section>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+
+        HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, accepted);
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, rejected));
+        Assert.Contains(
+            "semantic fixed-layout pages were [1, 2, 4], expected [1, 3, 4]",
+            exception.Message);
+    }
+
+    [Fact]
     public void Generate_FailsWhenStableLayoutExpectationsAreNotMet()
     {
         using TempDirectory tempDirectory = new();

@@ -303,6 +303,25 @@ def _validate_expectations(expectations: dict[str, Any], prefix: str) -> None:
                     f"{prefix} expectations.semanticRuledGridSourceBorderCountsByPage values must be positive integers"
                 )
 
+    semantic_fixed_layout_pages = expectations.get("semanticFixedLayoutPageNumbers")
+    if semantic_fixed_layout_pages is not None:
+        if (
+            not isinstance(semantic_fixed_layout_pages, list)
+            or not semantic_fixed_layout_pages
+            or any(
+                not isinstance(page_number, int)
+                or isinstance(page_number, bool)
+                or page_number < 1
+                or page_number > page_count
+                for page_number in semantic_fixed_layout_pages
+            )
+            or len(set(semantic_fixed_layout_pages)) != len(semantic_fixed_layout_pages)
+        ):
+            raise ValueError(
+                f"{prefix} expectations.semanticFixedLayoutPageNumbers must be a non-empty "
+                "array of unique positive page numbers within pageCount"
+            )
+
 
 def _validate_https_url(value: str, label: str) -> None:
     parsed = urlparse(value)

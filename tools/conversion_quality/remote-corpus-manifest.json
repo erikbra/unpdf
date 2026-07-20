@@ -242,7 +242,12 @@
         },
         "semanticRuledGridSourceBorderCountsByPage": {
           "2": 26
-        }
+        },
+        "semanticFixedLayoutPageNumbers": [
+          1,
+          3,
+          4
+        ]
       }
     },
     {

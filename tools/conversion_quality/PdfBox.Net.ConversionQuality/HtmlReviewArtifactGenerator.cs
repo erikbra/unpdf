@@ -258,11 +258,14 @@ public static class HtmlReviewArtifactGenerator
             example.Expectations?.SemanticRuledGridColumnCountsByPage ?? [];
         Dictionary<int, int> expectedRuledGridSourceBordersByPage =
             example.Expectations?.SemanticRuledGridSourceBorderCountsByPage ?? [];
+        List<int> expectedFixedLayoutPages =
+            example.Expectations?.SemanticFixedLayoutPageNumbers ?? [];
         if (expectedOrderedByPage.Count == 0 &&
             expectedUnorderedByPage.Count == 0 &&
             expectedMixedRegionsByPage.Count == 0 &&
             expectedRuledGridColumnsByPage.Count == 0 &&
-            expectedRuledGridSourceBordersByPage.Count == 0)
+            expectedRuledGridSourceBordersByPage.Count == 0 &&
+            expectedFixedLayoutPages.Count == 0)
         {
             return;
         }
@@ -303,11 +306,58 @@ public static class HtmlReviewArtifactGenerator
             dom,
             expectedRuledGridSourceBordersByPage,
             failures);
+        ValidateSemanticFixedLayoutPageExpectations(
+            example,
+            dom,
+            expectedFixedLayoutPages,
+            failures);
 
         if (failures.Count > 0)
         {
             throw new InvalidOperationException(
                 $"HTML review semantic expectations failed for '{example.Id}': {string.Join("; ", failures)}.");
+        }
+    }
+
+    private static void ValidateSemanticFixedLayoutPageExpectations(
+        HtmlReviewManifestExample example,
+        XDocument dom,
+        IReadOnlyList<int> expectedPageNumbers,
+        List<string> failures)
+    {
+        if (expectedPageNumbers.Count == 0)
+        {
+            return;
+        }
+
+        int[] expected = expectedPageNumbers.Order().ToArray();
+        if (expected.Any(static pageNumber => pageNumber < 1) ||
+            expected.Distinct().Count() != expected.Length)
+        {
+            throw new InvalidOperationException(
+                $"HTML review example '{example.Id}' has invalid semantic fixed-layout page expectations.");
+        }
+
+        int[] actual = dom.Descendants()
+            .Where(static element =>
+                element.Attribute("class")?.Value.Split(
+                        ' ',
+                        StringSplitOptions.RemoveEmptyEntries)
+                    .Contains("pdf-semantic-layout-fallback-page", StringComparer.Ordinal) ?? false)
+            .Select(static element => int.TryParse(
+                element.Attribute("data-page-number")?.Value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int pageNumber)
+                    ? pageNumber
+                    : 0)
+            .Order()
+            .ToArray();
+        if (!actual.SequenceEqual(expected))
+        {
+            failures.Add(
+                $"semantic fixed-layout pages were [{string.Join(", ", actual)}], " +
+                $"expected [{string.Join(", ", expected)}]");
         }
     }
 
@@ -916,4 +966,6 @@ public sealed class HtmlReviewExpectations
     public Dictionary<int, int> SemanticRuledGridColumnCountsByPage { get; set; } = [];
 
     public Dictionary<int, int> SemanticRuledGridSourceBorderCountsByPage { get; set; } = [];
+
+    public List<int> SemanticFixedLayoutPageNumbers { get; set; } = [];
 }
