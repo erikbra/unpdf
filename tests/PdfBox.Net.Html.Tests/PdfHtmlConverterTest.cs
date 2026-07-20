@@ -1631,6 +1631,108 @@ public class PdfHtmlConverterTest
             fallbackPage.DescendantsAndSelf().Count(element => HasClass(element, "pdf-text-run")));
         Assert.Contains("Tagged graphic cover", fallbackPage.Value, StringComparison.Ordinal);
         Assert.Empty(ElementsByClass(dom, "pdf-semantic-figure"));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-map-figure-page"));
+    }
+
+    [Fact]
+    public async Task Convert_SemanticContinuousFlow_KeepsMapLabelsInsideBoundedFigure()
+    {
+        PdfLayoutDocument layout = CreateTaggedLabelledMapLayoutFixture();
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(html.Html);
+
+        XElement mapFigure = Assert.Single(ElementsByClass(dom, "pdf-semantic-map-figure-page"));
+        Assert.True(HasClass(mapFigure, "pdf-semantic-layout-fallback-page"));
+        Assert.Equal("figure", mapFigure.Attribute("role")?.Value);
+        Assert.Equal("Map or diagram", mapFigure.Attribute("aria-label")?.Value);
+        Assert.Equal(
+            layout.Pages[0].Runs.Count,
+            mapFigure.Descendants().Count(element => HasClass(element, "pdf-text-run")));
+        Assert.Contains("North trail", mapFigure.Value, StringComparison.Ordinal);
+        Assert.Contains("Legend item 06", mapFigure.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain(dom.Descendants(), element =>
+            element.Name.LocalName is "h1" or "h2" or "h3" or "h4" or "h5" or "h6" or "table");
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-figure"));
+
+        using TempDirectory tempDirectory = new();
+        html.WriteToDirectory(tempDirectory.Path);
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage browserPage = await browser.NewPageAsync(new BrowserNewPageOptions
+        {
+            ViewportSize = new ViewportSize { Width = 1200, Height = 1200 }
+        });
+        await browserPage.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+        double[] geometry = await browserPage.EvaluateAsync<double[]>(
+            """
+            () => {
+              const figure = document.querySelector(".pdf-semantic-map-figure-page");
+              const main = document.querySelector(".pdf-semantic-document-flow");
+              return [
+                figure.getBoundingClientRect().height,
+                main.getBoundingClientRect().height,
+                document.documentElement.scrollHeight
+              ];
+            }
+            """);
+
+        double expectedPageHeight = layout.Pages[0].Height * 4d / 3d;
+        Assert.InRange(geometry[0], expectedPageHeight - 1, expectedPageHeight + 1);
+        Assert.True(
+            geometry[1] <= expectedPageHeight * 1.2d,
+            $"continuous main height {geometry[1]:0.##} exceeded bounded map height {expectedPageHeight:0.##}");
+        Assert.True(
+            geometry[2] <= expectedPageHeight * 1.3d,
+            $"continuous document height {geometry[2]:0.##} exceeded bounded map height {expectedPageHeight:0.##}");
+    }
+
+    [Fact]
+    public void Convert_SemanticContinuousFlow_DoesNotTreatDenseTaggedProseAsMap()
+    {
+        List<PdfTextLine> lines =
+        [
+            CreateScientificFixtureLine(
+                "Dense tagged article",
+                72f,
+                42f,
+                220f,
+                14f,
+                "Helvetica-Bold")
+        ];
+        for (int index = 0; index < 24; index++)
+        {
+            lines.Add(CreateScientificFixtureLine(
+                $"This ordinary paragraph line {index + 1:00} contains sustained prose for the reader.",
+                72f,
+                78f + index * 25f,
+                468f));
+        }
+
+        PdfLayoutDocument layout = WithTaggedParagraphs(
+            CreateSemanticHtmlFixture(
+                lines,
+                [CreateFilledRectanglePath(
+                    54,
+                    new PdfLayoutRectangle(0f, 0f, 612f, 792f),
+                    new PdfLayoutColor(0.96f, 0.97f, 0.99f, 1f, "DeviceRGB"))]),
+            promoteFirstRunToHeading: true);
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        }).Html);
+
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-map-figure-page"));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-layout-fallback-page"));
+        Assert.Contains(dom.Descendants(), element =>
+            element.Value.Contains("sustained prose for the reader", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -8902,6 +9004,73 @@ public class PdfHtmlConverterTest
             new PdfLayoutRectangle(60f, 88f, 160f, 430f),
             diagramFill);
         return CreateSemanticHtmlFixture(lines, [diagram]);
+    }
+
+    private static PdfLayoutDocument CreateTaggedLabelledMapLayoutFixture()
+    {
+        List<PdfTextLine> lines =
+        [
+            CreateScientificFixtureLine(
+                "Labelled trail map",
+                36f,
+                22f,
+                190f,
+                16f,
+                "Helvetica-Bold")
+        ];
+        string[] labels =
+        [
+            "North trail",
+            "River crossing",
+            "Old quarry",
+            "Lake overlook",
+            "East gate",
+            "Ranger station",
+            "Cedar grove",
+            "Foot bridge",
+            "Picnic area",
+            "South ridge",
+            "Camp one",
+            "Camp two",
+            "Visitor center",
+            "Marsh loop",
+            "West beach",
+            "Hilltop",
+            "Creek bend",
+            "Trail junction",
+            "Scenic point",
+            "Boat launch",
+            "Pine hollow",
+            "Lookout tower",
+            "Meadow path",
+            "Historic cabin",
+            "South trail",
+            "Park boundary",
+            "Scale 1 km",
+            "Legend item 04",
+            "Legend item 05",
+            "Legend item 06"
+        ];
+        float[] xPositions = [30f, 130f, 230f, 330f, 430f, 530f];
+        float[] yPositions = [92f, 202f, 312f, 422f, 532f];
+        for (int index = 0; index < labels.Length; index++)
+        {
+            lines.Add(CreateScientificFixtureLine(
+                labels[index],
+                xPositions[index % xPositions.Length],
+                yPositions[index / xPositions.Length],
+                64f,
+                9f));
+        }
+
+        PdfLayoutColor mapFill = new(0.84f, 0.93f, 0.82f, 1f, "DeviceRGB");
+        PdfLayoutDocument map = CreateSemanticHtmlFixture(
+            lines,
+            [CreateFilledRectanglePath(
+                55,
+                new PdfLayoutRectangle(0f, 0f, 612f, 792f),
+                mapFill)]);
+        return WithTaggedParagraphs(map, promoteFirstRunToHeading: true);
     }
 
     private static PdfLayoutDocument CreateTaggedTwoColumnInstructionLayoutFixture()

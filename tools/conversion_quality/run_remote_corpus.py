@@ -328,6 +328,32 @@ def _validate_expectations(
                     f"{prefix} expectations.semanticRuledGridSourceBorderCountsByPage values must be positive integers"
                 )
 
+    for expectation_name in (
+        "semanticHeadingCountsByPage",
+        "semanticTableCountsByPage",
+    ):
+        semantic_counts_by_page = expectations.get(expectation_name)
+        if semantic_counts_by_page is None:
+            continue
+        if not isinstance(semantic_counts_by_page, dict) or not semantic_counts_by_page:
+            raise ValueError(
+                f"{prefix} expectations.{expectation_name} must be a non-empty object"
+            )
+        for page_number, count in semantic_counts_by_page.items():
+            if (
+                not isinstance(page_number, str)
+                or not page_number.isdigit()
+                or int(page_number) < 1
+                or int(page_number) > page_count
+            ):
+                raise ValueError(
+                    f"{prefix} expectations.{expectation_name} keys must be page numbers within pageCount"
+                )
+            if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                raise ValueError(
+                    f"{prefix} expectations.{expectation_name} values must be non-negative integers"
+                )
+
     semantic_fixed_layout_pages = expectations.get("semanticFixedLayoutPageNumbers")
     if semantic_fixed_layout_pages is not None:
         if (
@@ -377,6 +403,36 @@ def _validate_expectations(
             ):
                 raise ValueError(
                     f"{prefix} expectations.{expectation_name} values must be ratios from zero to one"
+                )
+
+    maximum_height_ratios_by_page = expectations.get("maxHtmlHeightRatioByPage")
+    if maximum_height_ratios_by_page is not None:
+        if (
+            not isinstance(maximum_height_ratios_by_page, dict)
+            or not maximum_height_ratios_by_page
+        ):
+            raise ValueError(
+                f"{prefix} expectations.maxHtmlHeightRatioByPage must be a non-empty object"
+            )
+        for page_number, maximum in maximum_height_ratios_by_page.items():
+            if (
+                not isinstance(page_number, str)
+                or not page_number.isdigit()
+                or int(page_number) < 1
+                or int(page_number) > page_count
+                or int(page_number) > quality_pages
+            ):
+                raise ValueError(
+                    f"{prefix} expectations.maxHtmlHeightRatioByPage keys must be page numbers "
+                    "within pageCount and qualityPages"
+                )
+            if (
+                not isinstance(maximum, (int, float))
+                or isinstance(maximum, bool)
+                or not 0 <= maximum <= 10
+            ):
+                raise ValueError(
+                    f"{prefix} expectations.maxHtmlHeightRatioByPage values must be ratios from zero to ten"
                 )
 
 

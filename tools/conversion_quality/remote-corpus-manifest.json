@@ -340,7 +340,19 @@
         ],
         "minTextRuns": 800,
         "minImagePlacements": 750,
-        "minVectorPaths": 850
+        "minVectorPaths": 850,
+        "semanticHeadingCountsByPage": {
+          "1": 0
+        },
+        "semanticTableCountsByPage": {
+          "1": 0
+        },
+        "semanticFixedLayoutPageNumbers": [
+          1
+        ],
+        "maxHtmlHeightRatioByPage": {
+          "1": 1.01
+        }
       }
     },
     {

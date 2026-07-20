@@ -261,6 +261,10 @@ public static class HtmlReviewArtifactGenerator
             example.Expectations?.SemanticRuledGridColumnCountsByPage ?? [];
         Dictionary<int, int> expectedRuledGridSourceBordersByPage =
             example.Expectations?.SemanticRuledGridSourceBorderCountsByPage ?? [];
+        Dictionary<int, int> expectedHeadingCountsByPage =
+            example.Expectations?.SemanticHeadingCountsByPage ?? [];
+        Dictionary<int, int> expectedTableCountsByPage =
+            example.Expectations?.SemanticTableCountsByPage ?? [];
         List<int> expectedFixedLayoutPages =
             example.Expectations?.SemanticFixedLayoutPageNumbers ?? [];
         if (expectedOrderedByPage.Count == 0 &&
@@ -269,6 +273,8 @@ public static class HtmlReviewArtifactGenerator
             expectedColumnsByPage.Count == 0 &&
             expectedRuledGridColumnsByPage.Count == 0 &&
             expectedRuledGridSourceBordersByPage.Count == 0 &&
+            expectedHeadingCountsByPage.Count == 0 &&
+            expectedTableCountsByPage.Count == 0 &&
             expectedFixedLayoutPages.Count == 0)
         {
             return;
@@ -315,6 +321,20 @@ public static class HtmlReviewArtifactGenerator
             dom,
             expectedRuledGridSourceBordersByPage,
             failures);
+        ValidateSemanticElementCountExpectations(
+            example,
+            dom,
+            expectedHeadingCountsByPage,
+            "heading",
+            static element => element.Name.LocalName is "h1" or "h2" or "h3" or "h4" or "h5" or "h6",
+            failures);
+        ValidateSemanticElementCountExpectations(
+            example,
+            dom,
+            expectedTableCountsByPage,
+            "table",
+            static element => element.Name.LocalName == "table",
+            failures);
         ValidateSemanticFixedLayoutPageExpectations(
             example,
             dom,
@@ -336,8 +356,11 @@ public static class HtmlReviewArtifactGenerator
             example.Expectations?.MaxPdfMissRatioByPage ?? [];
         Dictionary<int, double> maximumSevereColorDeltaRatioByPage =
             example.Expectations?.MaxSevereColorDeltaRatioByPage ?? [];
+        Dictionary<int, double> maximumHtmlHeightRatioByPage =
+            example.Expectations?.MaxHtmlHeightRatioByPage ?? [];
         if (maximumPdfMissRatioByPage.Count == 0 &&
-            maximumSevereColorDeltaRatioByPage.Count == 0)
+            maximumSevereColorDeltaRatioByPage.Count == 0 &&
+            maximumHtmlHeightRatioByPage.Count == 0)
         {
             return;
         }
@@ -357,10 +380,53 @@ public static class HtmlReviewArtifactGenerator
             "severe color delta ratio",
             static visual => visual.SevereColorDeltaRatio,
             failures);
+        ValidateMaximumQualityCheckMetric(
+            example,
+            qualityReport,
+            maximumHtmlHeightRatioByPage,
+            "HTML height ratio",
+            "page-dimensions",
+            "heightRatio",
+            failures);
         if (failures.Count > 0)
         {
             throw new InvalidOperationException(
                 $"HTML review visual expectations failed for '{example.Id}': {string.Join("; ", failures)}.");
+        }
+    }
+
+    private static void ValidateMaximumQualityCheckMetric(
+        HtmlReviewManifestExample example,
+        PdfHtmlQualityReport qualityReport,
+        IReadOnlyDictionary<int, double> maximumByPage,
+        string metricName,
+        string checkId,
+        string metricId,
+        List<string> failures)
+    {
+        foreach ((int pageNumber, double maximum) in maximumByPage)
+        {
+            if (pageNumber < 1 || !double.IsFinite(maximum) || maximum is < 0 or > 10)
+            {
+                throw new InvalidOperationException(
+                    $"HTML review example '{example.Id}' has an invalid maximum {metricName} expectation for page {pageNumber}.");
+            }
+
+            PdfHtmlQualityCheck? check = qualityReport.Pages
+                .FirstOrDefault(page => page.PageNumber == pageNumber)
+                ?.Checks
+                .FirstOrDefault(check => check.Id == checkId);
+            double? actual = check?.Metrics.GetValueOrDefault(metricId);
+            if (actual is null)
+            {
+                failures.Add($"{metricName} on page {pageNumber} was unavailable");
+            }
+            else if (actual.Value > maximum)
+            {
+                failures.Add(
+                    $"{metricName} on page {pageNumber} was {actual.Value.ToString("0.####", CultureInfo.InvariantCulture)}, " +
+                    $"expected at most {maximum.ToString("0.####", CultureInfo.InvariantCulture)}");
+            }
         }
     }
 
@@ -433,6 +499,58 @@ public static class HtmlReviewArtifactGenerator
         return element.Attribute("class")?.Value
             .Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Contains(className, StringComparer.Ordinal) ?? false;
+    }
+
+    private static void ValidateSemanticElementCountExpectations(
+        HtmlReviewManifestExample example,
+        XDocument dom,
+        IReadOnlyDictionary<int, int> expectedByPage,
+        string elementKind,
+        Func<XElement, bool> predicate,
+        List<string> failures)
+    {
+        if (expectedByPage.Count == 0)
+        {
+            return;
+        }
+
+        if (expectedByPage.Any(static expectation =>
+                expectation.Key < 1 || expectation.Value < 0))
+        {
+            throw new InvalidOperationException(
+                $"HTML review example '{example.Id}' has invalid semantic {elementKind} count expectations.");
+        }
+
+        Dictionary<int, int> actualByPage = [];
+        int currentPage = 0;
+        foreach (XElement element in dom.Descendants())
+        {
+            if ((HasClass(element, "pdf-semantic-page-break") ||
+                    HasClass(element, "pdf-semantic-layout-fallback-page")) &&
+                int.TryParse(
+                    element.Attribute("data-page-number")?.Value,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out int pageNumber))
+            {
+                currentPage = pageNumber;
+            }
+
+            if (currentPage > 0 && predicate(element))
+            {
+                actualByPage[currentPage] = actualByPage.GetValueOrDefault(currentPage) + 1;
+            }
+        }
+
+        foreach ((int pageNumber, int expectedCount) in expectedByPage)
+        {
+            int actual = actualByPage.GetValueOrDefault(pageNumber);
+            if (actual != expectedCount)
+            {
+                failures.Add(
+                    $"semantic {elementKind} count on page {pageNumber} was {actual}, expected {expectedCount}");
+            }
+        }
     }
 
     private static void ValidateSemanticFixedLayoutPageExpectations(
@@ -1085,9 +1203,15 @@ public sealed class HtmlReviewExpectations
 
     public Dictionary<int, int> SemanticRuledGridSourceBorderCountsByPage { get; set; } = [];
 
+    public Dictionary<int, int> SemanticHeadingCountsByPage { get; set; } = [];
+
+    public Dictionary<int, int> SemanticTableCountsByPage { get; set; } = [];
+
     public List<int> SemanticFixedLayoutPageNumbers { get; set; } = [];
 
     public Dictionary<int, double> MaxPdfMissRatioByPage { get; set; } = [];
 
     public Dictionary<int, double> MaxSevereColorDeltaRatioByPage { get; set; } = [];
+
+    public Dictionary<int, double> MaxHtmlHeightRatioByPage { get; set; } = [];
 }

@@ -71,6 +71,23 @@ class RemoteCorpusTest(unittest.TestCase):
         self.assertTrue(all(len(item.sha256) == 64 for item in documents))
         mount_rainier = next(item for item in documents if item.id == "nps-mount-rainier")
         self.assertEqual({"2": 1}, mount_rainier.expectations["minImagePlacementsByPage"])
+        point_reyes = next(item for item in documents if item.id == "nps-point-reyes-map")
+        self.assertEqual(
+            {"1": 0},
+            point_reyes.expectations["semanticHeadingCountsByPage"],
+        )
+        self.assertEqual(
+            {"1": 0},
+            point_reyes.expectations["semanticTableCountsByPage"],
+        )
+        self.assertEqual(
+            [1],
+            point_reyes.expectations["semanticFixedLayoutPageNumbers"],
+        )
+        self.assertEqual(
+            {"1": 1.01},
+            point_reyes.expectations["maxHtmlHeightRatioByPage"],
+        )
         nist = next(item for item in documents if item.id == "nist-sp800-171r3")
         self.assertEqual(15, nist.quality_pages)
         uscis = next(item for item in documents if item.id == "uscis-i9")
@@ -344,6 +361,18 @@ class RemoteCorpusTest(unittest.TestCase):
                 remote_corpus.load_manifest(manifest)
 
             entry["expectations"]["semanticRuledGridSourceBorderCountsByPage"] = {"2": 26}
+            entry["expectations"]["semanticHeadingCountsByPage"] = {"1": -1}
+            self._write_manifest(manifest, [entry])
+            with self.assertRaisesRegex(ValueError, "non-negative integers"):
+                remote_corpus.load_manifest(manifest)
+
+            entry["expectations"]["semanticHeadingCountsByPage"] = {"1": 0}
+            entry["expectations"]["semanticTableCountsByPage"] = {"2": 0}
+            self._write_manifest(manifest, [entry])
+            with self.assertRaisesRegex(ValueError, "within pageCount"):
+                remote_corpus.load_manifest(manifest)
+
+            entry["expectations"]["semanticTableCountsByPage"] = {"1": 0}
             entry["expectations"]["semanticFixedLayoutPageNumbers"] = [1, 1]
             self._write_manifest(manifest, [entry])
             with self.assertRaisesRegex(ValueError, "unique positive page numbers"):
@@ -358,6 +387,12 @@ class RemoteCorpusTest(unittest.TestCase):
             entry["expectations"]["maxPdfMissRatioByPage"] = {"2": 0.1}
             self._write_manifest(manifest, [entry])
             with self.assertRaisesRegex(ValueError, "within pageCount and qualityPages"):
+                remote_corpus.load_manifest(manifest)
+
+            entry["expectations"]["maxPdfMissRatioByPage"] = {"1": 0.1}
+            entry["expectations"]["maxHtmlHeightRatioByPage"] = {"1": 10.01}
+            self._write_manifest(manifest, [entry])
+            with self.assertRaisesRegex(ValueError, "zero to ten"):
                 remote_corpus.load_manifest(manifest)
 
     def test_fetch_document_retries_verifies_hash_and_installs_atomically(self) -> None:
