@@ -210,6 +210,78 @@ public class PdfHtmlSemanticIslandTest
     }
 
     [Fact]
+    public void Convert_W9InstructionPages_PreserveAuthoredTwoColumnSemantics()
+    {
+        using PDDocument document = Loader.LoadPDF(FixturePath("irs-w9.pdf"));
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true,
+            IncludeFontAssets = true
+        });
+        XDocument dom = ParseHtml(
+            PdfHtmlConverter.Convert(layout, SemanticContinuousOptions()).Html);
+        XElement[] grids = ElementsByClass(dom, "pdf-semantic-authored-columns")
+            .OrderBy(grid => int.Parse(grid.Attribute("data-source-page")!.Value))
+            .ToArray();
+
+        Assert.Equal(new[] { "2", "3", "4", "5", "6" }, grids
+            .Select(grid => grid.Attribute("data-source-page")?.Value)
+            .ToArray());
+        Assert.All(grids, static grid =>
+        {
+            Assert.Equal("2", grid.Attribute("data-column-count")?.Value);
+            Assert.Equal(
+                2,
+                grid.Elements().Count(static element => HasClass(element, "pdf-semantic-column")));
+        });
+
+        XElement[] page2Columns = ColumnElements(grids[0]);
+        Assert.Contains(
+            page2Columns[1].Elements("div").SelectMany(static block => block.Elements("h3")),
+            static heading => heading.Value.Contains("Backup Withholding", StringComparison.Ordinal));
+        Assert.NotEmpty(page2Columns[0].Descendants("ul"));
+        Assert.NotEmpty(page2Columns[1].Descendants("ol"));
+        Assert.Contains(page2Columns[0].Descendants("span"), static span =>
+            HasClass(span, "pdf-font-helveticaneueltstd-it"));
+
+        XElement[] page3Columns = ColumnElements(grids[1]);
+        Assert.True(
+            page3Columns[0].Value.IndexOf("What Is FATCA Reporting?", StringComparison.Ordinal) <
+            page3Columns[0].Value.IndexOf("Specific Instructions", StringComparison.Ordinal));
+        Assert.True(
+            page3Columns[1].Value.IndexOf("Line 2", StringComparison.Ordinal) <
+            page3Columns[1].Value.IndexOf("Line 3a", StringComparison.Ordinal));
+        Assert.NotEmpty(page3Columns.SelectMany(static column => column.Descendants("h4")));
+
+        XElement[] page4Columns = ColumnElements(grids[2]);
+        Assert.Single(page4Columns[0].Descendants("table"));
+        Assert.Contains("Line 5", page4Columns[1].Value, StringComparison.Ordinal);
+        Assert.Contains("Part I. Taxpayer Identification Number", page4Columns[1].Value, StringComparison.Ordinal);
+
+        XElement[] page5Columns = ColumnElements(grids[3]);
+        Assert.Single(page5Columns[0].Descendants("table"));
+        Assert.Single(page5Columns[1].Descendants("table"));
+        Assert.Contains("Part II. Certification", page5Columns[0].Value, StringComparison.Ordinal);
+        Assert.Contains("Secure Your Tax Records From Identity Theft", page5Columns[1].Value, StringComparison.Ordinal);
+
+        XElement[] page6Columns = ColumnElements(grids[4]);
+        Assert.Empty(page6Columns[0].Descendants("h3"));
+        Assert.Contains(
+            page6Columns[1].Descendants("h3"),
+            static heading => heading.Value.Contains("Privacy Act Notice", StringComparison.Ordinal));
+        Assert.Single(Regex.Matches(
+            dom.Root!.Value,
+            Regex.Escape("Privacy Act Notice")));
+
+        static XElement[] ColumnElements(XElement grid)
+        {
+            return grid.Elements()
+                .Where(static element => HasClass(element, "pdf-semantic-column"))
+                .ToArray();
+        }
+    }
+
+    [Fact]
     public void Convert_LinkedSymbolBulletRows_EmitOneFallbackListWithSemanticLinks()
     {
         PdfLayoutDocument layout = CreateLinkedMemberListLayout();

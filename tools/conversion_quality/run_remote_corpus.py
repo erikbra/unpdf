@@ -261,6 +261,27 @@ def _validate_expectations(expectations: dict[str, Any], prefix: str) -> None:
                     f"{prefix} expectations.semanticMixedRegionCountsByPage values must be positive integers"
                 )
 
+    semantic_columns_by_page = expectations.get("semanticColumnCountsByPage")
+    if semantic_columns_by_page is not None:
+        if not isinstance(semantic_columns_by_page, dict) or not semantic_columns_by_page:
+            raise ValueError(
+                f"{prefix} expectations.semanticColumnCountsByPage must be a non-empty object"
+            )
+        for page_number, count in semantic_columns_by_page.items():
+            if (
+                not isinstance(page_number, str)
+                or not page_number.isdigit()
+                or int(page_number) < 1
+                or int(page_number) > page_count
+            ):
+                raise ValueError(
+                    f"{prefix} expectations.semanticColumnCountsByPage keys must be page numbers within pageCount"
+                )
+            if not isinstance(count, int) or isinstance(count, bool) or count < 2:
+                raise ValueError(
+                    f"{prefix} expectations.semanticColumnCountsByPage values must be integers of at least two"
+                )
+
     semantic_ruled_grid_columns_by_page = expectations.get(
         "semanticRuledGridColumnCountsByPage"
     )

@@ -105,6 +105,10 @@ class RemoteCorpusTest(unittest.TestCase):
             {"1": [4]},
             w9.expectations["semanticOrderedListItemCountsByPage"],
         )
+        self.assertEqual(
+            {"2": 2, "3": 2, "4": 2, "5": 2, "6": 2},
+            w9.expectations["semanticColumnCountsByPage"],
+        )
         fbi = next(item for item in documents if item.id == "fbi-fd258")
         self.assertEqual(
             {"2": 1},
@@ -306,6 +310,12 @@ class RemoteCorpusTest(unittest.TestCase):
                 remote_corpus.load_manifest(manifest)
 
             entry["expectations"]["semanticMixedRegionCountsByPage"] = {"2": 1}
+            entry["expectations"]["semanticColumnCountsByPage"] = {"1": 1}
+            self._write_manifest(manifest, [entry])
+            with self.assertRaisesRegex(ValueError, "at least two"):
+                remote_corpus.load_manifest(manifest)
+
+            entry["expectations"]["semanticColumnCountsByPage"] = {"1": 2}
             entry["expectations"]["semanticRuledGridColumnCountsByPage"] = {"2": 1}
             self._write_manifest(manifest, [entry])
             with self.assertRaisesRegex(ValueError, "at least two"):

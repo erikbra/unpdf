@@ -73,8 +73,8 @@
       "rawBytes": 24341
     },
     "PdfBox.Net.Html.wasm": {
-      "brotliBytes": 162963,
-      "rawBytes": 709397
+      "brotliBytes": 165432,
+      "rawBytes": 721685
     },
     "PdfBox.Net.IO.wasm": {
       "brotliBytes": 14685,
@@ -248,7 +248,7 @@
   },
   "schemaVersion": 1,
   "totals": {
-    "brotliBytes": 5263105,
-    "rawBytes": 18597320
+    "brotliBytes": 5265574,
+    "rawBytes": 18609608
   }
 }

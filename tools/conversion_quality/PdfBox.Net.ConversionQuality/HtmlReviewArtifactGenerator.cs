@@ -254,6 +254,8 @@ public static class HtmlReviewArtifactGenerator
             example.Expectations?.SemanticUnorderedListItemCountsByPage ?? [];
         Dictionary<int, int> expectedMixedRegionsByPage =
             example.Expectations?.SemanticMixedRegionCountsByPage ?? [];
+        Dictionary<int, int> expectedColumnsByPage =
+            example.Expectations?.SemanticColumnCountsByPage ?? [];
         Dictionary<int, int> expectedRuledGridColumnsByPage =
             example.Expectations?.SemanticRuledGridColumnCountsByPage ?? [];
         Dictionary<int, int> expectedRuledGridSourceBordersByPage =
@@ -263,6 +265,7 @@ public static class HtmlReviewArtifactGenerator
         if (expectedOrderedByPage.Count == 0 &&
             expectedUnorderedByPage.Count == 0 &&
             expectedMixedRegionsByPage.Count == 0 &&
+            expectedColumnsByPage.Count == 0 &&
             expectedRuledGridColumnsByPage.Count == 0 &&
             expectedRuledGridSourceBordersByPage.Count == 0 &&
             expectedFixedLayoutPages.Count == 0)
@@ -296,6 +299,11 @@ public static class HtmlReviewArtifactGenerator
             dom,
             expectedMixedRegionsByPage,
             failures);
+        ValidateSemanticColumnExpectations(
+            example,
+            dom,
+            expectedColumnsByPage,
+            failures);
         ValidateSemanticRuledGridExpectations(
             example,
             dom,
@@ -317,6 +325,44 @@ public static class HtmlReviewArtifactGenerator
             throw new InvalidOperationException(
                 $"HTML review semantic expectations failed for '{example.Id}': {string.Join("; ", failures)}.");
         }
+    }
+
+    private static void ValidateSemanticColumnExpectations(
+        HtmlReviewManifestExample example,
+        XDocument dom,
+        IReadOnlyDictionary<int, int> expectedByPage,
+        List<string> failures)
+    {
+        foreach ((int pageNumber, int expectedCount) in expectedByPage)
+        {
+            if (pageNumber < 1 || expectedCount < 2)
+            {
+                throw new InvalidOperationException(
+                    $"HTML review example '{example.Id}' has an invalid semantic column expectation for page {pageNumber}.");
+            }
+
+            int[] actualCounts = dom.Descendants()
+                .Where(element =>
+                    HasClass(element, "pdf-semantic-columns") &&
+                    element.Attribute("data-source-page")?.Value ==
+                        pageNumber.ToString(CultureInfo.InvariantCulture))
+                .Select(columns => columns.Elements()
+                    .Count(static element => HasClass(element, "pdf-semantic-column")))
+                .ToArray();
+            if (!actualCounts.SequenceEqual([expectedCount]))
+            {
+                failures.Add(
+                    $"semantic column counts on page {pageNumber} were " +
+                    $"[{string.Join(", ", actualCounts)}], expected [{expectedCount}]");
+            }
+        }
+    }
+
+    private static bool HasClass(XElement element, string className)
+    {
+        return element.Attribute("class")?.Value
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Contains(className, StringComparer.Ordinal) ?? false;
     }
 
     private static void ValidateSemanticFixedLayoutPageExpectations(
@@ -962,6 +1008,8 @@ public sealed class HtmlReviewExpectations
     public Dictionary<int, List<int>> SemanticUnorderedListItemCountsByPage { get; set; } = [];
 
     public Dictionary<int, int> SemanticMixedRegionCountsByPage { get; set; } = [];
+
+    public Dictionary<int, int> SemanticColumnCountsByPage { get; set; } = [];
 
     public Dictionary<int, int> SemanticRuledGridColumnCountsByPage { get; set; } = [];
 
