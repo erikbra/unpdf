@@ -59,6 +59,13 @@ annotation appearances and transparency-group raster fallbacks report
 available in degraded mode; strict and backend-required modes fail
 deterministically instead.
 
+When `IncludeTransparencyGroupFallbacks` and image assets are enabled, compact
+shape-alpha, pattern-fill, and non-rectangular shading-clip regions are
+detected before direct SVG export and captured as bounded
+`ComplexArtworkFallback` images. The rest of the page—including selectable
+text—remains in the layout model. Image, vector-path, and shading paint
+operations retain their source content-stream order.
+
 This package does not register a rendering backend. Applications that need
 image conversion or raster fallbacks can reference `PdfBox.Net.SkiaSharp` or
 `PdfBox.Net.ImageMagick` and register that provider during startup.

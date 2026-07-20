@@ -88,6 +88,7 @@ public static class PdfHtmlConverter
         .pdf-page {
           background: var(--pdf-page-background);
           box-shadow: 0 1pt 4pt var(--pdf-page-edge-shadow);
+          isolation: isolate;
           margin: 0 auto 24pt;
           overflow: hidden;
           position: relative;
@@ -102,7 +103,7 @@ public static class PdfHtmlConverter
           position: absolute;
           transform-origin: 0 0;
           white-space: pre;
-          z-index: 1;
+          z-index: 1000000;
         }
 
         .pdf-ocr-scan-page .pdf-ocr-text-run {
@@ -148,7 +149,7 @@ public static class PdfHtmlConverter
           font: 10pt Arial, Helvetica, sans-serif;
           margin: 0;
           min-height: 1em;
-          z-index: 3;
+          z-index: 1000002;
         }
 
         .pdf-form-control[type="checkbox"],
@@ -1641,7 +1642,7 @@ public static class PdfHtmlConverter
           display: block;
           outline: none;
           position: absolute;
-          z-index: 3;
+          z-index: 1000002;
         }
 
         .pdf-image {
@@ -1982,7 +1983,9 @@ public static class PdfHtmlConverter
             }
         }
 
-        if (page.Shadings.Count > 0)
+        if (page.Shadings.Count > 0 &&
+            !page.PaintOperations.Any(static operation =>
+                operation.Kind == PdfLayoutPaintOperationKind.Shading))
         {
             WriteShadingLayer(html, page, scale);
         }
@@ -2012,7 +2015,8 @@ public static class PdfHtmlConverter
                 }
 
                 PdfTextRun run = page.Runs[runIndex];
-                if (semanticIslandRuns.Contains(run) || IsCoveredByTransparencyFallback(page, run.PageBounds))
+                if (semanticIslandRuns.Contains(run) ||
+                    IsCoveredByVisualFallback(page, run.PageBounds, preserveTextOverComplexArtwork: true))
                 {
                     continue;
                 }
@@ -2135,7 +2139,10 @@ public static class PdfHtmlConverter
         if (ownedRuns.Length == 0 || ownedRuns.Length != sourceRunSequence.Length ||
             ownedRuns.Any(static run => run.Glyphs.Count == 0 || MathF.Abs(run.Direction) > 0.01f) ||
             ownedRuns.Any(run => !pageRunIndices.ContainsKey(run)) ||
-            ownedRuns.Any(run => IsCoveredByTransparencyFallback(page, run.PageBounds)))
+            ownedRuns.Any(run => IsCoveredByVisualFallback(
+                page,
+                run.PageBounds,
+                preserveTextOverComplexArtwork: true)))
         {
             return false;
         }
@@ -2495,9 +2502,12 @@ public static class PdfHtmlConverter
     {
         Dictionary<int, PdfLayoutImage> imagesByIndex = page.Images.ToDictionary(image => image.Index);
         Dictionary<int, PdfLayoutPath> pathsByIndex = vectorPaths.ToDictionary(path => path.Index);
+        Dictionary<int, PdfLayoutShading> shadingsByIndex =
+            page.Shadings.ToDictionary(static shading => shading.Index);
         List<PdfLayoutPath> pathBatch = [];
         PdfLayoutPath[] precedingUnderpaint = [];
         int vectorLayerIndex = 0;
+        int graphicStackingIndex = 0;
 
         void FlushPaths()
         {
@@ -2512,8 +2522,10 @@ public static class PdfHtmlConverter
                 scale,
                 pathBatch,
                 "pdf-vector-layer",
-                "paint-" + vectorLayerIndex.ToString(CultureInfo.InvariantCulture));
+                "paint-" + vectorLayerIndex.ToString(CultureInfo.InvariantCulture),
+                graphicStackingIndex);
             vectorLayerIndex++;
+            graphicStackingIndex++;
             pathBatch.Clear();
         }
 
@@ -2540,10 +2552,40 @@ public static class PdfHtmlConverter
             }
 
             FlushPaths();
+            if (operation.Kind == PdfLayoutPaintOperationKind.Shading)
+            {
+                if (shadingsByIndex.TryGetValue(operation.Index, out PdfLayoutShading? shading))
+                {
+                    WriteShadingLayer(
+                        html,
+                        page,
+                        scale,
+                        [shading],
+                        graphicStackingIndex);
+                    graphicStackingIndex++;
+                }
+
+                precedingUnderpaint = [];
+                continue;
+            }
+
+            if (operation.Kind != PdfLayoutPaintOperationKind.Image)
+            {
+                continue;
+            }
+
             if (imagesByIndex.TryGetValue(operation.Index, out PdfLayoutImage? image) &&
                 imageAssets.TryGetValue(image.AssetId, out PdfLayoutImageAsset? asset))
             {
-                WriteImage(html, page, image, asset, scale, precedingUnderpaint);
+                WriteImage(
+                    html,
+                    page,
+                    image,
+                    asset,
+                    scale,
+                    precedingUnderpaint,
+                    graphicStackingIndex);
+                graphicStackingIndex++;
                 PdfLayoutPath[] preservedSpotUnderpaint = precedingUnderpaint
                     .Where(path => IsPreservedSpotUnderpaint(path, image))
                     .ToArray();
@@ -2555,8 +2597,10 @@ public static class PdfHtmlConverter
                         scale,
                         preservedSpotUnderpaint,
                         "pdf-vector-layer pdf-overprint-preserved-layer",
-                        "overprint-" + vectorLayerIndex.ToString(CultureInfo.InvariantCulture));
+                        "overprint-" + vectorLayerIndex.ToString(CultureInfo.InvariantCulture),
+                        graphicStackingIndex);
                     vectorLayerIndex++;
+                    graphicStackingIndex++;
                 }
             }
         }
@@ -2965,7 +3009,8 @@ public static class PdfHtmlConverter
         PdfLayoutImage image,
         PdfLayoutImageAsset asset,
         float scale,
-        IReadOnlyList<PdfLayoutPath>? precedingUnderpaint = null)
+        IReadOnlyList<PdfLayoutPath>? precedingUnderpaint = null,
+        int? stackingIndex = null)
     {
         IReadOnlyList<PdfLayoutClipPath> clipPaths = CanPaintUniformImageWithoutClip(
             image,
@@ -3003,6 +3048,11 @@ public static class PdfHtmlConverter
             .Append(CssPoints(image.Bounds.Width * scale))
             .Append(";height:")
             .Append(CssPoints(image.Bounds.Height * scale));
+        if (stackingIndex is int imageStackingIndex)
+        {
+            html.Append(";z-index:")
+                .Append(imageStackingIndex.ToString(CultureInfo.InvariantCulture));
+        }
         if (clipPaths.Count > 0)
         {
             html.Append(";clip-path:url(#")
@@ -3115,7 +3165,7 @@ public static class PdfHtmlConverter
             .Where(path => semanticPage == null || !IsSemanticFlowRulePath(page, semanticPage, path))
             .Where(static path => !RequiresShapeAlphaFallback(path))
             .Where(static path => !path.UsesSoftMask)
-            .Where(path => !IsCoveredByTransparencyFallback(page, path.Bounds))
+            .Where(path => !IsCoveredByVisualFallback(page, path.Bounds))
             .ToArray();
     }
 
@@ -3134,7 +3184,7 @@ public static class PdfHtmlConverter
         }
 
         return images
-            .Where(static image => image.Kind != PdfLayoutImageKind.TransparencyGroupFallback)
+            .Where(static image => !IsVisualFallbackImage(image))
             .Any(image => ContainsWithTolerance(path.Bounds, image.Bounds, 0.25f));
     }
 
@@ -3155,7 +3205,8 @@ public static class PdfHtmlConverter
         float scale,
         IReadOnlyList<PdfLayoutPath> paths,
         string cssClass,
-        string layerName)
+        string layerName,
+        int? stackingIndex = null)
     {
         if (paths.Count == 0)
         {
@@ -3175,7 +3226,13 @@ public static class PdfHtmlConverter
             .Append("\" style=\"position:absolute;left:0;top:0;width:")
             .Append(CssPoints(page.Width * scale))
             .Append(";height:")
-            .Append(CssPoints(page.Height * scale))
+            .Append(CssPoints(page.Height * scale));
+        if (stackingIndex is int vectorStackingIndex)
+        {
+            html.Append(";z-index:")
+                .Append(vectorStackingIndex.ToString(CultureInfo.InvariantCulture));
+        }
+        html
             .AppendLine("\" aria-hidden=\"true\">");
 
         WriteVectorContent(
@@ -3187,10 +3244,16 @@ public static class PdfHtmlConverter
         html.AppendLine("    </svg>");
     }
 
-    private static void WriteShadingLayer(StringBuilder html, PdfLayoutPage page, float scale)
+    private static void WriteShadingLayer(
+        StringBuilder html,
+        PdfLayoutPage page,
+        float scale,
+        IReadOnlyList<PdfLayoutShading>? selectedShadings = null,
+        int? stackingIndex = null)
     {
+        IReadOnlyList<PdfLayoutShading> shadings = selectedShadings ?? page.Shadings;
         html.Append("    <svg class=\"pdf-shading-layer\" data-shading-count=\"")
-            .Append(page.Shadings.Count.ToString(CultureInfo.InvariantCulture))
+            .Append(shadings.Count.ToString(CultureInfo.InvariantCulture))
             .Append("\" viewBox=\"0 0 ")
             .Append(SvgNumber(page.Width))
             .Append(' ')
@@ -3198,10 +3261,16 @@ public static class PdfHtmlConverter
             .Append("\" style=\"position:absolute;left:0;top:0;width:")
             .Append(CssPoints(page.Width * scale))
             .Append(";height:")
-            .Append(CssPoints(page.Height * scale))
+            .Append(CssPoints(page.Height * scale));
+        if (stackingIndex is int shadingStackingIndex)
+        {
+            html.Append(";z-index:")
+                .Append(shadingStackingIndex.ToString(CultureInfo.InvariantCulture));
+        }
+        html
             .AppendLine("\" aria-hidden=\"true\">");
         html.AppendLine("      <defs>");
-        foreach (PdfLayoutShading shading in page.Shadings)
+        foreach (PdfLayoutShading shading in shadings)
         {
             WriteShadingDefinition(html, page, shading);
             if (shading.ShadingType == 7)
@@ -3221,7 +3290,7 @@ public static class PdfHtmlConverter
         }
 
         html.AppendLine("      </defs>");
-        foreach (PdfLayoutShading shading in page.Shadings)
+        foreach (PdfLayoutShading shading in shadings)
         {
             if (shading.ShadingType == 7)
             {
@@ -4525,7 +4594,9 @@ public static class PdfHtmlConverter
                 "cover");
         }
 
-        if (page.Shadings.Count > 0)
+        if (page.Shadings.Count > 0 &&
+            !page.PaintOperations.Any(static operation =>
+                operation.Kind == PdfLayoutPaintOperationKind.Shading))
         {
             WriteShadingLayer(html, page, scale);
         }
@@ -4673,12 +4744,13 @@ public static class PdfHtmlConverter
             return true;
         }
 
-        // A tagged PDF has already supplied the reading order and semantic
-        // relationships. Geometry-based sparse-page and column heuristics must
-        // not replace that authored structure with fixed-layout text.
         if (semanticPage.Elements.Any(static element => element.TaggedStructure != null))
         {
-            return false;
+            // Tagged slide and cover pages can still rely on a page-spanning
+            // graphic backdrop. Keep their authored text selectable, but retain
+            // page geometry so paint-order-dependent artwork is not detached
+            // into an incomplete semantic figure.
+            return RequiresTaggedGraphicLayoutPreservation(page, semanticPage);
         }
 
         if (RequiresDocumentIndexVisualPreservation(page, semanticPage))
@@ -4749,6 +4821,44 @@ public static class PdfHtmlConverter
 
         return semanticPage.Elements.Count <= 1 &&
             PageContentTop(page) > page.Height * 0.14f;
+    }
+
+    private static bool RequiresTaggedGraphicLayoutPreservation(
+        PdfLayoutPage page,
+        PdfSemanticPage semanticPage)
+    {
+        if (page.Width <= 0 ||
+            page.Height <= 0 ||
+            page.Lines.Count > 18 ||
+            page.Runs.Count > 40 ||
+            semanticPage.Elements.Count > 20 ||
+            semanticPage.Elements.Any(static element =>
+                element.Kind is PdfSemanticElementKind.Table or
+                    PdfSemanticElementKind.DefinitionList or
+                    PdfSemanticElementKind.Bibliography or
+                    PdfSemanticElementKind.Navigation))
+        {
+            return false;
+        }
+
+        PdfTextGlyph[] textGlyphs = page.Glyphs
+            .Where(static glyph => !string.IsNullOrWhiteSpace(glyph.Text))
+            .ToArray();
+        if (textGlyphs.Length > 0 &&
+            textGlyphs.Count(static glyph => glyph.IsPainted) < textGlyphs.Length * 0.75f)
+        {
+            return false;
+        }
+
+        PdfLayoutRectangle pageBounds = new(0, 0, page.Width, page.Height);
+        float pageArea = page.Width * page.Height;
+        return page.Images
+            .Where(static image => !IsVisualFallbackImage(image))
+            .Select(VisibleImageBounds)
+            .Any(bounds =>
+                bounds.Width >= page.Width * 0.8f &&
+                bounds.Height >= page.Height * 0.65f &&
+                RectangleIntersectionArea(bounds, pageBounds) >= pageArea * 0.62f);
     }
 
     private static bool RequiresDocumentIndexVisualPreservation(
@@ -9197,18 +9307,12 @@ public static class PdfHtmlConverter
             .Append(SvgNumber(-region.Y))
             .Append(")\">");
 
-        foreach (PdfLayoutImage image in images)
-        {
-            if (imageAssets.TryGetValue(image.AssetId, out PdfLayoutImageAsset? asset))
-            {
-                WriteSvgImage(html, page, image, asset);
-            }
-        }
-
-        WriteVectorContent(
+        WriteSemanticFigureGraphics(
             html,
+            page,
+            images,
             paths,
-            page.VectorGroups,
+            imageAssets,
             $"pdf-vector-figure-{page.PageNumber.ToString(CultureInfo.InvariantCulture)}-{MathF.Round(region.X).ToString(CultureInfo.InvariantCulture)}-{MathF.Round(region.Y).ToString(CultureInfo.InvariantCulture)}");
 
         foreach (PdfTextRun run in textRuns)
@@ -9232,6 +9336,104 @@ public static class PdfHtmlConverter
         return true;
     }
 
+    private static void WriteSemanticFigureGraphics(
+        StringBuilder html,
+        PdfLayoutPage page,
+        IReadOnlyList<PdfLayoutImage> images,
+        IReadOnlyList<PdfLayoutPath> paths,
+        IReadOnlyDictionary<string, PdfLayoutImageAsset> imageAssets,
+        string clipIdPrefix)
+    {
+        if (page.PaintOperations.Count == 0)
+        {
+            foreach (PdfLayoutImage image in images)
+            {
+                if (imageAssets.TryGetValue(image.AssetId, out PdfLayoutImageAsset? asset))
+                {
+                    WriteSvgImage(html, page, image, asset);
+                }
+            }
+
+            WriteVectorContent(html, paths, page.VectorGroups, clipIdPrefix);
+            return;
+        }
+
+        Dictionary<int, PdfLayoutImage> imagesByIndex = images.ToDictionary(static image => image.Index);
+        Dictionary<int, PdfLayoutPath> pathsByIndex = paths.ToDictionary(static path => path.Index);
+        HashSet<int> emittedImages = [];
+        HashSet<int> emittedPaths = [];
+        List<PdfLayoutPath> pathBatch = [];
+        int batchIndex = 0;
+
+        void FlushPaths()
+        {
+            if (pathBatch.Count == 0)
+            {
+                return;
+            }
+
+            WriteVectorContent(
+                html,
+                pathBatch,
+                page.VectorGroups,
+                clipIdPrefix + "-paint-" + batchIndex.ToString(CultureInfo.InvariantCulture));
+            foreach (PdfLayoutPath path in pathBatch)
+            {
+                emittedPaths.Add(path.Index);
+            }
+
+            pathBatch.Clear();
+            batchIndex++;
+        }
+
+        foreach (PdfLayoutPaintOperation operation in page.PaintOperations)
+        {
+            if (operation.Kind == PdfLayoutPaintOperationKind.Path)
+            {
+                if (pathsByIndex.TryGetValue(operation.Index, out PdfLayoutPath? path))
+                {
+                    pathBatch.Add(path);
+                }
+
+                continue;
+            }
+
+            if (operation.Kind != PdfLayoutPaintOperationKind.Image ||
+                !imagesByIndex.TryGetValue(operation.Index, out PdfLayoutImage? image))
+            {
+                continue;
+            }
+
+            FlushPaths();
+            if (imageAssets.TryGetValue(image.AssetId, out PdfLayoutImageAsset? asset))
+            {
+                WriteSvgImage(html, page, image, asset);
+                emittedImages.Add(image.Index);
+            }
+        }
+
+        FlushPaths();
+        foreach (PdfLayoutImage image in images.Where(image => !emittedImages.Contains(image.Index)))
+        {
+            if (imageAssets.TryGetValue(image.AssetId, out PdfLayoutImageAsset? asset))
+            {
+                WriteSvgImage(html, page, image, asset);
+            }
+        }
+
+        PdfLayoutPath[] remainingPaths = paths
+            .Where(path => !emittedPaths.Contains(path.Index))
+            .ToArray();
+        if (remainingPaths.Length > 0)
+        {
+            WriteVectorContent(
+                html,
+                remainingPaths,
+                page.VectorGroups,
+                clipIdPrefix + "-remaining");
+        }
+    }
+
     private static bool IsLocalizedFigureDecoration(
         PdfLayoutRectangle decoration,
         PdfLayoutRectangle figure)
@@ -9251,7 +9453,9 @@ public static class PdfHtmlConverter
         return page.Paths
             .Where(path => !IsSemanticFlowRulePath(page, semanticPage, path))
             .Where(path => path.Bounds.Width > 0.1f || path.Bounds.Height > 0.1f)
-            .Where(path => !IsCoveredByTransparencyFallback(page, path.Bounds))
+            .Where(static path => !RequiresShapeAlphaFallback(path))
+            .Where(static path => !path.UsesSoftMask)
+            .Where(path => !IsCoveredByVisualFallback(page, path.Bounds))
             .Where(path => RectanglesIntersect(path.Bounds, region, 2f));
     }
 
@@ -9264,7 +9468,10 @@ public static class PdfHtmlConverter
             .Where(run => includeAllText || IsFigureLabelRun(run))
             .Where(run => !IsUnpaintedTextRun(run))
             .Where(run => !IsHorizontalTextInsideInvisibleVectorGroup(page, run))
-            .Where(run => !IsCoveredByTransparencyFallback(page, run.PageBounds))
+            .Where(run => !IsCoveredByVisualFallback(
+                page,
+                run.PageBounds,
+                preserveTextOverComplexArtwork: true))
             .Where(run => RectanglesIntersect(run.PageBounds, region, 2f))
             .OrderBy(static run => run.PageBounds.Y)
             .ThenBy(static run => run.PageBounds.X);
@@ -9454,11 +9661,23 @@ public static class PdfHtmlConverter
             second.Bottom >= first.Y - tolerance;
     }
 
-    private static bool IsCoveredByTransparencyFallback(PdfLayoutPage page, PdfLayoutRectangle bounds)
+    private static bool IsCoveredByVisualFallback(
+        PdfLayoutPage page,
+        PdfLayoutRectangle bounds,
+        bool preserveTextOverComplexArtwork = false)
     {
         return page.Images
-            .Where(static image => image.Kind == PdfLayoutImageKind.TransparencyGroupFallback)
+            .Where(image =>
+                image.Kind == PdfLayoutImageKind.TransparencyGroupFallback ||
+                !preserveTextOverComplexArtwork &&
+                    image.Kind == PdfLayoutImageKind.ComplexArtworkFallback)
             .Any(image => RectanglesIntersect(bounds, image.Bounds, 0));
+    }
+
+    private static bool IsVisualFallbackImage(PdfLayoutImage image)
+    {
+        return image.Kind is PdfLayoutImageKind.TransparencyGroupFallback or
+            PdfLayoutImageKind.ComplexArtworkFallback;
     }
 
     private static PdfLayoutRectangle VisibleImageBounds(PdfLayoutImage image)

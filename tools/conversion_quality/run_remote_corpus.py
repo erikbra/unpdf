@@ -160,7 +160,7 @@ def _parse_document(entry: dict[str, Any], path: Path, index: int) -> RemoteDocu
     expectations = entry.get("expectations")
     if not isinstance(expectations, dict):
         raise ValueError(f"{prefix} expectations must be an object")
-    _validate_expectations(expectations, prefix)
+    _validate_expectations(expectations, prefix, quality_pages)
 
     return RemoteDocument(
         id=document_id,
@@ -175,7 +175,11 @@ def _parse_document(entry: dict[str, Any], path: Path, index: int) -> RemoteDocu
     )
 
 
-def _validate_expectations(expectations: dict[str, Any], prefix: str) -> None:
+def _validate_expectations(
+    expectations: dict[str, Any],
+    prefix: str,
+    quality_pages: int,
+) -> None:
     page_count = expectations.get("pageCount")
     if not isinstance(page_count, int) or isinstance(page_count, bool) or page_count < 1:
         raise ValueError(f"{prefix} expectations.pageCount must be a positive integer")
@@ -342,6 +346,38 @@ def _validate_expectations(expectations: dict[str, Any], prefix: str) -> None:
                 f"{prefix} expectations.semanticFixedLayoutPageNumbers must be a non-empty "
                 "array of unique positive page numbers within pageCount"
             )
+
+    for expectation_name in (
+        "maxPdfMissRatioByPage",
+        "maxSevereColorDeltaRatioByPage",
+    ):
+        maximum_ratios_by_page = expectations.get(expectation_name)
+        if maximum_ratios_by_page is None:
+            continue
+        if not isinstance(maximum_ratios_by_page, dict) or not maximum_ratios_by_page:
+            raise ValueError(
+                f"{prefix} expectations.{expectation_name} must be a non-empty object"
+            )
+        for page_number, maximum in maximum_ratios_by_page.items():
+            if (
+                not isinstance(page_number, str)
+                or not page_number.isdigit()
+                or int(page_number) < 1
+                or int(page_number) > page_count
+                or int(page_number) > quality_pages
+            ):
+                raise ValueError(
+                    f"{prefix} expectations.{expectation_name} keys must be page numbers "
+                    "within pageCount and qualityPages"
+                )
+            if (
+                not isinstance(maximum, (int, float))
+                or isinstance(maximum, bool)
+                or not 0 <= maximum <= 1
+            ):
+                raise ValueError(
+                    f"{prefix} expectations.{expectation_name} values must be ratios from zero to one"
+                )
 
 
 def _validate_https_url(value: str, label: str) -> None:

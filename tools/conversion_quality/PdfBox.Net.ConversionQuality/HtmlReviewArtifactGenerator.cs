@@ -150,6 +150,7 @@ public static class HtmlReviewArtifactGenerator
                 example.Notes))
             .GetAwaiter()
             .GetResult();
+        ValidateQualityExpectations(example, qualityReport);
 
         HtmlReviewExampleResult result = new(
             example.Id,
@@ -324,6 +325,75 @@ public static class HtmlReviewArtifactGenerator
         {
             throw new InvalidOperationException(
                 $"HTML review semantic expectations failed for '{example.Id}': {string.Join("; ", failures)}.");
+        }
+    }
+
+    internal static void ValidateQualityExpectations(
+        HtmlReviewManifestExample example,
+        PdfHtmlQualityReport qualityReport)
+    {
+        Dictionary<int, double> maximumPdfMissRatioByPage =
+            example.Expectations?.MaxPdfMissRatioByPage ?? [];
+        Dictionary<int, double> maximumSevereColorDeltaRatioByPage =
+            example.Expectations?.MaxSevereColorDeltaRatioByPage ?? [];
+        if (maximumPdfMissRatioByPage.Count == 0 &&
+            maximumSevereColorDeltaRatioByPage.Count == 0)
+        {
+            return;
+        }
+
+        List<string> failures = [];
+        ValidateMaximumVisualMetric(
+            example,
+            qualityReport,
+            maximumPdfMissRatioByPage,
+            "PDF foreground miss ratio",
+            static visual => visual.PdfMissRatio,
+            failures);
+        ValidateMaximumVisualMetric(
+            example,
+            qualityReport,
+            maximumSevereColorDeltaRatioByPage,
+            "severe color delta ratio",
+            static visual => visual.SevereColorDeltaRatio,
+            failures);
+        if (failures.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"HTML review visual expectations failed for '{example.Id}': {string.Join("; ", failures)}.");
+        }
+    }
+
+    private static void ValidateMaximumVisualMetric(
+        HtmlReviewManifestExample example,
+        PdfHtmlQualityReport qualityReport,
+        IReadOnlyDictionary<int, double> maximumByPage,
+        string metricName,
+        Func<PdfHtmlVisualMetrics, double?> selector,
+        List<string> failures)
+    {
+        foreach ((int pageNumber, double maximum) in maximumByPage)
+        {
+            if (pageNumber < 1 || !double.IsFinite(maximum) || maximum is < 0 or > 1)
+            {
+                throw new InvalidOperationException(
+                    $"HTML review example '{example.Id}' has an invalid maximum {metricName} expectation for page {pageNumber}.");
+            }
+
+            PdfHtmlVisualMetrics? visual = qualityReport.Pages
+                .FirstOrDefault(page => page.PageNumber == pageNumber)
+                ?.Visual;
+            double? actual = visual is null ? null : selector(visual);
+            if (actual is null)
+            {
+                failures.Add($"{metricName} on page {pageNumber} was unavailable");
+            }
+            else if (actual.Value > maximum)
+            {
+                failures.Add(
+                    $"{metricName} on page {pageNumber} was {actual.Value.ToString("0.####", CultureInfo.InvariantCulture)}, " +
+                    $"expected at most {maximum.ToString("0.####", CultureInfo.InvariantCulture)}");
+            }
         }
     }
 
@@ -1016,4 +1086,8 @@ public sealed class HtmlReviewExpectations
     public Dictionary<int, int> SemanticRuledGridSourceBorderCountsByPage { get; set; } = [];
 
     public List<int> SemanticFixedLayoutPageNumbers { get; set; } = [];
+
+    public Dictionary<int, double> MaxPdfMissRatioByPage { get; set; } = [];
+
+    public Dictionary<int, double> MaxSevereColorDeltaRatioByPage { get; set; } = [];
 }
