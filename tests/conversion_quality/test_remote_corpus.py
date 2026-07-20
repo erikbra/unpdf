@@ -130,8 +130,16 @@ class RemoteCorpusTest(unittest.TestCase):
         )
         bert = next(item for item in documents if item.id == "acl-bert")
         self.assertEqual(2, bert.quality_pages)
+        self.assertEqual(
+            "h1|BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+            bert.expectations["semanticHeadingOutline"][0],
+        )
         unet = next(item for item in documents if item.id == "arxiv-unet")
         self.assertEqual(8, unet.quality_pages)
+        self.assertEqual(
+            ["h2|Acknowlegements", "h2|References"],
+            unet.expectations["semanticHeadingOutline"][-2:],
+        )
         w9 = next(item for item in documents if item.id == "irs-w9")
         self.assertEqual(6, w9.quality_pages)
         self.assertEqual(
@@ -373,6 +381,12 @@ class RemoteCorpusTest(unittest.TestCase):
                 remote_corpus.load_manifest(manifest)
 
             entry["expectations"]["semanticTableCountsByPage"] = {"1": 0}
+            entry["expectations"]["semanticHeadingOutline"] = ["h7|Invalid"]
+            self._write_manifest(manifest, [entry])
+            with self.assertRaisesRegex(ValueError, "hN\\|Heading text"):
+                remote_corpus.load_manifest(manifest)
+
+            entry["expectations"]["semanticHeadingOutline"] = ["h1|Title"]
             entry["expectations"]["semanticFixedLayoutPageNumbers"] = [1, 1]
             self._write_manifest(manifest, [entry])
             with self.assertRaisesRegex(ValueError, "unique positive page numbers"):

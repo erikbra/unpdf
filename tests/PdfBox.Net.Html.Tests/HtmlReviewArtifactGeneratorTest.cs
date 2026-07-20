@@ -520,6 +520,57 @@ public sealed class HtmlReviewArtifactGeneratorTest
     }
 
     [Fact]
+    public void ValidateSemanticExpectations_RequiresStableAccessibleHeadingOutline()
+    {
+        HtmlReviewManifestExample example = new()
+        {
+            Id = "academic-outline",
+            Expectations = new HtmlReviewExpectations
+            {
+                SemanticHeadingOutline =
+                [
+                    "h1|Document title",
+                    "h2|1 Introduction",
+                    "h3|1.1 Background"
+                ]
+            }
+        };
+        PdfHtmlDocument accepted = new(
+            """
+            <html><body>
+              <h1 class="pdf-semantic-heading" id="heading-document-title">Document title</h1>
+              <section class="pdf-semantic-section" aria-labelledby="heading-1-introduction">
+                <h2 class="pdf-semantic-heading" id="heading-1-introduction">1 Introduction</h2>
+                <section class="pdf-semantic-section" aria-labelledby="heading-1-1-background">
+                  <h3 class="pdf-semantic-heading" id="heading-1-1-background">1.1 Background</h3>
+                </section>
+              </section>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+        PdfHtmlDocument rejected = new(
+            """
+            <html><body>
+              <h1 class="pdf-semantic-heading" id="heading-document-title">Document title</h1>
+              <section class="pdf-semantic-section" aria-labelledby="heading-missing">
+                <h1 class="pdf-semantic-heading" id="heading-duplicate">1 Introduction</h1>
+                <h3 class="pdf-semantic-heading" id="heading-duplicate">1.1 Background</h3>
+              </section>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+
+        HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, accepted);
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, rejected));
+        Assert.Contains("semantic heading outline was", exception.Message);
+        Assert.Contains("semantic heading ids were missing or duplicated", exception.Message);
+        Assert.Contains("semantic sections referenced missing headings [heading-missing]", exception.Message);
+    }
+
+    [Fact]
     public void ValidateQualityExpectations_RequiresPerPageVisualAndHeightRatchets()
     {
         PdfHtmlQualityCheck dimensions = new(

@@ -73,6 +73,7 @@ public static class PdfSemanticExtractor
             PdfSemanticInlineInference.Apply(layout.Pages[index], pages[index]);
         }
 
+        pages = PdfSemanticHeadingNormalizer.Normalize(pages);
         return new PdfSemanticDocument(pages);
     }
 

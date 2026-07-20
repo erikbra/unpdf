@@ -1205,7 +1205,7 @@ public sealed class PdfSemanticExtractorTest
         PdfSemanticElement heading = Assert.Single(page.Elements, element =>
             element.Kind == PdfSemanticElementKind.Heading &&
             element.Text == "Standalone Policy Label");
-        Assert.Equal(2, heading.HeadingLevel);
+        Assert.Equal(1, heading.HeadingLevel);
 
         PdfSemanticElement inlineLeadIn = Assert.Single(page.Elements, element =>
             element.Kind == PdfSemanticElementKind.Paragraph &&
