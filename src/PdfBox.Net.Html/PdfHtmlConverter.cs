@@ -1931,7 +1931,13 @@ public static class PdfHtmlConverter
             .Append(page.PageNumber.ToString(CultureInfo.InvariantCulture))
             .Append("\" id=\"page-")
             .Append(page.PageNumber.ToString(CultureInfo.InvariantCulture))
-            .Append("\" style=\"width:")
+            .Append('"');
+        if (additionalClass?.Contains("pdf-semantic-map-figure-page", StringComparison.Ordinal) == true)
+        {
+            html.Append(" role=\"figure\" aria-label=\"Map or diagram\"");
+        }
+
+        html.Append(" style=\"width:")
             .Append(CssPoints(page.Width * scale))
             .Append(";height:")
             .Append(CssPoints(page.Height * scale))
@@ -4439,7 +4445,9 @@ public static class PdfHtmlConverter
                     semanticPage: null,
                     sectionTree: null,
                     textMode: PdfHtmlTextMode.FixedLayout,
-                    additionalClass: "pdf-semantic-layout-fallback-page",
+                    additionalClass: context.IsMapOrDiagram
+                        ? "pdf-semantic-layout-fallback-page pdf-semantic-map-figure-page"
+                        : "pdf-semantic-layout-fallback-page",
                     inferredTextOptions: semanticOptions,
                     fallbackSemanticPage: context.SemanticPage);
                 PdfSemanticElement? documentIndexElement = SemanticDocumentIndexElement(context.SemanticPage);
@@ -4687,14 +4695,15 @@ public static class PdfHtmlConverter
         FootnoteContext? footnotes = null)
     {
         bool hasAuthoredStructure = semanticPage.Elements.Any(static element => element.TaggedStructure != null);
-        PdfSemanticLineGrid? lineGrid = hasAuthoredStructure
+        bool isMapOrDiagram = IsMapOrDiagramDominantPage(page, semanticPage);
+        PdfSemanticLineGrid? lineGrid = hasAuthoredStructure || isMapOrDiagram
             ? null
             : TryCreateSemanticLineGrid(page, semanticPage);
-        PdfSemanticRuledGrid? ruledGrid = hasAuthoredStructure
+        PdfSemanticRuledGrid? ruledGrid = hasAuthoredStructure && !isMapOrDiagram
             ? TryCreateSemanticRuledGrid(page, semanticPage)
             : null;
         PdfSemanticColumns? columns = null;
-        if (lineGrid == null && ruledGrid == null)
+        if (!isMapOrDiagram && lineGrid == null && ruledGrid == null)
         {
             columns = hasAuthoredStructure
                 ? TryCreateAuthoredSemanticColumns(page, semanticPage)
@@ -4722,7 +4731,70 @@ public static class PdfHtmlConverter
             lineGrid,
             columns,
             ruledGrid,
-            RequiresFixedLayoutFallback(page, semanticPage, lineGrid, columns));
+            isMapOrDiagram || RequiresFixedLayoutFallback(page, semanticPage, lineGrid, columns),
+            isMapOrDiagram);
+    }
+
+    private static bool IsMapOrDiagramDominantPage(
+        PdfLayoutPage page,
+        PdfSemanticPage semanticPage)
+    {
+        if (page.Width <= 0 || page.Height <= 0 || page.Lines.Count < 18)
+        {
+            return false;
+        }
+
+        foreach (PdfSemanticElement element in semanticPage.Elements)
+        {
+            if (element.Kind is PdfSemanticElementKind.Bibliography or
+                    PdfSemanticElementKind.DefinitionList or
+                    PdfSemanticElementKind.CodeBlock or
+                    PdfSemanticElementKind.Algorithm ||
+                IsFigureCaption(element))
+            {
+                return false;
+            }
+        }
+
+        int textLineCount = 0;
+        int conciseLabels = 0;
+        float labelLeft = page.Width;
+        float labelTop = page.Height;
+        float labelRight = 0;
+        float labelBottom = 0;
+        foreach (PdfTextLine line in page.Lines)
+        {
+            if (string.IsNullOrWhiteSpace(line.Text) ||
+                line.Bounds.Width <= 0.1f ||
+                line.Bounds.Height <= 0.1f)
+            {
+                continue;
+            }
+
+            textLineCount++;
+            if (line.Text.Length <= 56 && CountWords(line.Text) <= 7)
+            {
+                conciseLabels++;
+            }
+
+            labelLeft = MathF.Min(labelLeft, line.Bounds.X);
+            labelTop = MathF.Min(labelTop, line.Bounds.Y);
+            labelRight = MathF.Max(labelRight, line.Bounds.Right);
+            labelBottom = MathF.Max(labelBottom, line.Bounds.Bottom);
+        }
+
+        if (textLineCount < 18 ||
+            conciseLabels < 18 ||
+            conciseLabels < textLineCount * 0.6f ||
+            labelRight - labelLeft < page.Width * 0.62f ||
+            labelBottom - labelTop < page.Height * 0.5f)
+        {
+            return false;
+        }
+
+        return HasFullPageVectorBackdrop(page) ||
+            page.Images.Count >= 8 ||
+            page.Paths.Count >= 40;
     }
 
     private static bool RequiresFixedLayoutFallback(
@@ -17313,7 +17385,8 @@ public static class PdfHtmlConverter
             PdfSemanticLineGrid? lineGrid,
             PdfSemanticColumns? columns,
             PdfSemanticRuledGrid? ruledGrid,
-            bool usesFixedLayoutFallback)
+            bool usesFixedLayoutFallback,
+            bool isMapOrDiagram)
         {
             Page = page;
             SemanticPage = semanticPage;
@@ -17325,6 +17398,7 @@ public static class PdfHtmlConverter
             Columns = columns;
             RuledGrid = ruledGrid;
             UsesFixedLayoutFallback = usesFixedLayoutFallback;
+            IsMapOrDiagram = isMapOrDiagram;
         }
 
         public PdfLayoutPage Page { get; }
@@ -17346,6 +17420,8 @@ public static class PdfHtmlConverter
         public PdfSemanticRuledGrid? RuledGrid { get; }
 
         public bool UsesFixedLayoutFallback { get; }
+
+        public bool IsMapOrDiagram { get; }
     }
 
     private readonly record struct SemanticAsideSourceDecoration(

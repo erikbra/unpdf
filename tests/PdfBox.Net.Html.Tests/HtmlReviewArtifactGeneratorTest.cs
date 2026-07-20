@@ -470,8 +470,65 @@ public sealed class HtmlReviewArtifactGeneratorTest
     }
 
     [Fact]
-    public void ValidateQualityExpectations_RequiresPerPageForegroundAndColorRatchets()
+    public void ValidateSemanticExpectations_RequiresExactHeadingAndTableCountsByPage()
     {
+        HtmlReviewManifestExample example = new()
+        {
+            Id = "map-structure",
+            Expectations = new HtmlReviewExpectations
+            {
+                SemanticHeadingCountsByPage = new Dictionary<int, int>
+                {
+                    [1] = 0,
+                    [2] = 1
+                },
+                SemanticTableCountsByPage = new Dictionary<int, int>
+                {
+                    [1] = 0,
+                    [2] = 1
+                }
+            }
+        };
+        PdfHtmlDocument accepted = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-page-break" data-page-number="1"></div>
+              <p>Map labels remain spatial text.</p>
+              <div class="pdf-semantic-page-break" data-page-number="2"></div>
+              <section><h2>Ordinary section</h2><table><tr><td>Value</td></tr></table></section>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+        PdfHtmlDocument rejected = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-page-break" data-page-number="1"></div>
+              <section><h1>False map heading</h1><table><tr><td>False legend table</td></tr></table></section>
+              <div class="pdf-semantic-page-break" data-page-number="2"></div>
+              <section><h2>Ordinary section</h2><table><tr><td>Value</td></tr></table></section>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+
+        HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, accepted);
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, rejected));
+        Assert.Contains("semantic heading count on page 1 was 1, expected 0", exception.Message);
+        Assert.Contains("semantic table count on page 1 was 1, expected 0", exception.Message);
+    }
+
+    [Fact]
+    public void ValidateQualityExpectations_RequiresPerPageVisualAndHeightRatchets()
+    {
+        PdfHtmlQualityCheck dimensions = new(
+            "page-dimensions",
+            "layout",
+            "passed",
+            1,
+            "Synthetic dimensions.",
+            new Dictionary<string, double> { ["heightRatio"] = 1.0 });
         PdfHtmlQualityPageReport page = new(
             1,
             "ok",
@@ -501,7 +558,7 @@ public sealed class HtmlReviewArtifactGeneratorTest
                 1.5,
                 0.04,
                 0.95),
-            [],
+            [dimensions],
             []);
         PdfHtmlQualityReport report = new(
             1,
@@ -522,7 +579,8 @@ public sealed class HtmlReviewArtifactGeneratorTest
             Expectations = new HtmlReviewExpectations
             {
                 MaxPdfMissRatioByPage = new Dictionary<int, double> { [1] = 0.03 },
-                MaxSevereColorDeltaRatioByPage = new Dictionary<int, double> { [1] = 0.05 }
+                MaxSevereColorDeltaRatioByPage = new Dictionary<int, double> { [1] = 0.05 },
+                MaxHtmlHeightRatioByPage = new Dictionary<int, double> { [1] = 1.01 }
             }
         };
 
@@ -534,13 +592,15 @@ public sealed class HtmlReviewArtifactGeneratorTest
             Expectations = new HtmlReviewExpectations
             {
                 MaxPdfMissRatioByPage = new Dictionary<int, double> { [1] = 0.01 },
-                MaxSevereColorDeltaRatioByPage = new Dictionary<int, double> { [1] = 0.03 }
+                MaxSevereColorDeltaRatioByPage = new Dictionary<int, double> { [1] = 0.03 },
+                MaxHtmlHeightRatioByPage = new Dictionary<int, double> { [1] = 0.99 }
             }
         };
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
             HtmlReviewArtifactGenerator.ValidateQualityExpectations(rejected, report));
         Assert.Contains("PDF foreground miss ratio on page 1 was 0.02, expected at most 0.01", exception.Message);
         Assert.Contains("severe color delta ratio on page 1 was 0.04, expected at most 0.03", exception.Message);
+        Assert.Contains("HTML height ratio on page 1 was 1, expected at most 0.99", exception.Message);
     }
 
     [Fact]
