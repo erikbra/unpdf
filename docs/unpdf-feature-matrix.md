@@ -17,7 +17,7 @@ not make semantic HTML structurally identical to the source PDF.
 | Annotation appearances | Raster fallback where supported | Backend-required diagnostic | Planned |
 | Image masks and soft masks | Stencil and soft-mask image assets | Diagnostic/degraded | Planned |
 | Transparency groups and blend modes | Localized raster fallback for compact knockout, complex-blend, and soft-masked vector/text groups | Diagnostic/degraded | Planned |
-| Complex clipping, shadings and overprint | Partial with fallback for some cases | Partial with diagnostics | Planned |
+| Complex clipping, shadings and overprint | Ordered SVG shadings plus bounded fallback for non-rectangular shading clips; other cases partial | Partial with diagnostics | Planned |
 | Tagged structure and accessible semantics | Inferred/preserved where supported | Same | Planned |
 | Encryption | Supported where PdfBox.Net can open the document | Same | Planned |
 | Digital-signature validation | Not provided | Not provided | Not provided |

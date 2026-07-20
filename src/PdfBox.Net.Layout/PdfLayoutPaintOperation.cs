@@ -11,5 +11,6 @@ public readonly record struct PdfLayoutPaintOperation(PdfLayoutPaintOperationKin
 public enum PdfLayoutPaintOperationKind
 {
     Image,
-    Path
+    Path,
+    Shading
 }

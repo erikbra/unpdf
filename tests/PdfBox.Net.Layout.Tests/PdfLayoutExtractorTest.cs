@@ -349,7 +349,11 @@ public class PdfLayoutExtractorTest
 
         PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document);
 
-        PdfLayoutShading extracted = Assert.Single(Assert.Single(layout.Pages).Shadings);
+        PdfLayoutPage layoutPage = Assert.Single(layout.Pages);
+        PdfLayoutShading extracted = Assert.Single(layoutPage.Shadings);
+        Assert.Equal(
+            new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Shading, extracted.Index),
+            Assert.Single(layoutPage.PaintOperations));
         Assert.Equal(PDShading.SHADING_TYPE2, extracted.ShadingType);
         Assert.Equal(100, extracted.StartX, 3);
         Assert.Equal(392, extracted.StartY, 3);
@@ -386,6 +390,9 @@ public class PdfLayoutExtractorTest
         Assert.Contains(extracted.Triangles, triangle => triangle.Color.Red > triangle.Color.Blue);
         Assert.Contains(extracted.Triangles, triangle => triangle.Color.Blue > triangle.Color.Red);
         Assert.DoesNotContain(layoutPage.Diagnostics, diagnostic => diagnostic.Code == "shading-type-unsupported");
+        Assert.Equal(
+            new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Shading, extracted.Index),
+            Assert.Single(layoutPage.PaintOperations));
     }
 
     [Fact]

@@ -470,6 +470,80 @@ public sealed class HtmlReviewArtifactGeneratorTest
     }
 
     [Fact]
+    public void ValidateQualityExpectations_RequiresPerPageForegroundAndColorRatchets()
+    {
+        PdfHtmlQualityPageReport page = new(
+            1,
+            "ok",
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            new PdfHtmlVisualMetrics(
+                800,
+                600,
+                800,
+                600,
+                "synthetic",
+                true,
+                0.01,
+                0.02,
+                0.01,
+                1.5,
+                0.04,
+                0.95),
+            [],
+            []);
+        PdfHtmlQualityReport report = new(
+            1,
+            "ok",
+            "source.pdf",
+            "index.html",
+            "",
+            "layout",
+            1,
+            [],
+            [],
+            [],
+            [page],
+            []);
+        HtmlReviewManifestExample accepted = new()
+        {
+            Id = "visual-ratchets",
+            Expectations = new HtmlReviewExpectations
+            {
+                MaxPdfMissRatioByPage = new Dictionary<int, double> { [1] = 0.03 },
+                MaxSevereColorDeltaRatioByPage = new Dictionary<int, double> { [1] = 0.05 }
+            }
+        };
+
+        HtmlReviewArtifactGenerator.ValidateQualityExpectations(accepted, report);
+
+        HtmlReviewManifestExample rejected = new()
+        {
+            Id = "visual-ratchets",
+            Expectations = new HtmlReviewExpectations
+            {
+                MaxPdfMissRatioByPage = new Dictionary<int, double> { [1] = 0.01 },
+                MaxSevereColorDeltaRatioByPage = new Dictionary<int, double> { [1] = 0.03 }
+            }
+        };
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            HtmlReviewArtifactGenerator.ValidateQualityExpectations(rejected, report));
+        Assert.Contains("PDF foreground miss ratio on page 1 was 0.02, expected at most 0.01", exception.Message);
+        Assert.Contains("severe color delta ratio on page 1 was 0.04, expected at most 0.03", exception.Message);
+    }
+
+    [Fact]
     public void Generate_FailsWhenStableLayoutExpectationsAreNotMet()
     {
         using TempDirectory tempDirectory = new();

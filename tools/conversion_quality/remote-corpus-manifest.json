@@ -563,9 +563,26 @@
           "nist",
           "ieee754"
         ],
-        "minTextRuns": 150,
-        "minImagePlacements": 30,
-        "minVectorPaths": 80
+    "minTextRuns": 150,
+    "minImagePlacements": 30,
+    "minVectorPaths": 80,
+    "semanticFixedLayoutPageNumbers": [
+      1,
+      2,
+      3,
+      5,
+      6,
+      7,
+      8,
+      10,
+      11,
+      12,
+      13
+    ],
+    "maxPdfMissRatioByPage": {
+      "1": 0.01,
+      "2": 0.01
+    }
       }
     },
     {
@@ -614,9 +631,15 @@
           "european union",
           "learning the lessons of history"
         ],
-        "minTextRuns": 1500,
-        "minImagePlacements": 22,
-        "minVectorPaths": 7000
+    "minTextRuns": 1500,
+    "minImagePlacements": 22,
+    "minVectorPaths": 7000,
+    "minImagePlacementsByPage": {
+      "1": 3
+    },
+    "maxSevereColorDeltaRatioByPage": {
+      "1": 0.05
+    }
       }
     },
     {

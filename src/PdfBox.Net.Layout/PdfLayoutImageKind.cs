@@ -24,5 +24,11 @@ public enum PdfLayoutImageKind
     /// Rasterized fallback for a compact PDF transparency group whose compositing cannot be represented by
     /// independent HTML SVG paths.
     /// </summary>
-    TransparencyGroupFallback
+    TransparencyGroupFallback,
+
+    /// <summary>
+    /// Rasterized fallback for a compact artwork region that uses PDF compositing which cannot be represented
+    /// faithfully by independent HTML SVG paths.
+    /// </summary>
+    ComplexArtworkFallback
 }

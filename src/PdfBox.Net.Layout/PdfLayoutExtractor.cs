@@ -627,6 +627,7 @@ public static class PdfLayoutExtractor
         private readonly List<SoftMaskedTransparencyGroup> _softMaskedTransparencyGroups = new();
         private readonly List<PdfLayoutRectangle> _transparencyGroupFallbackBounds = new();
         private readonly List<PdfLayoutRectangle> _softMaskedTransparencyGroupFallbackBounds = new();
+        private readonly List<PdfLayoutRectangle> _complexArtworkFallbackBounds = new();
         private readonly HashSet<PdfLayoutRectangle> _representedSoftMaskedTransparencyGroupBounds = [];
         private bool _transparencyGroupFallbacksCollected;
 
@@ -1373,6 +1374,8 @@ public static class PdfLayoutExtractor
                         ExpandIsolatedDeviceCmykBlendGroupBounds));
                 _softMaskedTransparencyGroupFallbackBounds.AddRange(
                     collector.SoftMaskedTransparencyGroupFallbackBounds);
+                _complexArtworkFallbackBounds.AddRange(
+                    collector.ComplexArtworkFallbackBounds);
             }
         }
 
@@ -1388,13 +1391,31 @@ public static class PdfLayoutExtractor
                 .Where(bounds => !_representedSoftMaskedTransparencyGroupBounds.Contains(bounds))
                 .Select(ExpandSoftMaskedTransparencyGroupBounds)
                 .ToArray();
-            CollectTransparencyGroupFallbacks(
+            CollectVisualFallbacks(
                 _transparencyGroupFallbackBounds.Concat(softMaskedBounds).ToArray(),
+                PdfLayoutImageKind.TransparencyGroupFallback,
+                "transparency-group",
                 renderFullPage: softMaskedBounds.Length > 0);
+
+            PdfLayoutRectangle[] complexArtworkBounds = _complexArtworkFallbackBounds
+                .Select(ExpandComplexArtworkFallbackBounds)
+                .Where(bounds => !_images
+                    .Where(static image =>
+                        image.Kind is PdfLayoutImageKind.TransparencyGroupFallback or
+                            PdfLayoutImageKind.ComplexArtworkFallback)
+                    .Any(image => RectanglesTouch(image.Bounds, bounds, 2f)))
+                .ToArray();
+            CollectVisualFallbacks(
+                complexArtworkBounds,
+                PdfLayoutImageKind.ComplexArtworkFallback,
+                "complex-artwork",
+                renderFullPage: false);
         }
 
-        private void CollectTransparencyGroupFallbacks(
+        private void CollectVisualFallbacks(
             IReadOnlyList<PdfLayoutRectangle> groupBounds,
+            PdfLayoutImageKind fallbackKind,
+            string sourceName,
             bool renderFullPage = false)
         {
             PdfLayoutRectangle[] fallbackBounds = MergeTransparencyGroupBounds(groupBounds)
@@ -1405,11 +1426,14 @@ public static class PdfLayoutExtractor
                 return;
             }
 
+            bool isComplexArtwork = fallbackKind == PdfLayoutImageKind.ComplexArtworkFallback;
+            string diagnosticPrefix = isComplexArtwork ? "complex-artwork" : "transparency-group";
+            string fallbackDescription = isComplexArtwork ? "Complex-artwork" : "Transparency-group";
             if (!RenderingBackend.IsRegistered)
             {
                 HandleFallbackExportFailure(
-                    "transparency-group-rasterization-backend-missing",
-                    "Transparency-group fallback rendering requires a registered rendering backend.",
+                    diagnosticPrefix + "-rasterization-backend-missing",
+                    fallbackDescription + " fallback rendering requires a registered rendering backend.",
                     backendMissing: true);
                 return;
             }
@@ -1417,8 +1441,8 @@ public static class PdfLayoutExtractor
             if (_rotation != 0)
             {
                 HandleFallbackExportFailure(
-                    "transparency-group-rasterization-rotation-unsupported",
-                    "Transparency-group raster fallbacks are not collected for rotated pages yet.",
+                    diagnosticPrefix + "-rasterization-rotation-unsupported",
+                    fallbackDescription + " raster fallbacks are not collected for rotated pages yet.",
                     backendMissing: false);
                 return;
             }
@@ -1441,7 +1465,7 @@ public static class PdfLayoutExtractor
                             pageBounds,
                             bounds,
                             TransparencyGroupRasterScale);
-                        AddTransparencyGroupFallback(image, bounds, fallbackIndex);
+                        AddVisualFallback(image, bounds, fallbackIndex, fallbackKind, sourceName);
                     }
 
                     return;
@@ -1456,7 +1480,12 @@ public static class PdfLayoutExtractor
                     if (batch.FallbackIndexes.Count == 1)
                     {
                         int fallbackIndex = batch.FallbackIndexes[0];
-                        AddTransparencyGroupFallback(renderedRegion, fallbackBounds[fallbackIndex], fallbackIndex);
+                        AddVisualFallback(
+                            renderedRegion,
+                            fallbackBounds[fallbackIndex],
+                            fallbackIndex,
+                            fallbackKind,
+                            sourceName);
                         continue;
                     }
 
@@ -1468,15 +1497,15 @@ public static class PdfLayoutExtractor
                             batch.Bounds,
                             bounds,
                             TransparencyGroupRasterScale);
-                        AddTransparencyGroupFallback(image, bounds, fallbackIndex);
+                        AddVisualFallback(image, bounds, fallbackIndex, fallbackKind, sourceName);
                     }
                 }
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException or NotSupportedException)
             {
                 HandleFallbackExportFailure(
-                    "transparency-group-rasterization-failed",
-                    "Transparency-group fallback rendering failed: " + ex.Message,
+                    diagnosticPrefix + "-rasterization-failed",
+                    fallbackDescription + " fallback rendering failed: " + ex.Message,
                     backendMissing: false,
                     exception: ex);
             }
@@ -1503,6 +1532,16 @@ public static class PdfLayoutExtractor
         }
 
         private PdfLayoutRectangle ExpandSoftMaskedTransparencyGroupBounds(PdfLayoutRectangle bounds)
+        {
+            const float padding = 1f;
+            float left = MathF.Max(0, bounds.X - padding);
+            float top = MathF.Max(0, bounds.Y - padding);
+            float right = MathF.Min(_width, bounds.Right + padding);
+            float bottom = MathF.Min(_height, bounds.Bottom + padding);
+            return new PdfLayoutRectangle(left, top, right - left, bottom - top);
+        }
+
+        private PdfLayoutRectangle ExpandComplexArtworkFallbackBounds(PdfLayoutRectangle bounds)
         {
             const float padding = 1f;
             float left = MathF.Max(0, bounds.X - padding);
@@ -1675,19 +1714,21 @@ public static class PdfLayoutExtractor
             return new ScaledImageRegion(left, top, right, bottom);
         }
 
-        private void AddTransparencyGroupFallback(
+        private void AddVisualFallback(
             BufferedImage image,
             PdfLayoutRectangle bounds,
-            int fallbackIndex)
+            int fallbackIndex,
+            PdfLayoutImageKind fallbackKind,
+            string sourceName)
         {
-            string preferredAssetId = $"page-{_pageNumber.ToString(CultureInfo.InvariantCulture)}-transparency-group-{fallbackIndex.ToString(CultureInfo.InvariantCulture)}";
+            string preferredAssetId = $"page-{_pageNumber.ToString(CultureInfo.InvariantCulture)}-{sourceName}-{fallbackIndex.ToString(CultureInfo.InvariantCulture)}";
             byte[] data = RenderingBackend.Current.ImageCodec.Encode(image, EncodedImageFormat.Png, 100);
             PdfLayoutImageAsset asset = _imageAssets.Add(preferredAssetId, "png", "image/png", data);
             int index = _images.Count;
             _images.Add(new PdfLayoutImage(
                 index,
                 asset.AssetId,
-                PdfLayoutImageKind.TransparencyGroupFallback,
+                fallbackKind,
                 bounds,
                 new PdfLayoutTransform(1, 0, 0, 1, bounds.X, bounds.Y),
                 image.Width,
@@ -1695,7 +1736,7 @@ public static class PdfLayoutExtractor
                 8,
                 "DeviceRGB",
                 true,
-                "transparency-group"));
+                sourceName));
             _paintOperations.Add(new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Image, index));
         }
 
@@ -2610,8 +2651,11 @@ public static class PdfLayoutExtractor
         private readonly List<PdfLayoutRectangle> _knockoutTransparencyGroupBounds = new();
         private readonly List<PdfLayoutRectangle> _isolatedDeviceCmykBlendGroupBounds = new();
         private readonly List<PdfLayoutRectangle> _softMaskedTransparencyGroupFallbackBounds = new();
+        private readonly List<PdfLayoutRectangle> _complexArtworkFallbackBounds = new();
         private readonly List<SoftMaskedTransparencyGroup> _softMaskedTransparencyGroups = new();
         private bool _reportedShapeAlphaPath;
+        private bool _reportedPatternPath;
+        private bool _reportedComplexShadingClip;
         private int _nextVectorGroupIndex;
         private readonly HashSet<int> _reportedUnsupportedShadingTypes = [];
         private bool _reportedRotatedPath;
@@ -2660,6 +2704,9 @@ public static class PdfLayoutExtractor
 
         public IReadOnlyList<PdfLayoutRectangle> SoftMaskedTransparencyGroupFallbackBounds =>
             _softMaskedTransparencyGroupFallbackBounds;
+
+        public IReadOnlyList<PdfLayoutRectangle> ComplexArtworkFallbackBounds =>
+            _complexArtworkFallbackBounds;
 
         public IReadOnlyList<SoftMaskedTransparencyGroup> SoftMaskedTransparencyGroups => _softMaskedTransparencyGroups;
 
@@ -3324,6 +3371,7 @@ public static class PdfLayoutExtractor
             IReadOnlyList<PdfLayoutClipPath> clipPaths = AdditionalPathClipPaths(graphicsState);
             PDColor fillSource = graphicsState.GetNonStrokingColor();
             float fillAlpha = graphicsState.GetNonStrokeAlphaConstant();
+            bool usesPatternFill = includeFill && fillSource.GetColorSpace() is PDPattern;
             int? precomposedBackdropPathIndex = null;
             PdfLayoutColor? containingBackdropFill = null;
             bool composedDeviceN = false;
@@ -3434,14 +3482,28 @@ public static class PdfLayoutExtractor
             bool requiresShapeAlphaFallback = usesShapeAlpha &&
                 ((includeFill && graphicsState.GetNonStrokeAlphaConstant() < 0.999f) ||
                     (includeStroke && graphicsState.GetAlphaConstant() < 0.999f));
-            if (requiresShapeAlphaFallback && !_reportedShapeAlphaPath)
+            if (requiresShapeAlphaFallback || usesPatternFill)
             {
-                _diagnostics.Add(new PdfLayoutDiagnostic(
-                    PdfLayoutDiagnosticSeverity.Warning,
-                    "shape-alpha-vector-unsupported",
-                    "A vector path uses PDF shape-alpha compositing. The HTML converter omits the unsupported vector path instead of rendering an incorrect solid opacity effect.",
-                    _pageNumber));
-                _reportedShapeAlphaPath = true;
+                _complexArtworkFallbackBounds.Add(bounds);
+                if (requiresShapeAlphaFallback && !_reportedShapeAlphaPath)
+                {
+                    _diagnostics.Add(new PdfLayoutDiagnostic(
+                        PdfLayoutDiagnosticSeverity.Warning,
+                        "shape-alpha-vector-unsupported",
+                        "A vector path uses PDF shape-alpha compositing. Direct SVG cannot preserve that compositing, so image-enabled extraction uses a bounded artwork fallback.",
+                        _pageNumber));
+                    _reportedShapeAlphaPath = true;
+                }
+
+                if (usesPatternFill && !_reportedPatternPath)
+                {
+                    _diagnostics.Add(new PdfLayoutDiagnostic(
+                        PdfLayoutDiagnosticSeverity.Warning,
+                        "pattern-fill-vector-unsupported",
+                        "A vector path uses a PDF pattern fill. Direct SVG cannot preserve the pattern, so image-enabled extraction uses a bounded artwork fallback.",
+                        _pageNumber));
+                    _reportedPatternPath = true;
+                }
             }
             foreach (List<PdfLayoutRectangle> groupContentBounds in _vectorGroupContentBounds)
             {
@@ -4210,14 +4272,16 @@ public static class PdfLayoutExtractor
             PdfLayoutRectangle bounds = CurrentClipBounds(graphicsState)
                 ?? ShadingBounds(shading, ctm)
                 ?? new PdfLayoutRectangle(0, 0, _cropBox.Width, _cropBox.Height);
+            CollectComplexShadingClipFallback(graphicsState, bounds);
             PdfLayoutGradientStop[] stops = CreateShadingStops(shading, graphicsState.GetNonStrokeAlphaConstant());
             if (stops.Length < 2 || bounds.Width <= 0 || bounds.Height <= 0)
             {
                 return;
             }
 
+            int shadingIndex = _shadings.Count;
             _shadings.Add(new PdfLayoutShading(
-                _shadings.Count,
+                shadingIndex,
                 shading.GetShadingType(),
                 bounds,
                 startX,
@@ -4227,6 +4291,8 @@ public static class PdfLayoutExtractor
                 endY,
                 endRadius,
                 stops));
+            _paintOperations.Add(
+                new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Shading, shadingIndex));
         }
 
         private void CollectTensorShading(PDShadingType7 shading)
@@ -4308,8 +4374,10 @@ public static class PdfLayoutExtractor
             }
 
             PdfLayoutRectangle bounds = CurrentClipBounds(graphicsState) ?? TriangleBounds(triangles);
+            CollectComplexShadingClipFallback(graphicsState, bounds);
+            int shadingIndex = _shadings.Count;
             _shadings.Add(new PdfLayoutShading(
-                _shadings.Count,
+                shadingIndex,
                 shading.GetShadingType(),
                 bounds,
                 0,
@@ -4320,6 +4388,67 @@ public static class PdfLayoutExtractor
                 0,
                 [],
                 triangles));
+            _paintOperations.Add(
+                new PdfLayoutPaintOperation(PdfLayoutPaintOperationKind.Shading, shadingIndex));
+        }
+
+        private void CollectComplexShadingClipFallback(
+            PDGraphicsState graphicsState,
+            PdfLayoutRectangle bounds)
+        {
+            bool hasComplexClip = AdditionalPathClipPaths(graphicsState)
+                .Any(static clipPath => !IsAxisAlignedRectangleClip(clipPath));
+            if (!hasComplexClip)
+            {
+                return;
+            }
+
+            _complexArtworkFallbackBounds.Add(bounds);
+            if (_reportedComplexShadingClip)
+            {
+                return;
+            }
+
+            _diagnostics.Add(new PdfLayoutDiagnostic(
+                PdfLayoutDiagnosticSeverity.Warning,
+                "shading-clip-vector-unsupported",
+                "A PDF shading uses a non-rectangular clipping path. Direct SVG cannot preserve that clipped artwork, so image-enabled extraction uses a bounded artwork fallback.",
+                _pageNumber));
+            _reportedComplexShadingClip = true;
+        }
+
+        private static bool IsAxisAlignedRectangleClip(PdfLayoutClipPath clipPath)
+        {
+            IReadOnlyList<PdfLayoutPathCommand> commands = clipPath.Commands;
+            if (commands.Count != 5 ||
+                commands[0].Kind != PdfLayoutPathCommandKind.MoveTo ||
+                commands[1].Kind != PdfLayoutPathCommandKind.LineTo ||
+                commands[2].Kind != PdfLayoutPathCommandKind.LineTo ||
+                commands[3].Kind != PdfLayoutPathCommandKind.LineTo ||
+                commands[4].Kind != PdfLayoutPathCommandKind.ClosePath)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < 4; index++)
+            {
+                PdfLayoutPathCommand current = commands[index];
+                PdfLayoutPathCommand next = commands[(index + 1) % 4];
+                if (MathF.Abs(current.X1 - next.X1) > 0.01f &&
+                    MathF.Abs(current.Y1 - next.Y1) > 0.01f)
+                {
+                    return false;
+                }
+            }
+
+            return commands.Take(4)
+                    .Select(static command => command.X1)
+                    .DistinctBy(static value => (int)MathF.Round(value * 100f))
+                    .Count() == 2 &&
+                commands.Take(4)
+                    .Select(static command => command.Y1)
+                    .DistinctBy(static value => (int)MathF.Round(value * 100f))
+                    .Count() == 2;
         }
 
         private static TensorPatchData? ReadTensorPatch(

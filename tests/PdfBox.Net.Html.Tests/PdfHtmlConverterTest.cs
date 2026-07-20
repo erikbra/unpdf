@@ -19,6 +19,7 @@ using PdfBox.Net.PDModel.Graphics;
 using PdfBox.Net.PDModel.Graphics.Color;
 using PdfBox.Net.PDModel.Graphics.Form;
 using PdfBox.Net.PDModel.Graphics.Image;
+using PdfBox.Net.PDModel.Graphics.Shading;
 using PdfBox.Net.PDModel.Graphics.State;
 using PdfBox.Net.PDModel.Interactive.Action;
 using PdfBox.Net.PDModel.Interactive.Annotation;
@@ -1201,6 +1202,123 @@ public class PdfHtmlConverterTest
         Assert.DoesNotContain("MASKED", visibleText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Convert_ComplexArtworkFallback_PreservesShapeAlphaRegionAndSelectableText()
+    {
+        using PDDocument document = CreateShapeAlphaArtworkDocument();
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true,
+            IncludeTransparencyGroupFallbacks = true
+        });
+
+        PdfLayoutPage layoutPage = Assert.Single(layout.Pages);
+        PdfLayoutImage fallback = Assert.Single(
+            layoutPage.Images,
+            static image => image.Kind == PdfLayoutImageKind.ComplexArtworkFallback);
+        Assert.Equal("complex-artwork", fallback.SourceName);
+        Assert.InRange(fallback.Bounds.Width, 121.9f, 122.1f);
+        Assert.InRange(fallback.Bounds.Height, 61.9f, 62.1f);
+        Assert.Contains(
+            layoutPage.Diagnostics,
+            static diagnostic => diagnostic.Code == "shape-alpha-vector-unsupported");
+
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout);
+        XDocument dom = ParseHtml(html.Html);
+        XElement fallbackImage = Assert.Single(
+            ElementsByClass(dom, "pdf-image"),
+            element => element.Attribute("data-source-name")?.Value == "complex-artwork");
+        Assert.Contains("Selectable outside artwork", dom.Root!.Value, StringComparison.Ordinal);
+        Assert.Contains("Selectable artwork label", dom.Root.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            dom.Descendants(),
+            element => element.Name.LocalName == "path" &&
+                element.Attribute("data-path-index") is not null);
+        Assert.Equal(
+            fallback.AssetId,
+            fallbackImage.Attribute("data-asset-id")?.Value);
+
+        using TempDirectory tempDirectory = new();
+        html.WriteToDirectory(tempDirectory.Path);
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage page = await browser.NewPageAsync(new BrowserNewPageOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1000,
+                Height = 1200
+            }
+        });
+        await page.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+
+        BrowserRenderComparison comparison = await CompareRenderedGeometryAsync(document, layout, page);
+        Assert.True(comparison.Mismatches.Count == 0, string.Join(Environment.NewLine, comparison.Mismatches));
+        Assert.True(await page.GetByText("Selectable outside artwork", new PageGetByTextOptions
+        {
+            Exact = true
+        }).IsVisibleAsync());
+        Assert.True(await page.GetByText("Selectable artwork label", new PageGetByTextOptions
+        {
+            Exact = true
+        }).IsVisibleAsync());
+    }
+
+    [Fact]
+    public async Task Convert_ComplexArtworkFallback_PreservesNonRectangularShadingClip()
+    {
+        using PDDocument document = CreateComplexClippedShadingArtworkDocument();
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true,
+            IncludeTransparencyGroupFallbacks = true
+        });
+
+        PdfLayoutPage layoutPage = Assert.Single(layout.Pages);
+        PdfLayoutImage fallback = Assert.Single(
+            layoutPage.Images,
+            static image => image.Kind == PdfLayoutImageKind.ComplexArtworkFallback);
+        Assert.InRange(fallback.Bounds.Width, 121.9f, 122.1f);
+        Assert.InRange(fallback.Bounds.Height, 61.9f, 62.1f);
+        Assert.Contains(
+            layoutPage.Diagnostics,
+            static diagnostic => diagnostic.Code == "shading-clip-vector-unsupported");
+
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout);
+        XDocument dom = ParseHtml(html.Html);
+        Assert.Single(
+            ElementsByClass(dom, "pdf-image"),
+            element => element.Attribute("data-source-name")?.Value == "complex-artwork");
+        Assert.Contains("Selectable clipped artwork", dom.Root!.Value, StringComparison.Ordinal);
+
+        using TempDirectory tempDirectory = new();
+        html.WriteToDirectory(tempDirectory.Path);
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage page = await browser.NewPageAsync(new BrowserNewPageOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1000,
+                Height = 1200
+            }
+        });
+        await page.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+
+        BrowserRenderComparison comparison = await CompareRenderedGeometryAsync(document, layout, page);
+        Assert.True(comparison.Mismatches.Count == 0, string.Join(Environment.NewLine, comparison.Mismatches));
+        Assert.True(await page.GetByText("Selectable clipped artwork", new PageGetByTextOptions
+        {
+            Exact = true
+        }).IsVisibleAsync());
+    }
+
     [Theory]
     [InlineData(false, 255, 0)]
     [InlineData(true, 0, 255)]
@@ -1482,6 +1600,37 @@ public class PdfHtmlConverterTest
         XElement sparseFallback = Assert.Single(ElementsByClass(sparseDom, "pdf-semantic-layout-fallback-page"));
         Assert.Equal(sparseLayout.Pages[0].Runs.Count, sparseFallback.Descendants()
             .Count(element => HasClass(element, "pdf-text-run")));
+    }
+
+    [Fact]
+    public void Convert_SemanticContinuousFlow_PreservesTaggedGraphicBackdropPages()
+    {
+        using PDDocument document = CreateTaggedGraphicBackdropDocument();
+        PdfLayoutDocument extracted = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+        PdfLayoutDocument layout = WithTaggedParagraphs(
+            extracted,
+            promoteFirstRunToHeading: true);
+
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(html.Html);
+
+        XElement fallbackPage = Assert.Single(
+            ElementsByClass(dom, "pdf-semantic-layout-fallback-page"));
+        Assert.Single(
+            fallbackPage.DescendantsAndSelf(),
+            element => HasClass(element, "pdf-image"));
+        Assert.Equal(
+            extracted.Pages[0].Runs.Count,
+            fallbackPage.DescendantsAndSelf().Count(element => HasClass(element, "pdf-text-run")));
+        Assert.Contains("Tagged graphic cover", fallbackPage.Value, StringComparison.Ordinal);
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-figure"));
     }
 
     [Fact]
@@ -6995,6 +7144,75 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public async Task Convert_OrderedGraphicLayersMatchSourcePixelsInHeadlessBrowser()
+    {
+        using PDDocument document = CreateLayeredArtworkDocument();
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout);
+        XDocument dom = ParseHtml(html.Html);
+        XElement image = Assert.Single(ElementsByClass(dom, "pdf-image"));
+        XElement shading = Assert.Single(ElementsByClass(dom, "pdf-shading-layer"));
+        XElement vector = Assert.Single(ElementsByClass(dom, "pdf-vector-layer"));
+        Assert.Equal("0", ParseStyle(image.Attribute("style")?.Value ?? "")["z-index"]);
+        Assert.Equal("1", ParseStyle(shading.Attribute("style")?.Value ?? "")["z-index"]);
+        Assert.Equal("2", ParseStyle(vector.Attribute("style")?.Value ?? "")["z-index"]);
+
+        using TempDirectory tempDirectory = new();
+        html.WriteToDirectory(tempDirectory.Path);
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage page = await browser.NewPageAsync(new BrowserNewPageOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1000,
+                Height = 1200
+            }
+        });
+        await page.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+
+        BrowserRenderComparison comparison = await CompareRenderedGeometryAsync(document, layout, page);
+        Assert.True(comparison.Mismatches.Count == 0, string.Join(Environment.NewLine, comparison.Mismatches));
+    }
+
+    [Fact]
+    public void Convert_SemanticFigureGraphicsPreserveContentStreamOrder()
+    {
+        using PDDocument document = CreateImageWithVectorBackdropDocument();
+        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        {
+            IncludeImageAssets = true
+        });
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        IReadOnlyDictionary<string, PdfLayoutImageAsset> imageAssets =
+            layout.ImageAssets.ToDictionary(static asset => asset.AssetId);
+        MethodInfo writer = Assert.IsAssignableFrom<MethodInfo>(typeof(PdfHtmlConverter).GetMethod(
+            "WriteSemanticFigureGraphics",
+            BindingFlags.NonPublic | BindingFlags.Static));
+        StringBuilder markup = new();
+
+        writer.Invoke(
+            null,
+            [markup, page, page.Images, page.Paths, imageAssets, "test-figure"]);
+
+        XDocument dom = ParseHtml("<html><body><svg>" + markup + "</svg></body></html>");
+        XElement[] painted = dom.Descendants()
+            .Where(element =>
+                element.Name.LocalName == "image" ||
+                element.Name.LocalName == "path" && element.Attribute("data-path-index") is not null)
+            .ToArray();
+        Assert.Equal(["path", "image", "path"], painted.Select(static element => element.Name.LocalName));
+        Assert.Equal("0", painted[0].Attribute("data-path-index")?.Value);
+        Assert.Equal("1", painted[2].Attribute("data-path-index")?.Value);
+    }
+
+    [Fact]
     public async Task Convert_RenderedImageInHeadlessBrowserMatchesLayoutGeometry()
     {
         using PDDocument document = CreateImageDocument();
@@ -9883,6 +10101,149 @@ public class PdfHtmlConverterTest
             content.DrawImage(image, 72, 600, 120, 60);
         }
 
+        return document;
+    }
+
+    private static PDDocument CreateLayeredArtworkDocument()
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+        PDImageXObject image = LosslessFactory.CreateFromRawData(
+            document,
+            [255, 255, 255],
+            1,
+            1,
+            8,
+            3);
+        COSDictionary functionDictionary = new();
+        functionDictionary.SetInt(COSName.FUNCTION_TYPE, 2);
+        functionDictionary.SetItem(COSName.DOMAIN, COSArray.Of(0f, 1f));
+        functionDictionary.SetItem(COSName.C0, COSArray.Of(0.15f, 0.55f, 0.9f));
+        functionDictionary.SetItem(COSName.C1, COSArray.Of(0.3f, 0.8f, 0.35f));
+        functionDictionary.SetFloat(COSName.N, 1f);
+        PDShadingType2 shading = new(new COSDictionary());
+        shading.SetShadingType(PDShading.SHADING_TYPE2);
+        shading.SetColorSpace(PDDeviceRGB.Instance);
+        shading.SetCoords(COSArray.Of(72f, 630f, 192f, 630f));
+        shading.SetFunction(new PDFunctionType2(functionDictionary));
+
+        using PDPageContentStream content = new(document, page);
+        content.DrawImage(image, 72, 600, 120, 60);
+        content.SaveGraphicsState();
+        content.AddRect(72, 600, 120, 60);
+        content.Clip();
+        content.ShadingFill(shading);
+        content.RestoreGraphicsState();
+        content.SetNonStrokingColor(0f, 0f, 0f);
+        content.AddRect(105, 618, 54, 24);
+        content.Fill();
+        return document;
+    }
+
+    private static PDDocument CreateComplexClippedShadingArtworkDocument()
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+        PDFont font = new PDType1Font(PDType1Font.FontName.HELVETICA);
+        COSDictionary functionDictionary = new();
+        functionDictionary.SetInt(COSName.FUNCTION_TYPE, 2);
+        functionDictionary.SetItem(COSName.DOMAIN, COSArray.Of(0f, 1f));
+        functionDictionary.SetItem(COSName.C0, COSArray.Of(0.15f, 0.55f, 0.9f));
+        functionDictionary.SetItem(COSName.C1, COSArray.Of(0.5f, 0.85f, 0.2f));
+        functionDictionary.SetFloat(COSName.N, 1f);
+        PDShadingType2 shading = new(new COSDictionary());
+        shading.SetShadingType(PDShading.SHADING_TYPE2);
+        shading.SetColorSpace(PDDeviceRGB.Instance);
+        shading.SetCoords(COSArray.Of(72f, 630f, 192f, 630f));
+        shading.SetFunction(new PDFunctionType2(functionDictionary));
+
+        using PDPageContentStream content = new(document, page);
+        content.SetNonStrokingColor(0.85f, 0.9f, 0.95f);
+        content.AddRect(72, 600, 120, 60);
+        content.Fill();
+        content.SaveGraphicsState();
+        content.MoveTo(72, 600);
+        content.LineTo(192, 600);
+        content.LineTo(192, 660);
+        content.LineTo(150, 640);
+        content.LineTo(108, 660);
+        content.LineTo(72, 640);
+        content.ClosePath();
+        content.Clip();
+        content.ShadingFill(shading);
+        content.RestoreGraphicsState();
+        content.SetNonStrokingColor(0f, 0f, 0f);
+        content.AddRect(105, 618, 54, 24);
+        content.Fill();
+        WriteCompositeFixtureLine(
+            content,
+            font,
+            "Selectable clipped artwork",
+            78,
+            620,
+            9);
+        return document;
+    }
+
+    private static PDDocument CreateShapeAlphaArtworkDocument()
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+        PDFont font = new PDType1Font(PDType1Font.FontName.HELVETICA);
+        PDExtendedGraphicsState shapeAlpha = new();
+        shapeAlpha.SetAlphaSourceFlag(true);
+        shapeAlpha.SetNonStrokingAlphaConstant(0.75f);
+        shapeAlpha.SetBlendMode(BlendMode.MULTIPLY);
+        using PDPageContentStream content = new(document, page);
+        content.SetNonStrokingColor(0.15f, 0.55f, 0.9f);
+        content.AddRect(72, 600, 120, 60);
+        content.Fill();
+        content.SaveGraphicsState();
+        content.SetGraphicsStateParameters(shapeAlpha);
+        content.SetNonStrokingColor(0f, 0f, 0f);
+        content.AddRect(72, 600, 120, 60);
+        content.Fill();
+        content.RestoreGraphicsState();
+        content.SetNonStrokingColor(0f, 0f, 0f);
+        WriteCompositeFixtureLine(
+            content,
+            font,
+            "Selectable outside artwork",
+            72,
+            700,
+            12);
+        WriteCompositeFixtureLine(
+            content,
+            font,
+            "Selectable artwork label",
+            78,
+            620,
+            9);
+        return document;
+    }
+
+    private static PDDocument CreateTaggedGraphicBackdropDocument()
+    {
+        PDDocument document = new();
+        PDPage page = new();
+        document.AddPage(page);
+        PDImageXObject backdrop = LosslessFactory.CreateFromRawData(
+            document,
+            [10, 38, 78],
+            1,
+            1,
+            8,
+            3);
+        PDFont font = new PDType1Font(PDType1Font.FontName.HELVETICA_BOLD);
+        using PDPageContentStream content = new(document, page);
+        content.DrawImage(backdrop, 0, 92, 612, 700);
+        content.SetNonStrokingColor(1f, 1f, 1f);
+        WriteCompositeFixtureLine(content, font, "Tagged graphic cover", 54, 700, 28);
+        WriteCompositeFixtureLine(content, font, "Selectable authored subtitle", 180, 610, 18);
+        WriteCompositeFixtureLine(content, font, "2026", 280, 540, 16);
         return document;
     }
 

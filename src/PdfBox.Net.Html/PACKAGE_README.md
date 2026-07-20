@@ -44,6 +44,14 @@ column ownership; forms, spanning ruled tables, and mixed diagram/prose pages
 remain on their conservative layout paths. The generated `PdfHtmlDocument`
 exposes the HTML, CSS, and binary assets directly as well as `WriteToDirectory`.
 
+Sparse tagged slide pages with a page-spanning graphic backdrop stay on the
+fixed-layout path even in continuous semantic output, preserving the slide
+composition while keeping its text selectable. Fixed-layout and cover
+decoration layers emit images, browser-safe vectors, and SVG shadings in source
+paint order. Bounded complex-artwork fallbacks cover only unsupported
+shape-alpha, pattern-fill, or non-rectangular shading-clip regions; text over
+those regions remains live HTML.
+
 For images and raster fallbacks, register a rendering provider such as
 `PdfBox.Net.SkiaSharp` or `PdfBox.Net.ImageMagick` before extraction. Without a
 suitable backend, the layout image policy determines whether unsupported
