@@ -121,24 +121,9 @@ internal static class PdfTaggedSemanticProjector
         }
 
         string? numbering = source.Attributes.ListNumbering;
-        string[] authoredLabels = itemElements
-            .Select(item => item.Children
-                .FirstOrDefault(static child => child.Kind == PdfTaggedStructureKind.ListLabel))
-            .Select(label => label == null ? "" : AuthoredText(label, page.PageNumber).Trim())
-            .ToArray();
-        bool hasNumericLabels = numbering == null &&
-            authoredLabels.Length > 0 &&
-            authoredLabels.All(static marker => ParseListValue(marker).HasValue);
-        PdfSemanticListKind kind = IsOrderedListNumbering(numbering) || hasNumericLabels
-            ? PdfSemanticListKind.Ordered
-            : PdfSemanticListKind.Unordered;
-        PdfSemanticListMarkerKind markerKind = hasNumericLabels
-            ? PdfSemanticListMarkerKind.Decimal
-            : MarkerKind(numbering);
-        List<PdfSemanticListItem> items = [];
-        for (int index = 0; index < itemElements.Length; index++)
+        List<ProjectedTaggedListItem> projectedItems = [];
+        foreach (PdfTaggedStructureElement item in itemElements)
         {
-            PdfTaggedStructureElement item = itemElements[index];
             PdfTaggedStructureElement? label = item.Children
                 .FirstOrDefault(static child => child.Kind == PdfTaggedStructureKind.ListLabel);
             PdfTaggedStructureElement? body = item.Children
@@ -157,16 +142,12 @@ internal static class PdfTaggedSemanticProjector
                 text = string.Join(Environment.NewLine, lines.Select(static line => line.Text));
             }
 
-            string marker = authoredLabels[index];
-            if (marker.Length == 0)
-            {
-                marker = kind == PdfSemanticListKind.Ordered
-                    ? (index + 1).ToString(CultureInfo.InvariantCulture) + "."
-                    : "•";
-            }
-
             PdfSemanticList[] nested = item.Children
                 .Concat(body?.Children ?? [])
+                .Concat(source.Children
+                    .SkipWhile(child => !ReferenceEquals(child, item))
+                    .Skip(1)
+                    .TakeWhile(static child => child.Kind != PdfTaggedStructureKind.ListItem))
                 .Where(static child => child.Kind == PdfTaggedStructureKind.List)
                 .Select(child => CreateList(child, page))
                 .Where(static nestedList => nestedList != null)
@@ -182,22 +163,104 @@ internal static class PdfTaggedSemanticProjector
                 continue;
             }
 
-            items.Add(new PdfSemanticListItem(
+            string authoredMarker = label == null
+                ? ""
+                : AuthoredText(label, page.PageNumber).Trim();
+            DetectedListMarker? embeddedMarker =
+                authoredMarker.Length == 0 &&
+                TryDetectListMarker(
+                    lines.FirstOrDefault()?.Text ?? text,
+                    out DetectedListMarker detected)
+                    ? detected
+                    : null;
+            projectedItems.Add(new ProjectedTaggedListItem(
                 text,
                 itemRuns.Length == 0
                     ? UnionRectangles(nested.SelectMany(static nestedList => nestedList.Items).Select(static nestedItem => nestedItem.Bounds))
                     : PdfLayoutRectangle.Union(itemRuns.Select(static run => run.PageBounds)),
                 lines,
-                marker,
-                // Tagged list bodies are projected without their sibling Lbl
-                // content, so the renderer must not trim a marker prefix from
-                // the first body line.
-                markerLength: 0,
-                value: kind == PdfSemanticListKind.Ordered ? ParseListValue(marker) : null,
-                nestedLists: nested));
+                authoredMarker,
+                embeddedMarker,
+                nested));
         }
 
-        return new PdfSemanticList(kind, markerKind, items);
+        DetectedListMarker?[] detectedMarkers = projectedItems
+            .Select(static item =>
+                item.AuthoredMarker.Length > 0 &&
+                TryDetectListMarker(item.AuthoredMarker, out DetectedListMarker authored)
+                    ? authored
+                    : item.EmbeddedMarker)
+            .ToArray();
+        bool hasUniformDetectedMarkers = detectedMarkers.Length > 0 &&
+            detectedMarkers.All(static marker => marker.HasValue) &&
+            detectedMarkers
+                .Select(static marker => marker!.Value.MarkerKind)
+                .Distinct()
+                .Count() == 1;
+        DetectedListMarker? inferredMarker = hasUniformDetectedMarkers
+            ? detectedMarkers[0]
+            : null;
+        PdfSemanticListKind kind = IsOrderedListNumbering(numbering) ||
+            numbering == null && inferredMarker?.IsOrdered == true
+                ? PdfSemanticListKind.Ordered
+                : PdfSemanticListKind.Unordered;
+        PdfSemanticListMarkerKind markerKind = numbering == null && inferredMarker.HasValue
+            ? inferredMarker.Value.MarkerKind
+            : MarkerKind(numbering);
+        bool mayConsumeEmbeddedMarkers = numbering != null || hasUniformDetectedMarkers;
+        List<PdfSemanticListItem> items = [];
+        for (int index = 0; index < projectedItems.Count; index++)
+        {
+            ProjectedTaggedListItem projected = projectedItems[index];
+            DetectedListMarker? detected = detectedMarkers[index];
+            bool consumesEmbeddedMarker =
+                mayConsumeEmbeddedMarkers &&
+                projected.AuthoredMarker.Length == 0 &&
+                projected.EmbeddedMarker.HasValue &&
+                MarkerMatchesList(projected.EmbeddedMarker.Value, kind, markerKind);
+            int markerLength = consumesEmbeddedMarker
+                ? projected.EmbeddedMarker!.Value.Length
+                : 0;
+            string text = markerLength > 0 && projected.Text.Length >= markerLength
+                ? projected.Text[markerLength..].TrimStart()
+                : projected.Text;
+            string marker = projected.AuthoredMarker;
+            if (marker.Length == 0 && consumesEmbeddedMarker)
+            {
+                marker = projected.EmbeddedMarker!.Value.Marker;
+            }
+
+            if (marker.Length == 0)
+            {
+                marker = kind == PdfSemanticListKind.Ordered
+                    ? (index + 1).ToString(CultureInfo.InvariantCulture) + "."
+                    : "•";
+            }
+
+            int? value = kind == PdfSemanticListKind.Ordered
+                ? numbering == null
+                    ? detected?.Value ?? ParseListValue(marker, markerKind)
+                    : ParseListValue(marker, markerKind)
+                : null;
+            items.Add(new PdfSemanticListItem(
+                text,
+                projected.Bounds,
+                projected.Lines,
+                marker,
+                markerLength,
+                value,
+                projected.NestedLists));
+        }
+
+        int? start = kind == PdfSemanticListKind.Ordered
+            ? items.FirstOrDefault()?.Value
+            : null;
+        if (start == 1)
+        {
+            start = null;
+        }
+
+        return new PdfSemanticList(kind, markerKind, items, start);
     }
 
     private static PdfSemanticElement? CreateTableElement(
@@ -416,11 +479,171 @@ internal static class PdfTaggedSemanticProjector
         _ => PdfSemanticListMarkerKind.Bullet
     };
 
-    private static int? ParseListValue(string marker)
+    private static bool MarkerMatchesList(
+        DetectedListMarker marker,
+        PdfSemanticListKind kind,
+        PdfSemanticListMarkerKind markerKind)
     {
-        string digits = new(marker.TakeWhile(char.IsDigit).ToArray());
-        return int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out int value)
-            ? value
-            : null;
+        if (kind == PdfSemanticListKind.Ordered)
+        {
+            return marker.IsOrdered;
+        }
+
+        return !marker.IsOrdered &&
+            (markerKind == PdfSemanticListMarkerKind.Bullet ||
+                markerKind == marker.MarkerKind);
     }
+
+    private static bool TryDetectListMarker(string text, out DetectedListMarker marker)
+    {
+        marker = default;
+        int start = 0;
+        while (start < text.Length && char.IsWhiteSpace(text[start]))
+        {
+            start++;
+        }
+
+        if (start >= text.Length)
+        {
+            return false;
+        }
+
+        char first = text[start];
+        if (IsBulletMarker(first))
+        {
+            marker = new DetectedListMarker(
+                text[start].ToString(),
+                start + 1,
+                PdfSemanticListMarkerKind.Bullet,
+                null,
+                IsOrdered: false);
+            return true;
+        }
+
+        if (first == '-' && IsMarkerBoundary(text, start + 1))
+        {
+            marker = new DetectedListMarker(
+                "-",
+                start + 1,
+                PdfSemanticListMarkerKind.Hyphen,
+                null,
+                IsOrdered: false);
+            return true;
+        }
+
+        bool parenthesized = first == '(';
+        int valueStart = parenthesized ? start + 1 : start;
+        if (valueStart >= text.Length)
+        {
+            return false;
+        }
+
+        int valueEnd = valueStart;
+        PdfSemanticListMarkerKind markerKind;
+        int? value;
+        if (char.IsDigit(text[valueStart]))
+        {
+            while (valueEnd < text.Length && char.IsDigit(text[valueEnd]))
+            {
+                valueEnd++;
+            }
+
+            markerKind = PdfSemanticListMarkerKind.Decimal;
+            string digits = text[valueStart..valueEnd];
+            value = int.TryParse(
+                digits,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int number)
+                    ? number
+                    : null;
+        }
+        else if (char.IsAsciiLetter(text[valueStart]))
+        {
+            valueEnd++;
+            char letter = text[valueStart];
+            markerKind = char.IsUpper(letter)
+                ? PdfSemanticListMarkerKind.UpperAlpha
+                : PdfSemanticListMarkerKind.LowerAlpha;
+            value = char.ToUpperInvariant(letter) - 'A' + 1;
+        }
+        else
+        {
+            return false;
+        }
+
+        int markerEnd;
+        if (parenthesized)
+        {
+            if (valueEnd >= text.Length || text[valueEnd] != ')')
+            {
+                return false;
+            }
+
+            markerEnd = valueEnd + 1;
+        }
+        else
+        {
+            if (valueEnd >= text.Length || text[valueEnd] is not ('.' or ')'))
+            {
+                return false;
+            }
+
+            markerEnd = valueEnd + 1;
+        }
+
+        marker = new DetectedListMarker(
+            text[start..markerEnd],
+            markerEnd,
+            markerKind,
+            value,
+            IsOrdered: true);
+        return true;
+    }
+
+    private static bool IsMarkerBoundary(string text, int index)
+    {
+        return index >= text.Length || char.IsWhiteSpace(text[index]);
+    }
+
+    private static bool IsBulletMarker(char value)
+    {
+        return value is '•' or '●' or '◦' or '○' or '▪' or '■' or '‣' or '∙' or '·' or '\u0095';
+    }
+
+    private static int? ParseListValue(
+        string marker,
+        PdfSemanticListMarkerKind markerKind)
+    {
+        if (!TryDetectListMarker(marker.Trim(), out DetectedListMarker detected))
+        {
+            return null;
+        }
+
+        return markerKind switch
+        {
+            PdfSemanticListMarkerKind.Decimal
+                when detected.MarkerKind == PdfSemanticListMarkerKind.Decimal => detected.Value,
+            PdfSemanticListMarkerKind.LowerAlpha or PdfSemanticListMarkerKind.UpperAlpha
+                when detected.MarkerKind is
+                    PdfSemanticListMarkerKind.LowerAlpha or
+                    PdfSemanticListMarkerKind.UpperAlpha => detected.Value,
+            _ => null
+        };
+    }
+
+    private sealed record ProjectedTaggedListItem(
+        string Text,
+        PdfLayoutRectangle Bounds,
+        PdfSemanticLine[] Lines,
+        string AuthoredMarker,
+        DetectedListMarker? EmbeddedMarker,
+        PdfSemanticList[] NestedLists);
+
+    private readonly record struct DetectedListMarker(
+        string Marker,
+        int Length,
+        PdfSemanticListMarkerKind MarkerKind,
+        int? Value,
+        bool IsOrdered);
 }

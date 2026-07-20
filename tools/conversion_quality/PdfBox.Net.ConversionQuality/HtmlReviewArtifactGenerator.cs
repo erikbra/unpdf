@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -253,9 +254,15 @@ public static class HtmlReviewArtifactGenerator
             example.Expectations?.SemanticUnorderedListItemCountsByPage ?? [];
         Dictionary<int, int> expectedMixedRegionsByPage =
             example.Expectations?.SemanticMixedRegionCountsByPage ?? [];
+        Dictionary<int, int> expectedRuledGridColumnsByPage =
+            example.Expectations?.SemanticRuledGridColumnCountsByPage ?? [];
+        Dictionary<int, int> expectedRuledGridSourceBordersByPage =
+            example.Expectations?.SemanticRuledGridSourceBorderCountsByPage ?? [];
         if (expectedOrderedByPage.Count == 0 &&
             expectedUnorderedByPage.Count == 0 &&
-            expectedMixedRegionsByPage.Count == 0)
+            expectedMixedRegionsByPage.Count == 0 &&
+            expectedRuledGridColumnsByPage.Count == 0 &&
+            expectedRuledGridSourceBordersByPage.Count == 0)
         {
             return;
         }
@@ -286,11 +293,96 @@ public static class HtmlReviewArtifactGenerator
             dom,
             expectedMixedRegionsByPage,
             failures);
+        ValidateSemanticRuledGridExpectations(
+            example,
+            dom,
+            expectedRuledGridColumnsByPage,
+            failures);
+        ValidateSemanticRuledGridSourceBorderExpectations(
+            example,
+            dom,
+            expectedRuledGridSourceBordersByPage,
+            failures);
 
         if (failures.Count > 0)
         {
             throw new InvalidOperationException(
                 $"HTML review semantic expectations failed for '{example.Id}': {string.Join("; ", failures)}.");
+        }
+    }
+
+    private static void ValidateSemanticRuledGridSourceBorderExpectations(
+        HtmlReviewManifestExample example,
+        XDocument dom,
+        IReadOnlyDictionary<int, int> expectedByPage,
+        List<string> failures)
+    {
+        foreach ((int pageNumber, int expectedCount) in expectedByPage)
+        {
+            if (pageNumber < 1 || expectedCount < 1)
+            {
+                throw new InvalidOperationException(
+                    $"HTML review example '{example.Id}' has an invalid semantic ruled-grid source-border expectation for page {pageNumber}.");
+            }
+
+            int[] actualCounts = dom.Descendants()
+                .Where(element =>
+                    element.Attribute("data-layout")?.Value == "ruled-grid" &&
+                    element.Parent?.Attribute("data-source-page")?.Value ==
+                        pageNumber.ToString(CultureInfo.InvariantCulture))
+                .Select(grid => int.TryParse(
+                    grid.Attribute("data-source-border-count")?.Value,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out int count)
+                        ? count
+                        : 0)
+                .ToArray();
+            if (actualCounts.Length != 1 || actualCounts[0] != expectedCount)
+            {
+                failures.Add(
+                    $"semantic ruled-grid source-border counts on page {pageNumber} were " +
+                    $"[{string.Join(", ", actualCounts)}], expected [{expectedCount}]");
+            }
+        }
+    }
+
+    private static void ValidateSemanticRuledGridExpectations(
+        HtmlReviewManifestExample example,
+        XDocument dom,
+        IReadOnlyDictionary<int, int> expectedByPage,
+        List<string> failures)
+    {
+        foreach ((int pageNumber, int expectedColumnCount) in expectedByPage)
+        {
+            if (pageNumber < 1 || expectedColumnCount < 2)
+            {
+                throw new InvalidOperationException(
+                    $"HTML review example '{example.Id}' has an invalid semantic ruled-grid expectation for page {pageNumber}.");
+            }
+
+            XElement[] grids = dom.Descendants()
+                .Where(element =>
+                    element.Attribute("data-layout")?.Value == "ruled-grid" &&
+                    element.Parent?.Attribute("data-source-page")?.Value ==
+                        pageNumber.ToString(CultureInfo.InvariantCulture))
+                .ToArray();
+            int[] actualColumnCounts = grids
+                .Select(grid => int.TryParse(
+                    grid.Attribute("data-column-count")?.Value,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out int count)
+                        ? count
+                        : 0)
+                .ToArray();
+            if (actualColumnCounts.Length != 1 ||
+                actualColumnCounts[0] != expectedColumnCount)
+            {
+                failures.Add(
+                    $"semantic ruled-grid column counts on page {pageNumber} were " +
+                    $"[{string.Join(", ", actualColumnCounts)}], expected [{expectedColumnCount}]");
+            }
         }
     }
 
@@ -356,10 +448,21 @@ public static class HtmlReviewArtifactGenerator
                 .SingleOrDefault(element =>
                     element.Name.LocalName == "section" &&
                     element.Attribute("data-page-number")?.Value == pageNumber.ToString());
-            int[] actualItemCounts = page?.Descendants()
+            IEnumerable<XElement> lists = page != null
+                ? page.Descendants()
+                : dom.Descendants()
+                    .Where(element =>
+                        element.Attribute("data-source-page")?.Value ==
+                            pageNumber.ToString(CultureInfo.InvariantCulture) &&
+                        element.Attribute("class")?.Value.Split(
+                                ' ',
+                                StringSplitOptions.RemoveEmptyEntries)
+                            .Contains("pdf-semantic-ruled-grid-frame", StringComparer.Ordinal) == true)
+                    .SelectMany(static frame => frame.Descendants());
+            int[] actualItemCounts = lists
                 .Where(element => element.Name.LocalName == tagName)
                 .Select(static list => list.Elements().Count(static item => item.Name.LocalName == "li"))
-                .ToArray() ?? [];
+                .ToArray();
             if (!actualItemCounts.SequenceEqual(expectedItemCounts))
             {
                 failures.Add(
@@ -809,4 +912,8 @@ public sealed class HtmlReviewExpectations
     public Dictionary<int, List<int>> SemanticUnorderedListItemCountsByPage { get; set; } = [];
 
     public Dictionary<int, int> SemanticMixedRegionCountsByPage { get; set; } = [];
+
+    public Dictionary<int, int> SemanticRuledGridColumnCountsByPage { get; set; } = [];
+
+    public Dictionary<int, int> SemanticRuledGridSourceBorderCountsByPage { get; set; } = [];
 }

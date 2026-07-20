@@ -217,10 +217,32 @@
           "verification"
         ],
         "minTextRuns": 400,
-      "minImagePlacements": 5,
-      "minVectorPaths": 240,
-      "minLinks": 5,
-      "minFormControls": 100
+        "minImagePlacements": 5,
+        "minVectorPaths": 240,
+        "minLinks": 5,
+        "minFormControls": 100,
+        "semanticOrderedListItemCountsByPage": {
+          "2": [
+            6,
+            2,
+            2,
+            9,
+            3,
+            7,
+            3
+          ]
+        },
+        "semanticUnorderedListItemCountsByPage": {
+          "2": [
+            3
+          ]
+        },
+        "semanticRuledGridColumnCountsByPage": {
+          "2": 3
+        },
+        "semanticRuledGridSourceBorderCountsByPage": {
+          "2": 26
+        }
       }
     },
     {
