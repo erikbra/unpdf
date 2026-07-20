@@ -75,6 +75,22 @@ class RemoteCorpusTest(unittest.TestCase):
         self.assertEqual(15, nist.quality_pages)
         uscis = next(item for item in documents if item.id == "uscis-i9")
         self.assertEqual(4, uscis.quality_pages)
+        self.assertEqual(
+            {"2": 3},
+            uscis.expectations["semanticRuledGridColumnCountsByPage"],
+        )
+        self.assertEqual(
+            {"2": 26},
+            uscis.expectations["semanticRuledGridSourceBorderCountsByPage"],
+        )
+        self.assertEqual(
+            {"2": [6, 2, 2, 9, 3, 7, 3]},
+            uscis.expectations["semanticOrderedListItemCountsByPage"],
+        )
+        self.assertEqual(
+            {"2": [3]},
+            uscis.expectations["semanticUnorderedListItemCountsByPage"],
+        )
         bert = next(item for item in documents if item.id == "acl-bert")
         self.assertEqual(2, bert.quality_pages)
         unet = next(item for item in documents if item.id == "arxiv-unet")
@@ -281,6 +297,18 @@ class RemoteCorpusTest(unittest.TestCase):
 
             entry["expectations"]["minImagePlacementsByPage"] = {"1": 0}
             entry["expectations"]["semanticMixedRegionCountsByPage"] = {"2": 0}
+            self._write_manifest(manifest, [entry])
+            with self.assertRaisesRegex(ValueError, "positive integers"):
+                remote_corpus.load_manifest(manifest)
+
+            entry["expectations"]["semanticMixedRegionCountsByPage"] = {"2": 1}
+            entry["expectations"]["semanticRuledGridColumnCountsByPage"] = {"2": 1}
+            self._write_manifest(manifest, [entry])
+            with self.assertRaisesRegex(ValueError, "at least two"):
+                remote_corpus.load_manifest(manifest)
+
+            entry["expectations"]["semanticRuledGridColumnCountsByPage"] = {"2": 3}
+            entry["expectations"]["semanticRuledGridSourceBorderCountsByPage"] = {"2": 0}
             self._write_manifest(manifest, [entry])
             with self.assertRaisesRegex(ValueError, "positive integers"):
                 remote_corpus.load_manifest(manifest)

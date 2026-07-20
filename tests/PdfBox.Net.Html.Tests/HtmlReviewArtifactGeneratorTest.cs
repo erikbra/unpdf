@@ -206,6 +206,56 @@ public sealed class HtmlReviewArtifactGeneratorTest
     }
 
     [Fact]
+    public void ValidateSemanticExpectations_FindsListsInsideRuledGridPageFrame()
+    {
+        HtmlReviewManifestExample example = new()
+        {
+            Id = "semantic-ruled-grid-lists",
+            Expectations = new HtmlReviewExpectations
+            {
+                SemanticOrderedListItemCountsByPage = new Dictionary<int, List<int>>
+                {
+                    [2] = [2, 1]
+                },
+                SemanticUnorderedListItemCountsByPage = new Dictionary<int, List<int>>
+                {
+                    [2] = [3]
+                }
+            }
+        };
+        PdfHtmlDocument accepted = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-ruled-grid-frame" data-source-page="2">
+                <div data-layout="ruled-grid">
+                  <ol><li>A</li><li>B<ol><li>Nested</li></ol></li></ol>
+                  <ul><li>One</li><li>Two</li><li>Three</li></ul>
+                </div>
+              </div>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+        PdfHtmlDocument rejected = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-ruled-grid-frame" data-source-page="2">
+                <div data-layout="ruled-grid">
+                  <ul><li>One</li><li>Two</li><li>Three</li></ul>
+                </div>
+              </div>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+
+        HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, accepted);
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, rejected));
+        Assert.Contains("ordered-list item counts on page 2 were [], expected [2, 1]", exception.Message);
+    }
+
+    [Fact]
     public void ValidateSemanticExpectations_RequiresStableMixedRegionStructureByPage()
     {
         HtmlReviewManifestExample example = new()
@@ -248,6 +298,92 @@ public sealed class HtmlReviewArtifactGeneratorTest
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
             HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, rejected));
         Assert.Contains("mixed-region count on page 2 was 0, expected 1", exception.Message);
+    }
+
+    [Fact]
+    public void ValidateSemanticExpectations_RequiresRuledGridColumnCountByPage()
+    {
+        HtmlReviewManifestExample example = new()
+        {
+            Id = "ruled-grid",
+            Expectations = new HtmlReviewExpectations
+            {
+                SemanticRuledGridColumnCountsByPage = new Dictionary<int, int>
+                {
+                    [2] = 3
+                }
+            }
+        };
+        PdfHtmlDocument accepted = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-ruled-grid-frame" data-source-page="2">
+                <div class="pdf-semantic-ruled-grid" data-layout="ruled-grid" data-column-count="3">
+                  <div class="pdf-semantic-ruled-grid-cell"></div>
+                  <div class="pdf-semantic-ruled-grid-cell"></div>
+                  <div class="pdf-semantic-ruled-grid-cell"></div>
+                </div>
+              </div>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+        PdfHtmlDocument rejected = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-ruled-grid-frame" data-source-page="2">
+                <div class="pdf-semantic-ruled-grid" data-layout="ruled-grid" data-column-count="2"></div>
+              </div>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+
+        HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, accepted);
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, rejected));
+        Assert.Contains("ruled-grid column counts on page 2 were [2], expected [3]", exception.Message);
+    }
+
+    [Fact]
+    public void ValidateSemanticExpectations_RequiresRuledGridSourceBorderCountByPage()
+    {
+        HtmlReviewManifestExample example = new()
+        {
+            Id = "ruled-grid-borders",
+            Expectations = new HtmlReviewExpectations
+            {
+                SemanticRuledGridSourceBorderCountsByPage = new Dictionary<int, int>
+                {
+                    [2] = 26
+                }
+            }
+        };
+        PdfHtmlDocument accepted = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-ruled-grid-frame" data-source-page="2">
+                <div data-layout="ruled-grid" data-source-border-count="26"></div>
+              </div>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+        PdfHtmlDocument rejected = new(
+            """
+            <html><body>
+              <div class="pdf-semantic-ruled-grid-frame" data-source-page="2">
+                <div data-layout="ruled-grid" data-source-border-count="25"></div>
+              </div>
+            </body></html>
+            """,
+            "styles.css",
+            "");
+
+        HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, accepted);
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            HtmlReviewArtifactGenerator.ValidateSemanticExpectations(example, rejected));
+        Assert.Contains("ruled-grid source-border counts on page 2 were [25], expected [26]", exception.Message);
     }
 
     [Fact]

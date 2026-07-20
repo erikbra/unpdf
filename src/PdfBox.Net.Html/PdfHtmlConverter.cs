@@ -421,6 +421,214 @@ public static class PdfHtmlConverter
           white-space: pre;
         }
 
+        .pdf-semantic-page-rule-group {
+          align-self: stretch;
+          box-sizing: border-box;
+          height: var(--pdf-semantic-page-rule-group-height, 0);
+          margin: 0 0 var(--pdf-semantic-page-rule-gap-after, 0)
+            calc((100% - var(--pdf-page-width)) / 2);
+          max-width: none;
+          padding: 0 var(--pdf-semantic-page-rule-right-relative, 0)
+            0 var(--pdf-semantic-page-rule-left-relative, 0);
+          width: var(--pdf-page-width);
+        }
+
+        .pdf-semantic-page-rule-stack {
+          height: 100%;
+          position: relative;
+          width: 100%;
+        }
+
+        .pdf-semantic-page-rule {
+          border: 0;
+          border-top: var(--pdf-semantic-page-rule-thickness, 0.5pt) solid
+            var(--pdf-semantic-page-rule-color, currentColor);
+          box-sizing: border-box;
+          height: 0;
+          left: var(--pdf-semantic-page-rule-left, 0);
+          margin: 0;
+          position: absolute;
+          top: var(--pdf-semantic-page-rule-top, 0);
+          width: var(--pdf-semantic-page-rule-width, 100%);
+        }
+
+        .pdf-semantic-ruled-grid-frame {
+          align-self: stretch;
+          box-sizing: border-box;
+          margin: 6pt 0 10pt calc((100% - var(--pdf-page-width)) / 2);
+          max-width: none;
+          padding: 0 var(--pdf-semantic-ruled-right-relative, var(--pdf-semantic-ruled-right, 0))
+            0 var(--pdf-semantic-ruled-left-relative, var(--pdf-semantic-ruled-left, 0));
+          width: var(--pdf-page-width);
+        }
+
+        .pdf-semantic-ruled-grid {
+          border: var(--pdf-semantic-ruled-border-width, 0.5pt) solid
+            var(--pdf-semantic-ruled-border-color, #111827);
+          box-sizing: border-box;
+          display: grid;
+          grid-template-columns: var(--pdf-semantic-ruled-tracks);
+          width: 100%;
+        }
+
+        .pdf-semantic-ruled-grid-cell,
+        .pdf-semantic-ruled-grid-connector,
+        .pdf-semantic-ruled-grid-spanning {
+          box-sizing: border-box;
+          min-width: 0;
+        }
+
+        .pdf-semantic-ruled-grid-cell {
+          border-bottom: var(--pdf-semantic-ruled-border-width, 0.5pt) solid
+            var(--pdf-semantic-ruled-border-color, #111827);
+          border-right: var(--pdf-semantic-ruled-border-width, 0.5pt) solid
+            var(--pdf-semantic-ruled-border-color, #111827);
+          grid-column: var(--pdf-semantic-ruled-column);
+          grid-row: var(--pdf-semantic-ruled-row);
+          padding: 6pt;
+        }
+
+        .pdf-semantic-ruled-grid-cell-last {
+          border-right: 0;
+        }
+
+        .pdf-semantic-ruled-grid-cell-shared-heading-right,
+        .pdf-semantic-ruled-grid-cell-shared-heading-left {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .pdf-semantic-ruled-grid-cell-shared-heading-right {
+          border-right: 0;
+          padding-right: 9pt;
+        }
+
+        .pdf-semantic-ruled-grid-cell-shared-heading-left {
+          padding-left: 9pt;
+        }
+
+        .pdf-semantic-ruled-grid-cell-shared-heading-right > :first-child,
+        .pdf-semantic-ruled-grid-cell-shared-heading-left > :first-child {
+          box-sizing: border-box;
+          min-height: var(--pdf-semantic-ruled-shared-heading-height, auto);
+        }
+
+        .pdf-semantic-ruled-grid .pdf-semantic-ruled-grid-column-heading {
+          align-items: center;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          min-height: var(--pdf-semantic-ruled-shared-heading-height, auto);
+          text-align: center;
+          text-align-last: center;
+        }
+
+        .pdf-semantic-ruled-grid-cell-body {
+          display: flex;
+          flex: 1 1 auto;
+          flex-direction: column;
+          min-height: 0;
+          position: relative;
+        }
+
+        .pdf-semantic-ruled-grid-cell-body::after {
+          border-right: var(--pdf-semantic-ruled-border-width, 0.5pt) solid
+            var(--pdf-semantic-ruled-border-color, #111827);
+          bottom: -6pt;
+          content: "";
+          pointer-events: none;
+          position: absolute;
+          right: calc(-9pt - var(--pdf-semantic-ruled-border-width, 0.5pt));
+          top: calc(-1 * var(--pdf-semantic-ruled-border-width, 0.5pt));
+        }
+
+        .pdf-semantic-ruled-grid-cell > .pdf-semantic-list,
+        .pdf-semantic-ruled-grid-cell-body > .pdf-semantic-list {
+          margin-bottom: 0;
+        }
+
+        .pdf-semantic-ruled-grid-source-separator {
+          padding-bottom: 3pt;
+          position: relative;
+        }
+
+        .pdf-semantic-ruled-grid-source-separator::after {
+          border-bottom: var(--pdf-semantic-ruled-source-border-width, 0.5pt) solid
+            var(--pdf-semantic-ruled-source-border-color, #111827);
+          bottom: 0;
+          content: "";
+          left: -6pt;
+          pointer-events: none;
+          position: absolute;
+          right: -6pt;
+        }
+
+        .pdf-semantic-ruled-grid-cell-shared-heading-right
+          .pdf-semantic-ruled-grid-source-separator::after {
+          right: -9pt;
+        }
+
+        .pdf-semantic-ruled-grid-cell-shared-heading-left
+          .pdf-semantic-ruled-grid-source-separator::after {
+          left: -9pt;
+        }
+
+        .pdf-semantic-ruled-grid-cell > .pdf-semantic-list >
+          li.pdf-semantic-ruled-grid-source-separator::after,
+        .pdf-semantic-ruled-grid-cell-body > .pdf-semantic-list >
+          li.pdf-semantic-ruled-grid-source-separator::after {
+          left: calc(-1.35em - 6pt);
+        }
+
+        .pdf-semantic-ruled-grid-connector {
+          align-items: start;
+          border-bottom: var(--pdf-semantic-ruled-border-width, 0.5pt) solid
+            var(--pdf-semantic-ruled-border-color, #111827);
+          border-right: var(--pdf-semantic-ruled-border-width, 0.5pt) solid
+            var(--pdf-semantic-ruled-border-color, #111827);
+          display: flex;
+          grid-column: var(--pdf-semantic-ruled-column);
+          grid-row: var(--pdf-semantic-ruled-row);
+          justify-content: center;
+          overflow: visible;
+          padding-top: 18pt;
+          position: relative;
+          white-space: nowrap;
+          z-index: 2;
+        }
+
+        .pdf-semantic-ruled-grid-connector-collapsed {
+          border-right: 0;
+        }
+
+        .pdf-semantic-ruled-grid-connector-collapsed > * {
+          background: var(--pdf-page-background);
+          padding: 0 4pt;
+        }
+
+        .pdf-semantic-ruled-grid-spanning {
+          border-bottom: var(--pdf-semantic-ruled-border-width, 0.5pt) solid
+            var(--pdf-semantic-ruled-border-color, #111827);
+          grid-column: 1 / -1;
+          grid-row: var(--pdf-semantic-ruled-row);
+          padding: 6pt;
+          text-align: center;
+        }
+
+        .pdf-semantic-ruled-grid-row-last {
+          border-bottom: 0;
+        }
+
+        .pdf-semantic-flow .pdf-semantic-ruled-grid-lead-in {
+          align-self: center;
+          box-sizing: border-box;
+          max-width: none;
+          text-align: center;
+          text-align-last: center;
+          width: var(--pdf-semantic-ruled-grid-lead-in-width, 100%);
+        }
+
         .pdf-semantic-document-flow {
           background: var(--pdf-page-background);
           box-shadow: 0 1pt 4pt var(--pdf-page-edge-shadow);
@@ -993,6 +1201,14 @@ public static class PdfHtmlConverter
 
         .pdf-semantic-list .pdf-semantic-list {
           margin: 2pt 0 0;
+        }
+
+        ol.pdf-semantic-list-marker-parenthesized > li::marker {
+          content: "(" counter(list-item) ") ";
+        }
+
+        ol.pdf-semantic-list-marker-closing-parenthesis > li::marker {
+          content: counter(list-item) ") ";
         }
 
         .pdf-semantic-definition-list {
@@ -4037,9 +4253,11 @@ public static class PdfHtmlConverter
             if (pages[index].UsesFixedLayoutFallback ||
                 pages[index].LineGrid != null ||
                 pages[index].Columns != null ||
+                pages[index].RuledGrid != null ||
                 pages[index + 1].UsesFixedLayoutFallback ||
                 pages[index + 1].LineGrid != null ||
-                pages[index + 1].Columns != null)
+                pages[index + 1].Columns != null ||
+                pages[index + 1].RuledGrid != null)
             {
                 continue;
             }
@@ -4214,6 +4432,11 @@ public static class PdfHtmlConverter
                     semantic.SectionTree);
             }
 
+            if (context.RuledGrid?.TopRuleGroup != null)
+            {
+                WriteSemanticPageRuleGroup(html, context.RuledGrid.TopRuleGroup, context.Page, scale);
+            }
+
             skippedFigureRegionsByPage.TryGetValue(context.Page.PageNumber, out HashSet<PdfLayoutRectangle>? skippedFigureRegions);
             WriteSemanticFlowElements(
                 html,
@@ -4230,7 +4453,8 @@ public static class PdfHtmlConverter
                 paragraphMerges.GetValueOrDefault(index),
                 sectionWriter,
                 bibliographyWriter,
-                definitionListState);
+                definitionListState,
+                context.RuledGrid);
             if (continuesDefinitionFromPreviousPage && !definitionListState.IsOpen)
             {
                 WriteContinuousPageArtifacts(
@@ -4391,13 +4615,18 @@ public static class PdfHtmlConverter
         PdfSemanticLineGrid? lineGrid = hasAuthoredStructure
             ? null
             : TryCreateSemanticLineGrid(page, semanticPage);
-        PdfSemanticColumns? columns = lineGrid == null
-            ? hasAuthoredStructure
+        PdfSemanticRuledGrid? ruledGrid = hasAuthoredStructure
+            ? TryCreateSemanticRuledGrid(page, semanticPage)
+            : null;
+        PdfSemanticColumns? columns = null;
+        if (lineGrid == null && ruledGrid == null)
+        {
+            columns = hasAuthoredStructure
                 ? TryCreateMixedGraphicTextColumns(page, semanticPage) is { } mixedRegions
                     ? AddColumnSpanningFigures(mixedRegions)
                     : null
-                : TryCreateSemanticColumns(page, semanticPage)
-            : null;
+                : TryCreateSemanticColumns(page, semanticPage);
+        }
         PdfLayoutRectangle[] figureRegions = SemanticFigureRegions(page, semanticPage).ToArray();
         PdfSemanticElement[] positioned = semanticPage.Elements
             .Where(IsPositionedSemanticElement)
@@ -4416,6 +4645,7 @@ public static class PdfHtmlConverter
             figureRegions,
             lineGrid,
             columns,
+            ruledGrid,
             RequiresFixedLayoutFallback(page, semanticPage, lineGrid, columns));
     }
 
@@ -4823,6 +5053,755 @@ public static class PdfHtmlConverter
             SemanticColumnListElements(semanticPage),
             tracks[0].Left,
             MathF.Max(0, page.Width - tracks[^1].Right)));
+    }
+
+    private static PdfSemanticRuledGrid? TryCreateSemanticRuledGrid(
+        PdfLayoutPage page,
+        PdfSemanticPage semanticPage)
+    {
+        if (page.FormControls.Count > 0 ||
+            semanticPage.Elements.Any(static element =>
+                element.Kind is PdfSemanticElementKind.Table or PdfSemanticElementKind.DefinitionList))
+        {
+            return null;
+        }
+
+        PdfSemanticElement[] authoredTextBlocks = semanticPage.Elements
+            .Where(static element => element.TaggedStructure != null)
+            .Where(static element => element.Lines.Count > 0)
+            .Where(static element => !string.IsNullOrWhiteSpace(element.Text))
+            .Where(static element => element.Bounds.Width > 0.1f && element.Bounds.Height > 0.1f)
+            .ToArray();
+        PdfSemanticElement[] authoredBlocks = authoredTextBlocks
+            .Where(static element => element.Kind is
+                PdfSemanticElementKind.Paragraph or PdfSemanticElementKind.List)
+            .ToArray();
+        if (authoredBlocks.Length < 6)
+        {
+            return null;
+        }
+
+        foreach (PdfLayoutRectangle region in SemanticFigureRegions(page, semanticPage)
+            .Where(region => region.Width >= page.Width * 0.65f)
+            .Where(region => region.Height >= page.Height * 0.20f)
+            .OrderByDescending(static region => region.Width * region.Height))
+        {
+            if (!TryCreateSemanticRuledGridTracks(
+                    page,
+                    region,
+                    out SemanticRuledGridTrack[] tracks,
+                    out SemanticColumnGutter[] gutters))
+            {
+                continue;
+            }
+
+            PdfSemanticElement[] members = authoredBlocks
+                .Where(element => RectangleContainsCenter(ExpandRectangle(region, 2f, 2f), element.Bounds))
+                .OrderBy(static element => element.Bounds.Y)
+                .ThenBy(static element => element.Bounds.X)
+                .ToArray();
+            if (members.Length < 6 ||
+                authoredTextBlocks
+                    .Where(element => RectangleContainsCenter(ExpandRectangle(region, 2f, 2f), element.Bounds))
+                    .Any(element => !members.Contains(element)))
+            {
+                continue;
+            }
+
+            List<SemanticRuledGridPlacement> placements = [];
+            bool ambiguous = false;
+            foreach (PdfSemanticElement element in members)
+            {
+                if (TryPlaceSemanticRuledGridElement(
+                        region,
+                        tracks,
+                        gutters,
+                        element,
+                        out SemanticRuledGridPlacement placement))
+                {
+                    placements.Add(placement);
+                }
+                else
+                {
+                    ambiguous = true;
+                    break;
+                }
+            }
+
+            if (ambiguous ||
+                Enumerable.Range(0, tracks.Length).Any(index =>
+                    placements.Count(placement => placement.ColumnIndex == index) < 2))
+            {
+                continue;
+            }
+
+            SemanticRuledGridBand[] bands = CreateSemanticRuledGridBands(
+                tracks.Length,
+                placements);
+            if (bands.Length == 0 ||
+                !bands.Any(static band => !band.IsSpanning))
+            {
+                continue;
+            }
+
+            return new PdfSemanticRuledGrid(
+                page,
+                region,
+                tracks,
+                gutters,
+                bands,
+                members,
+                CreateSemanticRuledGridBorders(page, tracks, bands),
+                TryCreateSemanticPageTopRuleGroup(page, semanticPage, region));
+        }
+
+        return null;
+    }
+
+    private static SemanticPageRuleGroup? TryCreateSemanticPageTopRuleGroup(
+        PdfLayoutPage page,
+        PdfSemanticPage semanticPage,
+        PdfLayoutRectangle ruledRegion)
+    {
+        PdfSemanticElement? firstContent = semanticPage.Elements
+            .Where(static element => element.Lines.Count > 0)
+            .Where(static element => element.Kind is not (
+                PdfSemanticElementKind.Header or PdfSemanticElementKind.Footer))
+            .Where(element => element.Bounds.Bottom <= ruledRegion.Y)
+            .OrderBy(static element => element.Bounds.Y)
+            .ThenBy(static element => element.Bounds.X)
+            .FirstOrDefault();
+        if (firstContent == null)
+        {
+            return null;
+        }
+
+        float horizontalTolerance = MathF.Max(8f, page.Width * 0.02f);
+        SemanticPageRule[] candidates = page.Paths
+            .Select(path => TryCreateSemanticPageRule(path, out SemanticPageRule rule)
+                ? rule
+                : (SemanticPageRule?)null)
+            .Where(static rule => rule != null)
+            .Select(static rule => rule!.Value)
+            .Where(rule =>
+                rule.Width >= ruledRegion.Width * 0.80f &&
+                rule.Left >= ruledRegion.X - horizontalTolerance &&
+                rule.Right <= ruledRegion.Right + horizontalTolerance &&
+                rule.Top >= page.Height * 0.02f &&
+                rule.Bottom <= firstContent.Bounds.Y - 3f &&
+                rule.Thickness <= 8f &&
+                RelativeLuminance(rule.Color) <= 0.35f)
+            .OrderBy(static rule => rule.Top)
+            .ToArray();
+        if (candidates.Length == 0)
+        {
+            return null;
+        }
+
+        List<SemanticPageRule> cluster = [candidates[^1]];
+        for (int index = candidates.Length - 2; index >= 0; index--)
+        {
+            SemanticPageRule next = cluster[0];
+            if (next.Top - candidates[index].Bottom > 12f)
+            {
+                break;
+            }
+
+            cluster.Insert(0, candidates[index]);
+        }
+
+        if (cluster.Count > 3)
+        {
+            cluster.RemoveRange(0, cluster.Count - 3);
+        }
+
+        float top = cluster.Min(static rule => rule.Top);
+        float bottom = cluster.Max(static rule => rule.Bottom);
+        float gapAfter = MathF.Max(0f, firstContent.Bounds.Y - bottom - 4f);
+        return new SemanticPageRuleGroup(
+            ruledRegion.X,
+            ruledRegion.Right,
+            top,
+            bottom,
+            gapAfter,
+            cluster);
+    }
+
+    private static bool TryCreateSemanticPageRule(
+        PdfLayoutPath path,
+        out SemanticPageRule rule)
+    {
+        rule = default;
+        if (!path.IsStroked ||
+            path.UsesShapeAlpha ||
+            path.UsesSoftMask ||
+            path.Stroke?.DashArray.Any(static dash => dash > 0f) == true ||
+            path.Commands.Count != 2 ||
+            path.Commands[0].Kind != PdfLayoutPathCommandKind.MoveTo ||
+            path.Commands[1].Kind != PdfLayoutPathCommandKind.LineTo)
+        {
+            return false;
+        }
+
+        PdfLayoutPathCommand start = path.Commands[0];
+        PdfLayoutPathCommand end = path.Commands[1];
+        float thickness = MathF.Max(0.01f, path.Stroke!.Width);
+        float rise = MathF.Abs(end.Y1 - start.Y1);
+        if (rise > MathF.Max(0.75f, thickness * 0.5f))
+        {
+            return false;
+        }
+
+        float left = MathF.Min(start.X1, end.X1);
+        float right = MathF.Max(start.X1, end.X1);
+        float centerY = (start.Y1 + end.Y1) / 2f;
+        rule = new SemanticPageRule(
+            path.Index,
+            left,
+            right,
+            centerY - thickness / 2f,
+            thickness,
+            path.Stroke.Color);
+        return true;
+    }
+
+    private static float RelativeLuminance(PdfLayoutColor color)
+    {
+        return color.Red * 0.2126f + color.Green * 0.7152f + color.Blue * 0.0722f;
+    }
+
+    private static bool TryCreateSemanticRuledGridTracks(
+        PdfLayoutPage page,
+        PdfLayoutRectangle region,
+        out SemanticRuledGridTrack[] tracks,
+        out SemanticColumnGutter[] gutters)
+    {
+        tracks = [];
+        gutters = [];
+        List<List<PdfLayoutRectangle>> verticalFamilies = [];
+        float positionTolerance = MathF.Max(1f, page.Width * 0.002f);
+        foreach (PdfLayoutRectangle segment in page.Paths
+            .Where(static path => path.IsStroked && !path.UsesSoftMask)
+            .SelectMany(SemanticRuleSegments)
+            .Where(segment => segment.Height >= 6f &&
+                segment.Height >= MathF.Max(0.1f, segment.Width) * 8f)
+            .Where(segment => segment.X + segment.Width / 2f >= region.X - positionTolerance &&
+                segment.X + segment.Width / 2f <= region.Right + positionTolerance)
+            .Where(segment => segment.Bottom >= region.Y - positionTolerance &&
+                segment.Y <= region.Bottom + positionTolerance)
+            .OrderBy(static segment => segment.X))
+        {
+            float x = segment.X + segment.Width / 2f;
+            List<PdfLayoutRectangle>? family = verticalFamilies.FirstOrDefault(existing =>
+                MathF.Abs(existing.Average(static item => item.X + item.Width / 2f) - x) <= positionTolerance);
+            if (family == null)
+            {
+                verticalFamilies.Add([segment]);
+            }
+            else
+            {
+                family.Add(segment);
+            }
+        }
+
+        float minimumCoverage = region.Height * 0.52f;
+        float[] boundaries = verticalFamilies
+            .Where(family => VerticalRuleCoverage(family, region) >= minimumCoverage)
+            .Select(static family => family.Average(static item => item.X + item.Width / 2f))
+            .Order()
+            .ToArray();
+        if (boundaries.Length < 4 ||
+            MathF.Abs(boundaries[0] - region.X) > positionTolerance * 2f ||
+            MathF.Abs(boundaries[^1] - region.Right) > positionTolerance * 2f)
+        {
+            return false;
+        }
+
+        boundaries[0] = region.X;
+        boundaries[^1] = region.Right;
+        List<SemanticRuledGridTrack> detectedTracks = [];
+        float maximumGutterWidth = region.Width * 0.08f;
+        float minimumTrackWidth = region.Width * 0.16f;
+        for (int index = 0; index + 1 < boundaries.Length; index++)
+        {
+            float left = boundaries[index];
+            float right = boundaries[index + 1];
+            float width = right - left;
+            if (width >= minimumTrackWidth)
+            {
+                detectedTracks.Add(new SemanticRuledGridTrack(left, right));
+            }
+            else if (width > maximumGutterWidth)
+            {
+                return false;
+            }
+        }
+
+        // The initial reconciliation deliberately targets the common form layout
+        // that exposed #152. Other column counts remain on the conservative
+        // fallback path until their ownership and spanning behavior are covered.
+        if (detectedTracks.Count != 3)
+        {
+            return false;
+        }
+
+        SemanticColumnGutter[] detectedGutters = detectedTracks
+            .Zip(detectedTracks.Skip(1), static (left, right) =>
+                new SemanticColumnGutter(left.Right, right.Left))
+            .ToArray();
+        if (detectedGutters.Any(gutter => gutter.Width > maximumGutterWidth))
+        {
+            return false;
+        }
+
+        tracks = detectedTracks.ToArray();
+        gutters = detectedGutters;
+        return true;
+    }
+
+    private static float VerticalRuleCoverage(
+        IReadOnlyList<PdfLayoutRectangle> segments,
+        PdfLayoutRectangle region)
+    {
+        PdfLayoutRectangle[] clipped = segments
+            .Select(segment =>
+            {
+                float top = MathF.Max(region.Y, segment.Y);
+                float bottom = MathF.Min(region.Bottom, segment.Bottom);
+                return new PdfLayoutRectangle(segment.X, top, segment.Width, MathF.Max(0, bottom - top));
+            })
+            .Where(static segment => segment.Height > 0)
+            .OrderBy(static segment => segment.Y)
+            .ToArray();
+        if (clipped.Length == 0)
+        {
+            return 0f;
+        }
+
+        float coverage = 0f;
+        float top = clipped[0].Y;
+        float bottom = clipped[0].Bottom;
+        foreach (PdfLayoutRectangle segment in clipped.Skip(1))
+        {
+            if (segment.Y <= bottom + 1f)
+            {
+                bottom = MathF.Max(bottom, segment.Bottom);
+            }
+            else
+            {
+                coverage += bottom - top;
+                top = segment.Y;
+                bottom = segment.Bottom;
+            }
+        }
+
+        return coverage + bottom - top;
+    }
+
+    private static IEnumerable<PdfLayoutRectangle> SemanticRuleSegments(PdfLayoutPath path)
+    {
+        PdfLayoutPathCommand? subpathStart = null;
+        PdfLayoutPathCommand? previous = null;
+        foreach (PdfLayoutPathCommand command in path.Commands)
+        {
+            if (command.Kind == PdfLayoutPathCommandKind.MoveTo)
+            {
+                subpathStart = command;
+                previous = command;
+                continue;
+            }
+
+            if (command.Kind == PdfLayoutPathCommandKind.ClosePath)
+            {
+                if (previous != null && subpathStart != null)
+                {
+                    yield return RuleSegment(previous.Value, subpathStart.Value);
+                }
+
+                previous = null;
+                subpathStart = null;
+                continue;
+            }
+
+            if (command.Kind != PdfLayoutPathCommandKind.LineTo || previous == null)
+            {
+                continue;
+            }
+
+            yield return RuleSegment(previous.Value, command);
+            previous = command;
+        }
+    }
+
+    private static PdfLayoutRectangle RuleSegment(
+        PdfLayoutPathCommand start,
+        PdfLayoutPathCommand end)
+    {
+        return new PdfLayoutRectangle(
+            MathF.Min(start.X1, end.X1),
+            MathF.Min(start.Y1, end.Y1),
+            MathF.Abs(end.X1 - start.X1),
+            MathF.Abs(end.Y1 - start.Y1));
+    }
+
+    private static bool TryPlaceSemanticRuledGridElement(
+        PdfLayoutRectangle region,
+        IReadOnlyList<SemanticRuledGridTrack> tracks,
+        IReadOnlyList<SemanticColumnGutter> gutters,
+        PdfSemanticElement element,
+        out SemanticRuledGridPlacement placement)
+    {
+        placement = default;
+        int overlappingTracks = tracks.Count(track =>
+            HorizontalOverlap(element.Bounds, track.Bounds) >=
+                MathF.Min(element.Bounds.Width, track.Width) * 0.25f);
+        if (element.Bounds.Width >= region.Width * 0.52f && overlappingTracks >= 2)
+        {
+            placement = new SemanticRuledGridPlacement(element, null, null, IsSpanning: true);
+            return true;
+        }
+
+        if (element.Text.Trim().Length <= 32 &&
+            element.Bounds.Width <= region.Width * 0.12f)
+        {
+            float center = element.Bounds.X + element.Bounds.Width / 2f;
+            int gutterIndex = Enumerable.Range(0, gutters.Count)
+                .OrderBy(index => MathF.Abs(center - gutters[index].Boundary))
+                .FirstOrDefault();
+            float tolerance = MathF.Max(12f, region.Width * 0.025f);
+            if (gutters.Count > 0 &&
+                center >= gutters[gutterIndex].Left - tolerance &&
+                center <= gutters[gutterIndex].Right + tolerance)
+            {
+                placement = new SemanticRuledGridPlacement(
+                    element,
+                    null,
+                    gutterIndex,
+                    IsSpanning: false);
+                return true;
+            }
+        }
+
+        float[] overlapRatios = tracks
+            .Select(track => HorizontalOverlap(element.Bounds, track.Bounds) /
+                MathF.Max(0.1f, element.Bounds.Width))
+            .ToArray();
+        int bestTrack = Array.IndexOf(overlapRatios, overlapRatios.Max());
+        float secondBest = overlapRatios
+            .Where((_, index) => index != bestTrack)
+            .DefaultIfEmpty(0f)
+            .Max();
+        if (bestTrack >= 0 && overlapRatios[bestTrack] >= 0.70f && secondBest <= 0.30f)
+        {
+            placement = new SemanticRuledGridPlacement(element, bestTrack, null, IsSpanning: false);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static float HorizontalOverlap(
+        PdfLayoutRectangle first,
+        PdfLayoutRectangle second)
+    {
+        return MathF.Max(0, MathF.Min(first.Right, second.Right) - MathF.Max(first.X, second.X));
+    }
+
+    private static SemanticRuledGridBand[] CreateSemanticRuledGridBands(
+        int columnCount,
+        IReadOnlyList<SemanticRuledGridPlacement> placements)
+    {
+        List<SemanticRuledGridBand> bands = [];
+        List<SemanticRuledGridPlacement[]> spanningGroups = [];
+        List<SemanticRuledGridPlacement> currentGroup = [];
+        foreach (SemanticRuledGridPlacement placement in placements
+            .Where(static placement => placement.IsSpanning)
+            .OrderBy(static placement => placement.Element.Bounds.Y))
+        {
+            if (currentGroup.Count > 0 &&
+                placement.Element.Bounds.Y - currentGroup.Max(static item => item.Element.Bounds.Bottom) > 18f)
+            {
+                spanningGroups.Add(currentGroup.ToArray());
+                currentGroup.Clear();
+            }
+
+            currentGroup.Add(placement);
+        }
+
+        if (currentGroup.Count > 0)
+        {
+            spanningGroups.Add(currentGroup.ToArray());
+        }
+
+        float previousBottom = float.NegativeInfinity;
+        foreach (SemanticRuledGridPlacement[] spanningGroup in spanningGroups)
+        {
+            float groupTop = spanningGroup.Min(static placement => placement.Element.Bounds.Y);
+            AddSemanticRuledGridLaneBand(
+                bands,
+                columnCount,
+                placements.Where(placement =>
+                    !placement.IsSpanning &&
+                    placement.Element.Bounds.Y + placement.Element.Bounds.Height / 2f >= previousBottom &&
+                    placement.Element.Bounds.Y + placement.Element.Bounds.Height / 2f < groupTop));
+            bands.Add(SemanticRuledGridBand.CreateSpanning(
+                spanningGroup.Select(static placement => placement.Element).ToArray()));
+            previousBottom = spanningGroup.Max(static placement => placement.Element.Bounds.Bottom);
+        }
+
+        AddSemanticRuledGridLaneBand(
+            bands,
+            columnCount,
+            placements.Where(placement =>
+                !placement.IsSpanning &&
+                placement.Element.Bounds.Y + placement.Element.Bounds.Height / 2f >= previousBottom));
+        return bands.ToArray();
+    }
+
+    private static void AddSemanticRuledGridLaneBand(
+        ICollection<SemanticRuledGridBand> bands,
+        int columnCount,
+        IEnumerable<SemanticRuledGridPlacement> source)
+    {
+        SemanticRuledGridPlacement[] placements = source
+            .OrderBy(static placement => placement.Element.Bounds.Y)
+            .ThenBy(static placement => placement.Element.Bounds.X)
+            .ToArray();
+        if (placements.Length == 0)
+        {
+            return;
+        }
+
+        IReadOnlyList<PdfSemanticElement>[] columns = Enumerable.Range(0, columnCount)
+            .Select(index => (IReadOnlyList<PdfSemanticElement>)placements
+                .Where(placement => placement.ColumnIndex == index)
+                .Select(static placement => placement.Element)
+                .ToArray())
+            .ToArray();
+        SemanticRuledGridConnector[] connectors = placements
+            .Where(static placement => placement.GutterIndex.HasValue)
+            .Select(static placement => new SemanticRuledGridConnector(
+                placement.GutterIndex!.Value,
+                placement.Element))
+            .ToArray();
+        bands.Add(SemanticRuledGridBand.CreateLanes(columns, connectors));
+    }
+
+    private static SemanticRuledGridBorders CreateSemanticRuledGridBorders(
+        PdfLayoutPage page,
+        IReadOnlyList<SemanticRuledGridTrack> tracks,
+        IReadOnlyList<SemanticRuledGridBand> bands)
+    {
+        Dictionary<PdfSemanticElement, SemanticRuledBorder> elementBorders =
+            new((IEqualityComparer<PdfSemanticElement>)ReferenceEqualityComparer.Instance);
+        Dictionary<PdfSemanticListItem, SemanticRuledBorder> listItemBorders =
+            new((IEqualityComparer<PdfSemanticListItem>)ReferenceEqualityComparer.Instance);
+        SemanticRuledHorizontalRule[] rules = SemanticRuledHorizontalRules(page);
+
+        foreach (SemanticRuledGridBand band in bands.Where(static band => !band.IsSpanning))
+        {
+            for (int columnIndex = 0; columnIndex < tracks.Count; columnIndex++)
+            {
+                SemanticRuledGridUnit[] units = SemanticRuledGridUnits(band.Columns[columnIndex])
+                    .OrderBy(static unit => unit.Bounds.Y)
+                    .ThenBy(static unit => unit.Bounds.X)
+                    .ToArray();
+                if (units.Length < 2)
+                {
+                    continue;
+                }
+
+                SemanticRuledGridTrack track = tracks[columnIndex];
+                for (int unitIndex = 0; unitIndex + 1 < units.Length; unitIndex++)
+                {
+                    SemanticRuledGridUnit above = units[unitIndex];
+                    SemanticRuledGridUnit below = units[unitIndex + 1];
+                    float aboveCenter = above.Bounds.Y + above.Bounds.Height / 2f;
+                    float belowCenter = below.Bounds.Y + below.Bounds.Height / 2f;
+                    float expected = (above.Bounds.Bottom + below.Bounds.Y) / 2f;
+                    SemanticRuledHorizontalRule? matched = rules
+                        .Where(rule =>
+                            rule.CenterY > aboveCenter &&
+                            rule.CenterY < belowCenter &&
+                            HorizontalOverlap(
+                                new PdfLayoutRectangle(rule.Left, rule.CenterY, rule.Width, rule.Thickness),
+                                track.Bounds) >= track.Width * 0.80f)
+                        .OrderBy(rule => MathF.Abs(rule.CenterY - expected))
+                        .ThenByDescending(static rule => rule.Width)
+                        .Select(static rule => (SemanticRuledHorizontalRule?)rule)
+                        .FirstOrDefault();
+                    if (matched == null)
+                    {
+                        continue;
+                    }
+
+                    SemanticRuledBorder border = new(
+                        matched.Value.SourcePathIndex,
+                        matched.Value.CenterY,
+                        matched.Value.Thickness,
+                        matched.Value.Color);
+                    if (above.ListItem != null)
+                    {
+                        listItemBorders[above.ListItem] = border;
+                    }
+                    else
+                    {
+                        elementBorders[above.Element] = border;
+                    }
+                }
+            }
+        }
+
+        return new SemanticRuledGridBorders(elementBorders, listItemBorders);
+    }
+
+    private static IEnumerable<SemanticRuledGridUnit> SemanticRuledGridUnits(
+        IEnumerable<PdfSemanticElement> elements)
+    {
+        foreach (PdfSemanticElement element in elements)
+        {
+            if (element.SemanticList != null)
+            {
+                foreach (PdfSemanticListItem item in element.SemanticList.Items
+                    .Where(SemanticListItemHasRenderableContent))
+                {
+                    yield return new SemanticRuledGridUnit(element, item, item.Bounds);
+                }
+
+                continue;
+            }
+
+            yield return new SemanticRuledGridUnit(element, null, element.Bounds);
+        }
+    }
+
+    private static SemanticRuledHorizontalRule[] SemanticRuledHorizontalRules(PdfLayoutPage page)
+    {
+        List<SemanticRuledHorizontalRule> rules = [];
+        foreach (PdfLayoutPath path in page.Paths
+            .Where(static path => path.IsStroked && !path.UsesSoftMask && !path.UsesShapeAlpha)
+            .Where(static path => path.Stroke?.DashArray.Any(static dash => dash > 0f) != true))
+        {
+            float thickness = MathF.Max(0.01f, path.Stroke!.Width);
+            foreach (PdfLayoutRectangle segment in SemanticRuleSegments(path)
+                .Where(segment =>
+                    segment.Width >= 6f &&
+                    segment.Width >= MathF.Max(0.1f, segment.Height) * 8f))
+            {
+                rules.Add(new SemanticRuledHorizontalRule(
+                    path.Index,
+                    segment.X,
+                    segment.Right,
+                    segment.Y + segment.Height / 2f,
+                    thickness,
+                    path.Stroke.Color));
+            }
+        }
+
+        return rules.ToArray();
+    }
+
+    private static bool TryGetSemanticRuledGridSharedHeadingBottom(
+        PdfSemanticRuledGrid grid,
+        SemanticRuledGridBand band,
+        int columnIndex,
+        out float sharedHeadingBottom)
+    {
+        sharedHeadingBottom = 0f;
+        if (band.IsSpanning ||
+            columnIndex < 0 ||
+            columnIndex + 1 >= grid.Tracks.Count ||
+            grid.Gutters[columnIndex].Width > 0.5f)
+        {
+            return false;
+        }
+
+        PdfSemanticElement? leftHeading = band.Columns[columnIndex].FirstOrDefault();
+        PdfSemanticElement? rightHeading = band.Columns[columnIndex + 1].FirstOrDefault();
+        if (leftHeading == null ||
+            rightHeading == null ||
+            !grid.SourceBorders.ElementBorders.TryGetValue(
+                leftHeading,
+                out SemanticRuledBorder leftBorder) ||
+            !grid.SourceBorders.ElementBorders.TryGetValue(
+                rightHeading,
+                out SemanticRuledBorder rightBorder))
+        {
+            return false;
+        }
+
+        float positionTolerance = MathF.Max(1f, grid.Page.Width * 0.002f);
+        if (MathF.Abs(leftBorder.CenterY - rightBorder.CenterY) > positionTolerance * 2f)
+        {
+            return false;
+        }
+
+        float boundary = (grid.Tracks[columnIndex].Right +
+            grid.Tracks[columnIndex + 1].Left) / 2f;
+        float dividerTop = (leftBorder.CenterY + rightBorder.CenterY) / 2f;
+        PdfLayoutRectangle[] verticalSegments = grid.Page.Paths
+            .Where(static path => path.IsStroked && !path.UsesSoftMask)
+            .SelectMany(SemanticRuleSegments)
+            .Where(segment =>
+                segment.Height >= 6f &&
+                segment.Height >= MathF.Max(0.1f, segment.Width) * 8f &&
+                MathF.Abs(segment.X + segment.Width / 2f - boundary) <= positionTolerance)
+            .ToArray();
+        bool startsAtHeadingBottom = verticalSegments.Any(segment =>
+            MathF.Abs(segment.Y - dividerTop) <= positionTolerance * 2f &&
+            segment.Bottom >= dividerTop + 6f);
+        bool crossesHeading = verticalSegments.Any(segment =>
+            segment.Y < dividerTop - positionTolerance * 2f &&
+            segment.Bottom > grid.Region.Y + positionTolerance);
+        if (!startsAtHeadingBottom || crossesHeading)
+        {
+            return false;
+        }
+
+        sharedHeadingBottom = dividerTop;
+        return true;
+    }
+
+    private static bool TryGetSemanticRuledGridColumnHeadingBorder(
+        PdfSemanticRuledGrid grid,
+        SemanticRuledGridBand band,
+        int columnIndex,
+        out SemanticRuledBorder headingBorder)
+    {
+        headingBorder = default;
+        if (band.IsSpanning ||
+            columnIndex < 0 ||
+            columnIndex >= grid.Tracks.Count)
+        {
+            return false;
+        }
+
+        PdfSemanticElement? heading = band.Columns[columnIndex].FirstOrDefault();
+        if (heading == null ||
+            !grid.SourceBorders.ElementBorders.TryGetValue(heading, out headingBorder))
+        {
+            return false;
+        }
+
+        float positionTolerance = MathF.Max(1f, grid.Page.Width * 0.002f);
+        if (heading.Bounds.Y < grid.Region.Y - positionTolerance ||
+            heading.Bounds.Bottom > headingBorder.CenterY + positionTolerance)
+        {
+            return false;
+        }
+
+        float headingBorderCenterY = headingBorder.CenterY;
+        int alignedColumnCount = band.Columns.Count(column =>
+        {
+            PdfSemanticElement? candidate = column.FirstOrDefault();
+            return candidate != null &&
+                grid.SourceBorders.ElementBorders.TryGetValue(
+                    candidate,
+                    out SemanticRuledBorder candidateBorder) &&
+                MathF.Abs(candidateBorder.CenterY - headingBorderCenterY) <=
+                    positionTolerance * 2f;
+        });
+        return alignedColumnCount >= 2;
     }
 
     private static PdfSemanticColumns AddColumnSpanningFigures(PdfSemanticColumns columns)
@@ -5996,6 +6975,293 @@ public static class PdfHtmlConverter
         html.AppendLine("      </section>");
     }
 
+    private static void WriteSemanticRuledGrid(
+        StringBuilder html,
+        PdfSemanticRuledGrid grid,
+        FootnoteContext footnotes,
+        PdfLayoutPage page,
+        float scale)
+    {
+        html.Append("      <div class=\"pdf-semantic-ruled-grid-frame\" data-source-page=\"")
+            .Append(page.PageNumber.ToString(CultureInfo.InvariantCulture))
+            .Append("\" data-source-top=\"")
+            .Append(HtmlAttribute(CssPoints(grid.Region.Y)))
+            .Append("\" style=\"--pdf-semantic-ruled-left:")
+            .Append(CssPoints(grid.Region.X * scale))
+            .Append(";--pdf-semantic-ruled-right:")
+            .Append(CssPoints(MathF.Max(0, page.Width - grid.Region.Right) * scale))
+            .Append(";--pdf-semantic-ruled-left-relative:")
+            .Append(CssPercent(grid.Region.X / page.Width * 100f))
+            .Append(";--pdf-semantic-ruled-right-relative:")
+            .Append(CssPercent(MathF.Max(0, page.Width - grid.Region.Right) / page.Width * 100f))
+            .AppendLine("\">");
+        html.Append("        <div class=\"pdf-semantic-ruled-grid\" data-layout=\"ruled-grid\" data-column-count=\"")
+            .Append(grid.Tracks.Count.ToString(CultureInfo.InvariantCulture))
+            .Append("\" data-source-border-count=\"")
+            .Append(grid.SourceBorders.Count.ToString(CultureInfo.InvariantCulture))
+            .Append("\" style=\"--pdf-semantic-ruled-tracks:")
+            .Append(SemanticRuledGridTemplate(grid))
+            .AppendLine("\">");
+
+        for (int bandIndex = 0; bandIndex < grid.Bands.Count; bandIndex++)
+        {
+            SemanticRuledGridBand band = grid.Bands[bandIndex];
+            int gridRow = bandIndex + 1;
+            bool isLastRow = bandIndex == grid.Bands.Count - 1;
+            if (band.IsSpanning)
+            {
+                html.Append("          <div class=\"pdf-semantic-ruled-grid-spanning");
+                if (isLastRow)
+                {
+                    html.Append(" pdf-semantic-ruled-grid-row-last");
+                }
+
+                html.Append("\" style=\"--pdf-semantic-ruled-row:")
+                    .Append(gridRow.ToString(CultureInfo.InvariantCulture))
+                    .AppendLine("\">");
+                foreach (PdfSemanticElement element in band.SpanningElements)
+                {
+                    WriteFlowSemanticElement(
+                        html,
+                        element,
+                        footnotes,
+                        page,
+                        allowMeasuredWidth: false,
+                        preserveSourceLines:
+                            SemanticRuledGridShouldPreserveSpanningSourceLines(grid, element));
+                }
+
+                html.AppendLine("          </div>");
+                continue;
+            }
+
+            for (int columnIndex = 0; columnIndex < grid.Tracks.Count; columnIndex++)
+            {
+                bool hasColumnHeading =
+                    TryGetSemanticRuledGridColumnHeadingBorder(
+                        grid,
+                        band,
+                        columnIndex,
+                        out SemanticRuledBorder columnHeadingBorder);
+                bool sharesHeadingAcrossRightBoundary =
+                    TryGetSemanticRuledGridSharedHeadingBottom(
+                        grid,
+                        band,
+                        columnIndex,
+                        out float sharedHeadingBottomRight);
+                float sharedHeadingBottomLeft = 0f;
+                bool sharesHeadingAcrossLeftBoundary =
+                    columnIndex > 0 &&
+                    TryGetSemanticRuledGridSharedHeadingBottom(
+                        grid,
+                        band,
+                        columnIndex - 1,
+                        out sharedHeadingBottomLeft);
+                html.Append("          <div class=\"pdf-semantic-ruled-grid-cell");
+                if (columnIndex == grid.Tracks.Count - 1)
+                {
+                    html.Append(" pdf-semantic-ruled-grid-cell-last");
+                }
+                if (sharesHeadingAcrossRightBoundary)
+                {
+                    html.Append(" pdf-semantic-ruled-grid-cell-shared-heading-right");
+                }
+                if (sharesHeadingAcrossLeftBoundary)
+                {
+                    html.Append(" pdf-semantic-ruled-grid-cell-shared-heading-left");
+                }
+                if (isLastRow)
+                {
+                    html.Append(" pdf-semantic-ruled-grid-row-last");
+                }
+
+                html.Append("\" data-ruled-column=\"")
+                    .Append((columnIndex + 1).ToString(CultureInfo.InvariantCulture))
+                    .Append("\" style=\"--pdf-semantic-ruled-column:")
+                    .Append((columnIndex * 2 + 1).ToString(CultureInfo.InvariantCulture))
+                    .Append(";--pdf-semantic-ruled-row:")
+                    .Append(gridRow.ToString(CultureInfo.InvariantCulture));
+                if (hasColumnHeading ||
+                    sharesHeadingAcrossRightBoundary ||
+                    sharesHeadingAcrossLeftBoundary)
+                {
+                    float sharedHeadingBottom = hasColumnHeading
+                        ? columnHeadingBorder.CenterY
+                        : sharesHeadingAcrossRightBoundary
+                            ? sharedHeadingBottomRight
+                            : sharedHeadingBottomLeft;
+                    float sharedHeadingHeight = MathF.Max(
+                        0,
+                        (sharedHeadingBottom - grid.Region.Y) * scale - 6f);
+                    html.Append(";--pdf-semantic-ruled-shared-heading-height:")
+                        .Append(CssPoints(sharedHeadingHeight));
+                }
+
+                html
+                    .AppendLine("\">");
+                IReadOnlyList<PdfSemanticElement> columnElements = band.Columns[columnIndex];
+                for (int elementIndex = 0; elementIndex < columnElements.Count; elementIndex++)
+                {
+                    if (sharesHeadingAcrossRightBoundary && elementIndex == 1)
+                    {
+                        html.AppendLine("            <div class=\"pdf-semantic-ruled-grid-cell-body\">");
+                    }
+
+                    PdfSemanticElement element = columnElements[elementIndex];
+                    bool isColumnHeading = hasColumnHeading && elementIndex == 0;
+                    bool hasSourceBorder = grid.SourceBorders.ElementBorders.TryGetValue(
+                        element,
+                        out SemanticRuledBorder sourceBorder);
+                    WriteFlowSemanticElement(
+                        html,
+                        element,
+                        footnotes,
+                        page,
+                        allowMeasuredWidth: false,
+                        sourceBorder: hasSourceBorder ? sourceBorder : null,
+                        semanticListItemBorders: grid.SourceBorders.ListItemBorders,
+                        preserveSourceLines: isColumnHeading && element.Lines.Count > 1,
+                        additionalClass: isColumnHeading
+                            ? "pdf-semantic-ruled-grid-column-heading"
+                            : null);
+                }
+
+                if (sharesHeadingAcrossRightBoundary && columnElements.Count > 1)
+                {
+                    html.AppendLine("            </div>");
+                }
+
+                html.AppendLine("          </div>");
+            }
+
+            for (int gutterIndex = 0; gutterIndex < grid.Gutters.Count; gutterIndex++)
+            {
+                SemanticColumnGutter gutter = grid.Gutters[gutterIndex];
+                SemanticRuledGridConnector[] connectors = band.Connectors
+                    .Where(connector => connector.GutterIndex == gutterIndex)
+                    .ToArray();
+                float sourceOffset = connectors.Length == 0
+                    ? 0f
+                    : MathF.Max(0, connectors.Min(static connector => connector.Element.Bounds.Y) - band.SourceTop);
+                html.Append("          <div class=\"pdf-semantic-ruled-grid-connector");
+                if (gutter.Width <= 0.5f)
+                {
+                    html.Append(" pdf-semantic-ruled-grid-connector-collapsed");
+                }
+                if (isLastRow)
+                {
+                    html.Append(" pdf-semantic-ruled-grid-row-last");
+                }
+
+                html.Append("\" data-ruled-gutter=\"")
+                    .Append((gutterIndex + 1).ToString(CultureInfo.InvariantCulture))
+                    .Append("\" aria-hidden=\"true")
+                    .Append("\" style=\"--pdf-semantic-ruled-column:")
+                    .Append((gutterIndex * 2 + 2).ToString(CultureInfo.InvariantCulture))
+                    .Append(";--pdf-semantic-ruled-row:")
+                    .Append(gridRow.ToString(CultureInfo.InvariantCulture))
+                    .Append(";padding-top:")
+                    .Append(CssPoints(sourceOffset * scale))
+                    .AppendLine("\">");
+                foreach (SemanticRuledGridConnector connector in connectors)
+                {
+                    WriteFlowSemanticElement(
+                        html,
+                        connector.Element,
+                        footnotes,
+                        page,
+                        allowMeasuredWidth: false);
+                }
+
+                html.AppendLine("          </div>");
+            }
+        }
+
+        html.AppendLine("        </div>");
+        html.AppendLine("      </div>");
+    }
+
+    private static string SemanticRuledGridTemplate(PdfSemanticRuledGrid grid)
+    {
+        StringBuilder template = new();
+        for (int index = 0; index < grid.Tracks.Count; index++)
+        {
+            if (index > 0)
+            {
+                template.Append(' ')
+                    .Append("minmax(0,")
+                    .Append(SvgNumber(grid.Gutters[index - 1].Width))
+                    .Append("fr) ");
+            }
+
+            template.Append("minmax(0,")
+                .Append(SvgNumber(grid.Tracks[index].Width))
+                .Append("fr)");
+        }
+
+        return template.ToString();
+    }
+
+    private static bool SemanticRuledGridShouldPreserveSpanningSourceLines(
+        PdfSemanticRuledGrid grid,
+        PdfSemanticElement element)
+    {
+        if (element.Kind != PdfSemanticElementKind.Paragraph ||
+            element.Lines.Count is < 2 or > 5)
+        {
+            return false;
+        }
+
+        PdfSemanticLine[] lines = element.Lines
+            .Where(static line => line.Runs.Any(static run => MathF.Abs(run.Direction) < 0.01f))
+            .ToArray();
+        if (lines.Length != element.Lines.Count)
+        {
+            return false;
+        }
+
+        float sourceCenter = grid.Region.X + grid.Region.Width / 2f;
+        float centerTolerance = MathF.Max(6f, grid.Region.Width * 0.04f);
+        return lines.All(line =>
+            MathF.Abs(line.Bounds.X + line.Bounds.Width / 2f - sourceCenter) <= centerTolerance &&
+            line.Bounds.Width <= grid.Region.Width * 0.95f);
+    }
+
+    private static bool SemanticRuledGridIsCenteredLeadIn(
+        PdfSemanticRuledGrid grid,
+        PdfSemanticElement element)
+    {
+        if (element.Kind is not (
+                PdfSemanticElementKind.Heading or
+                PdfSemanticElementKind.Paragraph) ||
+            element.Lines.Count is < 1 or > 5)
+        {
+            return false;
+        }
+
+        float positionTolerance = MathF.Max(2f, grid.Page.Width * 0.004f);
+        float leadInTop = grid.TopRuleGroup?.Bottom ?? 0f;
+        if (element.Bounds.Y < leadInTop - positionTolerance ||
+            element.Bounds.Bottom > grid.Region.Y + positionTolerance)
+        {
+            return false;
+        }
+
+        PdfSemanticLine[] lines = element.Lines
+            .Where(static line => line.Runs.Any(static run => MathF.Abs(run.Direction) < 0.01f))
+            .ToArray();
+        if (lines.Length != element.Lines.Count)
+        {
+            return false;
+        }
+
+        float sourceCenter = grid.Region.X + grid.Region.Width / 2f;
+        float centerTolerance = MathF.Max(6f, grid.Region.Width * 0.04f);
+        return lines.All(line =>
+            MathF.Abs(line.Bounds.X + line.Bounds.Width / 2f - sourceCenter) <= centerTolerance &&
+            line.Bounds.Width <= grid.Region.Width * 0.98f);
+    }
+
     private static void WriteSemanticColumns(
         StringBuilder html,
         PdfSemanticColumns columns,
@@ -6309,6 +7575,50 @@ public static class PdfHtmlConverter
             html.AppendLine("        </div>");
         }
 
+        html.AppendLine("      </div>");
+    }
+
+    private static void WriteSemanticPageRuleGroup(
+        StringBuilder html,
+        SemanticPageRuleGroup group,
+        PdfLayoutPage page,
+        float scale)
+    {
+        float frameWidth = MathF.Max(0.1f, group.Right - group.Left);
+        html.Append("      <div class=\"pdf-semantic-page-rule-group\" aria-hidden=\"true\"")
+            .Append(" data-page-decoration=\"top-rules\" data-source-page=\"")
+            .Append(page.PageNumber.ToString(CultureInfo.InvariantCulture))
+            .Append("\" data-rule-count=\"")
+            .Append(group.Rules.Count.ToString(CultureInfo.InvariantCulture))
+            .Append("\" style=\"--pdf-semantic-page-rule-group-height:")
+            .Append(CssPoints((group.Bottom - group.Top) * scale))
+            .Append(";--pdf-semantic-page-rule-gap-after:")
+            .Append(CssPoints(group.GapAfter * scale))
+            .Append(";--pdf-semantic-page-rule-left-relative:")
+            .Append(CssPercent(group.Left / page.Width * 100f))
+            .Append(";--pdf-semantic-page-rule-right-relative:")
+            .Append(CssPercent(MathF.Max(0, page.Width - group.Right) / page.Width * 100f))
+            .AppendLine("\">");
+        html.AppendLine("        <div class=\"pdf-semantic-page-rule-stack\">");
+        foreach (SemanticPageRule rule in group.Rules)
+        {
+            html.Append("          <hr class=\"pdf-semantic-page-rule\" role=\"presentation\"")
+                .Append(" data-source-path-index=\"")
+                .Append(rule.SourcePathIndex.ToString(CultureInfo.InvariantCulture))
+                .Append("\" style=\"--pdf-semantic-page-rule-top:")
+                .Append(CssPoints((rule.Top - group.Top) * scale))
+                .Append(";--pdf-semantic-page-rule-left:")
+                .Append(CssPercent((rule.Left - group.Left) / frameWidth * 100f))
+                .Append(";--pdf-semantic-page-rule-width:")
+                .Append(CssPercent(rule.Width / frameWidth * 100f))
+                .Append(";--pdf-semantic-page-rule-thickness:")
+                .Append(CssPoints(rule.Thickness * scale))
+                .Append(";--pdf-semantic-page-rule-color:")
+                .Append(CssRgba(rule.Color))
+                .AppendLine("\" />");
+        }
+
+        html.AppendLine("        </div>");
         html.AppendLine("      </div>");
     }
 
@@ -7247,12 +8557,15 @@ public static class PdfHtmlConverter
         ContinuousParagraphMerge? paragraphMerge,
         SemanticSectionWriter? sectionWriter,
         SemanticBibliographyWriter? bibliographyWriter,
-        SemanticDefinitionListRenderState? definitionListState = null)
+        SemanticDefinitionListRenderState? definitionListState = null,
+        PdfSemanticRuledGrid? ruledGrid = null)
     {
         PdfLayoutRectangle[] figureRegions = figureRendering == SemanticFigureRendering.None
             ? []
             : SemanticFigureRegions(page, semanticPage)
                 .Where(region => skippedFigureRegions == null || !skippedFigureRegions.Contains(region))
+                .Where(region => ruledGrid == null ||
+                    !RectanglesIntersect(region, ruledGrid.Region, 2f))
                 .ToArray();
         Dictionary<PdfLayoutRectangle, PdfSemanticElement> captionsByFigure =
             figureRendering == SemanticFigureRendering.Content
@@ -7262,6 +8575,7 @@ public static class PdfHtmlConverter
         HashSet<FormulaGlyphKey> claimedFormulaGlyphs = [];
         List<PdfSemanticElement> deferredPageArtifacts = [];
         int nextFigureRegion = 0;
+        bool ruledGridWritten = false;
         for (int index = 0; index < flowElements.Count; index++)
         {
             PdfSemanticElement element = flowElements[index];
@@ -7280,6 +8594,22 @@ public static class PdfHtmlConverter
                 bibliographyWriter.ContinuesAfter(page.PageNumber) &&
                 IsSimplePageNumberFooter(element, page))
             {
+                continue;
+            }
+
+            if (ruledGrid?.Elements.Contains(element) == true)
+            {
+                if (!ruledGridWritten)
+                {
+                    if (definitionListState?.IsOpen == true)
+                    {
+                        CloseSemanticDefinitionList(html, definitionListState);
+                    }
+
+                    WriteSemanticRuledGrid(html, ruledGrid, footnotes, page, scale);
+                    ruledGridWritten = true;
+                }
+
                 continue;
             }
 
@@ -7391,15 +8721,26 @@ public static class PdfHtmlConverter
                 continue;
             }
 
+            bool isRuledGridLeadIn = ruledGrid != null &&
+                SemanticRuledGridIsCenteredLeadIn(ruledGrid, element);
             WriteFlowSemanticElement(
                 html,
                 element,
                 footnotes,
                 page,
-                allowMeasuredWidth: IsMeasuredWidthCandidate(flowElements, index),
+                allowMeasuredWidth: !isRuledGridLeadIn &&
+                    IsMeasuredWidthCandidate(flowElements, index),
                 claimedFormulaGlyphs: claimedFormulaGlyphs,
                 elementId: elementId,
-                headingLevel: headingLevel);
+                headingLevel: headingLevel,
+                preserveSourceLines: isRuledGridLeadIn && element.Lines.Count > 1,
+                additionalClass: isRuledGridLeadIn
+                    ? "pdf-semantic-ruled-grid-lead-in"
+                    : null,
+                additionalStyle: isRuledGridLeadIn
+                    ? "--pdf-semantic-ruled-grid-lead-in-width:" +
+                        CssPoints(ruledGrid!.Region.Width * scale)
+                    : null);
         }
 
         if (definitionListState?.IsOpen != true && deferredPageArtifacts.Count > 0)
@@ -8459,7 +9800,12 @@ public static class PdfHtmlConverter
         bool allowMeasuredWidth = true,
         ISet<FormulaGlyphKey>? claimedFormulaGlyphs = null,
         string? elementId = null,
-        int? headingLevel = null)
+        int? headingLevel = null,
+        SemanticRuledBorder? sourceBorder = null,
+        IReadOnlyDictionary<PdfSemanticListItem, SemanticRuledBorder>? semanticListItemBorders = null,
+        bool preserveSourceLines = false,
+        string? additionalClass = null,
+        string? additionalStyle = null)
     {
         if (claimedFormulaGlyphs is { Count: > 0 } &&
             IsFullyClaimedFormulaElement(element, claimedFormulaGlyphs))
@@ -8536,7 +9882,19 @@ public static class PdfHtmlConverter
 
         if (element.Kind == PdfSemanticElementKind.List && element.SemanticList != null)
         {
-            WriteSemanticList(html, element, footnotes, page);
+            WriteSemanticList(
+                html,
+                element.SemanticList,
+                element,
+                footnotes,
+                page,
+                indentation: 6,
+                isRoot: true,
+                rootAdditionalClass: sourceBorder.HasValue
+                    ? "pdf-semantic-ruled-grid-source-separator"
+                    : null,
+                rootStyle: sourceBorder.HasValue ? SemanticRuledBorderStyle(sourceBorder.Value) : null,
+                itemBorders: semanticListItemBorders);
             return;
         }
 
@@ -8552,6 +9910,26 @@ public static class PdfHtmlConverter
             return;
         }
 
+        string? textAdditionalClass = sourceBorder.HasValue
+            ? "pdf-semantic-ruled-grid-source-separator"
+            : null;
+        if (!string.IsNullOrWhiteSpace(additionalClass))
+        {
+            textAdditionalClass = string.IsNullOrWhiteSpace(textAdditionalClass)
+                ? additionalClass
+                : textAdditionalClass + " " + additionalClass;
+        }
+
+        string? textAdditionalStyle = sourceBorder.HasValue
+            ? SemanticRuledBorderStyle(sourceBorder.Value)
+            : null;
+        if (!string.IsNullOrWhiteSpace(additionalStyle))
+        {
+            textAdditionalStyle = string.IsNullOrWhiteSpace(textAdditionalStyle)
+                ? additionalStyle
+                : textAdditionalStyle + ";" + additionalStyle;
+        }
+
         WriteFlowTextElement(
             html,
             element,
@@ -8559,7 +9937,11 @@ public static class PdfHtmlConverter
             page,
             allowMeasuredWidth,
             elementId,
-            headingLevel);
+            headingLevel,
+            textAdditionalClass,
+            textAdditionalStyle,
+            sourceBorder?.SourcePathIndex,
+            preserveSourceLines);
     }
 
     private static void WriteSemanticThematicBreak(
@@ -8600,14 +9982,34 @@ public static class PdfHtmlConverter
         PdfLayoutPage? page,
         bool allowMeasuredWidth,
         string? elementId = null,
-        int? headingLevel = null)
+        int? headingLevel = null,
+        string? additionalClass = null,
+        string? additionalStyle = null,
+        int? sourceBorderPathIndex = null,
+        bool preserveSourceLines = false)
     {
         string tagName = SemanticTagName(element, headingLevel);
         html.Append("      <")
             .Append(tagName)
             .Append(" class=\"")
-            .Append(SemanticClassNames(element, page, allowMeasuredWidth))
-            .Append('"');
+            .Append(SemanticClassNames(element, page, allowMeasuredWidth));
+        if (!string.IsNullOrWhiteSpace(additionalClass))
+        {
+            html.Append(' ').Append(additionalClass);
+        }
+        if (preserveSourceLines)
+        {
+            html.Append(" pdf-semantic-preserve-source-lines");
+        }
+
+        html.Append('"');
+        if (sourceBorderPathIndex.HasValue)
+        {
+            html.Append(" data-source-border-path-index=\"")
+                .Append(sourceBorderPathIndex.Value.ToString(CultureInfo.InvariantCulture))
+                .Append('"');
+        }
+
         if (!string.IsNullOrEmpty(elementId))
         {
             html.Append(" id=\"").Append(HtmlAttribute(elementId)).Append('"');
@@ -8617,6 +10019,11 @@ public static class PdfHtmlConverter
         AppendTextDirectionAttribute(html, element.Text);
         AppendAsideLabelAttribute(html, element);
         string style = FlowSemanticStyle(element, page, allowMeasuredWidth);
+        if (!string.IsNullOrWhiteSpace(additionalStyle))
+        {
+            style = style.Length == 0 ? additionalStyle : style + ";" + additionalStyle;
+        }
+
         if (style.Length > 0)
         {
             html.Append(" style=\"")
@@ -8625,10 +10032,23 @@ public static class PdfHtmlConverter
         }
 
         html.Append(">");
-        WriteSemanticText(html, element, footnotes, page);
+        if (preserveSourceLines)
+        {
+            WriteSemanticSourceLines(html, element, footnotes, page);
+        }
+        else
+        {
+            WriteSemanticText(html, element, footnotes, page);
+        }
         html.Append("</")
             .Append(tagName)
             .AppendLine(">");
+    }
+
+    private static string SemanticRuledBorderStyle(SemanticRuledBorder border)
+    {
+        return "--pdf-semantic-ruled-source-border-width:" + CssPoints(border.Thickness) +
+            ";--pdf-semantic-ruled-source-border-color:" + CssRgba(border.Color);
     }
 
     private static void WriteSemanticDefinitionList(
@@ -8870,7 +10290,8 @@ public static class PdfHtmlConverter
         int indentation,
         bool isRoot,
         string? rootAdditionalClass = null,
-        string? rootStyle = null)
+        string? rootStyle = null,
+        IReadOnlyDictionary<PdfSemanticListItem, SemanticRuledBorder>? itemBorders = null)
     {
         PdfSemanticListItem[] renderableItems = list.Items
             .Where(SemanticListItemHasRenderableContent)
@@ -8892,6 +10313,12 @@ public static class PdfHtmlConverter
         }
 
         html.Append("pdf-semantic-list");
+        string? orderedMarkerClass = OrderedMarkerClass(list, renderableItems);
+        if (orderedMarkerClass != null)
+        {
+            html.Append(' ').Append(orderedMarkerClass);
+        }
+
         if (isRoot && !string.IsNullOrWhiteSpace(rootAdditionalClass))
         {
             html.Append(' ').Append(rootAdditionalClass);
@@ -8931,7 +10358,16 @@ public static class PdfHtmlConverter
         html.Append('>').AppendLine();
         foreach (PdfSemanticListItem item in renderableItems)
         {
-            WriteSemanticListItem(html, item, element, footnotes, page, indentation + 2);
+            SemanticRuledBorder sourceBorder = default;
+            bool hasSourceBorder = itemBorders?.TryGetValue(item, out sourceBorder) == true;
+            WriteSemanticListItem(
+                html,
+                item,
+                element,
+                footnotes,
+                page,
+                indentation + 2,
+                hasSourceBorder ? sourceBorder : null);
         }
 
         html.Append(' ', indentation)
@@ -8940,15 +10376,57 @@ public static class PdfHtmlConverter
             .AppendLine(">");
     }
 
+    private static string? OrderedMarkerClass(
+        PdfSemanticList list,
+        IReadOnlyList<PdfSemanticListItem> items)
+    {
+        if (list.Kind != PdfSemanticListKind.Ordered ||
+            list.MarkerKind != PdfSemanticListMarkerKind.Decimal)
+        {
+            return null;
+        }
+
+        if (items.All(static item =>
+            {
+                string marker = item.Marker.Trim();
+                return marker.StartsWith('(') && marker.EndsWith(')');
+            }))
+        {
+            return "pdf-semantic-list-marker-parenthesized";
+        }
+
+        if (items.All(static item =>
+            {
+                string marker = item.Marker.Trim();
+                return !marker.StartsWith('(') && marker.EndsWith(')');
+            }))
+        {
+            return "pdf-semantic-list-marker-closing-parenthesis";
+        }
+
+        return null;
+    }
+
     private static void WriteSemanticListItem(
         StringBuilder html,
         PdfSemanticListItem item,
         PdfSemanticElement listElement,
         FootnoteContext footnotes,
         PdfLayoutPage? page,
-        int indentation)
+        int indentation,
+        SemanticRuledBorder? sourceBorder = null)
     {
         html.Append(' ', indentation).Append("<li");
+        if (sourceBorder.HasValue)
+        {
+            html.Append(" class=\"pdf-semantic-ruled-grid-source-separator\"")
+                .Append(" data-source-border-path-index=\"")
+                .Append(sourceBorder.Value.SourcePathIndex.ToString(CultureInfo.InvariantCulture))
+                .Append("\" style=\"")
+                .Append(HtmlAttribute(SemanticRuledBorderStyle(sourceBorder.Value)))
+                .Append('"');
+        }
+
         if (item.Value.HasValue)
         {
             html.Append(" value=\"")
@@ -15303,6 +16781,7 @@ public static class PdfHtmlConverter
             IReadOnlyList<PdfLayoutRectangle> figureRegions,
             PdfSemanticLineGrid? lineGrid,
             PdfSemanticColumns? columns,
+            PdfSemanticRuledGrid? ruledGrid,
             bool usesFixedLayoutFallback)
         {
             Page = page;
@@ -15313,6 +16792,7 @@ public static class PdfHtmlConverter
             FigureRegions = figureRegions;
             LineGrid = lineGrid;
             Columns = columns;
+            RuledGrid = ruledGrid;
             UsesFixedLayoutFallback = usesFixedLayoutFallback;
         }
 
@@ -15331,6 +16811,8 @@ public static class PdfHtmlConverter
         public PdfSemanticLineGrid? LineGrid { get; }
 
         public PdfSemanticColumns? Columns { get; }
+
+        public PdfSemanticRuledGrid? RuledGrid { get; }
 
         public bool UsesFixedLayoutFallback { get; }
     }
@@ -15438,6 +16920,190 @@ public static class PdfHtmlConverter
         public float RightInset { get; }
 
         public bool IsMixedRegions => ColumnFigures.Count > 0;
+    }
+
+    private sealed class PdfSemanticRuledGrid
+    {
+        public PdfSemanticRuledGrid(
+            PdfLayoutPage page,
+            PdfLayoutRectangle region,
+            IReadOnlyList<SemanticRuledGridTrack> tracks,
+            IReadOnlyList<SemanticColumnGutter> gutters,
+            IReadOnlyList<SemanticRuledGridBand> bands,
+            IReadOnlyList<PdfSemanticElement> elements,
+            SemanticRuledGridBorders sourceBorders,
+            SemanticPageRuleGroup? topRuleGroup)
+        {
+            Page = page;
+            Region = region;
+            Tracks = tracks;
+            Gutters = gutters;
+            Bands = bands;
+            Elements = elements;
+            SourceBorders = sourceBorders;
+            TopRuleGroup = topRuleGroup;
+        }
+
+        public PdfLayoutPage Page { get; }
+
+        public PdfLayoutRectangle Region { get; }
+
+        public IReadOnlyList<SemanticRuledGridTrack> Tracks { get; }
+
+        public IReadOnlyList<SemanticColumnGutter> Gutters { get; }
+
+        public IReadOnlyList<SemanticRuledGridBand> Bands { get; }
+
+        public IReadOnlyList<PdfSemanticElement> Elements { get; }
+
+        public SemanticRuledGridBorders SourceBorders { get; }
+
+        public SemanticPageRuleGroup? TopRuleGroup { get; }
+    }
+
+    private sealed class SemanticRuledGridBorders
+    {
+        public SemanticRuledGridBorders(
+            IReadOnlyDictionary<PdfSemanticElement, SemanticRuledBorder> elementBorders,
+            IReadOnlyDictionary<PdfSemanticListItem, SemanticRuledBorder> listItemBorders)
+        {
+            ElementBorders = elementBorders;
+            ListItemBorders = listItemBorders;
+        }
+
+        public IReadOnlyDictionary<PdfSemanticElement, SemanticRuledBorder> ElementBorders { get; }
+
+        public IReadOnlyDictionary<PdfSemanticListItem, SemanticRuledBorder> ListItemBorders { get; }
+
+        public int Count => ElementBorders.Count + ListItemBorders.Count;
+    }
+
+    private readonly record struct SemanticRuledBorder(
+        int SourcePathIndex,
+        float CenterY,
+        float Thickness,
+        PdfLayoutColor Color);
+
+    private readonly record struct SemanticRuledHorizontalRule(
+        int SourcePathIndex,
+        float Left,
+        float Right,
+        float CenterY,
+        float Thickness,
+        PdfLayoutColor Color)
+    {
+        public float Width => MathF.Max(0f, Right - Left);
+    }
+
+    private readonly record struct SemanticRuledGridUnit(
+        PdfSemanticElement Element,
+        PdfSemanticListItem? ListItem,
+        PdfLayoutRectangle Bounds);
+
+    private sealed class SemanticPageRuleGroup
+    {
+        public SemanticPageRuleGroup(
+            float left,
+            float right,
+            float top,
+            float bottom,
+            float gapAfter,
+            IReadOnlyList<SemanticPageRule> rules)
+        {
+            Left = left;
+            Right = right;
+            Top = top;
+            Bottom = bottom;
+            GapAfter = gapAfter;
+            Rules = rules;
+        }
+
+        public float Left { get; }
+
+        public float Right { get; }
+
+        public float Top { get; }
+
+        public float Bottom { get; }
+
+        public float GapAfter { get; }
+
+        public IReadOnlyList<SemanticPageRule> Rules { get; }
+    }
+
+    private readonly record struct SemanticPageRule(
+        int SourcePathIndex,
+        float Left,
+        float Right,
+        float Top,
+        float Thickness,
+        PdfLayoutColor Color)
+    {
+        public float Width => MathF.Max(0f, Right - Left);
+
+        public float Bottom => Top + Thickness;
+    }
+
+    private sealed class SemanticRuledGridBand
+    {
+        private SemanticRuledGridBand(
+            IReadOnlyList<PdfSemanticElement>[] columns,
+            IReadOnlyList<SemanticRuledGridConnector> connectors,
+            IReadOnlyList<PdfSemanticElement> spanningElements)
+        {
+            Columns = columns;
+            Connectors = connectors;
+            SpanningElements = spanningElements;
+            PdfSemanticElement[] elements = columns
+                .SelectMany(static column => column)
+                .Concat(connectors.Select(static connector => connector.Element))
+                .Concat(spanningElements)
+                .ToArray();
+            SourceTop = elements.Min(static element => element.Bounds.Y);
+            SourceBottom = elements.Max(static element => element.Bounds.Bottom);
+        }
+
+        public IReadOnlyList<PdfSemanticElement>[] Columns { get; }
+
+        public IReadOnlyList<SemanticRuledGridConnector> Connectors { get; }
+
+        public IReadOnlyList<PdfSemanticElement> SpanningElements { get; }
+
+        public float SourceTop { get; }
+
+        public float SourceBottom { get; }
+
+        public bool IsSpanning => SpanningElements.Count > 0;
+
+        public static SemanticRuledGridBand CreateLanes(
+            IReadOnlyList<PdfSemanticElement>[] columns,
+            IReadOnlyList<SemanticRuledGridConnector> connectors)
+        {
+            return new SemanticRuledGridBand(columns, connectors, []);
+        }
+
+        public static SemanticRuledGridBand CreateSpanning(
+            IReadOnlyList<PdfSemanticElement> elements)
+        {
+            return new SemanticRuledGridBand([], [], elements);
+        }
+    }
+
+    private readonly record struct SemanticRuledGridPlacement(
+        PdfSemanticElement Element,
+        int? ColumnIndex,
+        int? GutterIndex,
+        bool IsSpanning);
+
+    private readonly record struct SemanticRuledGridConnector(
+        int GutterIndex,
+        PdfSemanticElement Element);
+
+    private readonly record struct SemanticRuledGridTrack(float Left, float Right)
+    {
+        public float Width => MathF.Max(0, Right - Left);
+
+        public PdfLayoutRectangle Bounds => new(Left, 0f, Width, 1f);
     }
 
     private readonly record struct SemanticColumnItem(

@@ -1591,6 +1591,222 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_SemanticContinuousFlow_ReconcilesTaggedRuledThreeLaneGrid()
+    {
+        PdfLayoutDocument layout = WithTaggedParagraphs(
+            CreateTaggedRuledThreeLaneLayoutFixture(),
+            groupReceiptGuidance: true,
+            groupRuledHeadings: true);
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(html.Html);
+
+        XElement grid = Assert.Single(ElementsByClass(dom, "pdf-semantic-ruled-grid"));
+        Assert.Equal("ruled-grid", grid.Attribute("data-layout")?.Value);
+        Assert.Equal("3", grid.Attribute("data-column-count")?.Value);
+        Assert.Equal("3", grid.Attribute("data-source-border-count")?.Value);
+        XElement[] cells = ElementsByClass(dom, "pdf-semantic-ruled-grid-cell").ToArray();
+        Assert.Equal(6, cells.Length);
+        Assert.Contains("List A heading", cells[0].Value, StringComparison.Ordinal);
+        Assert.Contains("List B heading", cells[1].Value, StringComparison.Ordinal);
+        Assert.Contains("List C heading", cells[2].Value, StringComparison.Ordinal);
+        Assert.True(HasClass(cells[1], "pdf-semantic-ruled-grid-cell-shared-heading-right"));
+        Assert.True(HasClass(cells[2], "pdf-semantic-ruled-grid-cell-shared-heading-left"));
+        Assert.False(HasClass(cells[0], "pdf-semantic-ruled-grid-cell-shared-heading-right"));
+        Assert.False(HasClass(cells[0], "pdf-semantic-ruled-grid-cell-shared-heading-left"));
+        Assert.Equal(
+            ParseStyle(cells[1].Attribute("style")?.Value ?? "")
+                ["--pdf-semantic-ruled-shared-heading-height"],
+            ParseStyle(cells[2].Attribute("style")?.Value ?? "")
+                ["--pdf-semantic-ruled-shared-heading-height"]);
+        XElement[] columnHeadings = cells
+            .Take(3)
+            .Select(static cell => cell.Elements().First())
+            .ToArray();
+        Assert.All(columnHeadings, static heading =>
+        {
+            Assert.True(HasClass(heading, "pdf-semantic-ruled-grid-column-heading"));
+            Assert.True(HasClass(heading, "pdf-semantic-preserve-source-lines"));
+            Assert.Equal(2, heading.Elements().Count(static element =>
+                HasClass(element, "pdf-semantic-line")));
+        });
+        XElement listBBody = Assert.Single(cells[1].Elements(), static element =>
+            HasClass(element, "pdf-semantic-ruled-grid-cell-body"));
+        Assert.DoesNotContain("List B heading", listBBody.Value, StringComparison.Ordinal);
+        Assert.Contains("List B primary content", listBBody.Value, StringComparison.Ordinal);
+        Assert.Contains("List A receipt", cells[3].Value, StringComparison.Ordinal);
+        Assert.Contains("List B receipt", cells[4].Value, StringComparison.Ordinal);
+        Assert.Contains("List C receipt", cells[5].Value, StringComparison.Ordinal);
+
+        XElement spanning = Assert.Single(ElementsByClass(dom, "pdf-semantic-ruled-grid-spanning"));
+        Assert.Contains("Shared receipt guidance", spanning.Value, StringComparison.Ordinal);
+        XElement preservedGuidance = Assert.Single(
+            spanning.Descendants(),
+            static element => HasClass(element, "pdf-semantic-preserve-source-lines"));
+        Assert.Equal(3, preservedGuidance.Elements().Count(static element =>
+            HasClass(element, "pdf-semantic-line")));
+        Assert.Equal(
+            [
+                "Shared receipt guidance",
+                "May be presented in place of a document listed above.",
+                "For receipt validity dates, see the source guidance."
+            ],
+            preservedGuidance.Elements()
+                .Where(static element => HasClass(element, "pdf-semantic-line"))
+                .Select(static element => element.Value.Trim()));
+        XElement[] connectors = ElementsByClass(dom, "pdf-semantic-ruled-grid-connector")
+            .Where(static connector => !string.IsNullOrWhiteSpace(connector.Value))
+            .ToArray();
+        Assert.Equal(2, connectors.Length);
+        Assert.Contains(connectors, static connector => connector.Value.Trim() == "OR");
+        Assert.Contains(connectors, static connector => connector.Value.Trim() == "AND");
+        Assert.All(connectors, static connector =>
+            Assert.Equal("true", connector.Attribute("aria-hidden")?.Value));
+        XElement ruleGroup = Assert.Single(ElementsByClass(dom, "pdf-semantic-page-rule-group"));
+        Assert.Equal("top-rules", ruleGroup.Attribute("data-page-decoration")?.Value);
+        Assert.Equal("2", ruleGroup.Attribute("data-rule-count")?.Value);
+        XElement[] pageRules = ruleGroup
+            .Descendants()
+            .Where(static element => HasClass(element, "pdf-semantic-page-rule"))
+            .ToArray();
+        Assert.Equal(2, pageRules.Length);
+        Assert.Equal(new[] { "207", "208" }, pageRules
+            .Select(static rule => rule.Attribute("data-source-path-index")?.Value ?? "")
+            .ToArray());
+        Assert.All(pageRules, static rule => Assert.Equal("presentation", rule.Attribute("role")?.Value));
+        Assert.Equal(6f, ParsePoints(ParseStyle(pageRules[0].Attribute("style")?.Value ?? "")
+            ["--pdf-semantic-page-rule-thickness"]));
+        Assert.Equal(0.72f, ParsePoints(ParseStyle(pageRules[1].Attribute("style")?.Value ?? "")
+            ["--pdf-semantic-page-rule-thickness"]));
+        XElement[] sourceSeparators = ElementsByClass(dom, "pdf-semantic-ruled-grid-source-separator")
+            .ToArray();
+        Assert.Equal(3, sourceSeparators.Length);
+        Assert.All(sourceSeparators, static separator =>
+            Assert.Equal("209", separator.Attribute("data-source-border-path-index")?.Value));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-figure"));
+        Assert.Single(Regex.Matches(dom.Root!.Value, Regex.Escape("List A heading")));
+        Assert.Single(Regex.Matches(dom.Root.Value, Regex.Escape("Shared receipt guidance")));
+        XElement centeredLeadIn = Assert.Single(
+            ElementsByClass(dom, "pdf-semantic-ruled-grid-lead-in"),
+            static element => element.Value.Contains(
+                "Centered lead-in first line",
+                StringComparison.Ordinal));
+        Assert.True(HasClass(centeredLeadIn, "pdf-semantic-preserve-source-lines"));
+        Assert.Equal(2, centeredLeadIn.Elements().Count(static element =>
+            HasClass(element, "pdf-semantic-line")));
+        Assert.Equal(
+            540f,
+            ParsePoints(ParseStyle(centeredLeadIn.Attribute("style")?.Value ?? "")
+                ["--pdf-semantic-ruled-grid-lead-in-width"]));
+    }
+
+    [Fact]
+    public async Task Convert_SemanticContinuousFlow_RendersTaggedRuledGridGeometryInBrowser()
+    {
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(
+            WithTaggedParagraphs(
+                CreateTaggedRuledThreeLaneLayoutFixture(),
+                groupReceiptGuidance: true,
+                groupRuledHeadings: true),
+            new PdfHtmlOptions
+            {
+                TextMode = PdfHtmlTextMode.Semantic,
+                SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+            });
+        using TempDirectory tempDirectory = new();
+        html.WriteToDirectory(tempDirectory.Path);
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = true
+        });
+        IPage page = await browser.NewPageAsync(new BrowserNewPageOptions
+        {
+            ViewportSize = new ViewportSize { Width = 1000, Height = 1200 }
+        });
+        await page.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+
+        double[] geometry = await page.EvaluateAsync<double[]>(
+            """
+            () => {
+              const grid = document.querySelector(".pdf-semantic-ruled-grid");
+              const cells = Array.from(grid.querySelectorAll(".pdf-semantic-ruled-grid-cell")).slice(0, 3);
+              const spanning = grid.querySelector(".pdf-semantic-ruled-grid-spanning");
+              const connectors = Array.from(grid.querySelectorAll(".pdf-semantic-ruled-grid-connector"));
+              const orConnector = connectors.find(element => element.textContent.trim() === "OR");
+              const andConnector = connectors.find(element => element.textContent.trim() === "AND");
+              const listA = Array.from(cells[0].children)
+                .find(element => element.textContent.includes("List A primary content"));
+              const headings = cells.map(cell => cell.firstElementChild);
+              const leadIn = document.querySelector(".pdf-semantic-ruled-grid-lead-in.pdf-semantic-preserve-source-lines");
+              const boxes = [
+                grid,
+                ...cells,
+                spanning,
+                orConnector,
+                andConnector,
+                listA,
+                ...headings,
+                leadIn
+              ]
+                .map(element => element.getBoundingClientRect());
+              return boxes.flatMap(box => [box.left, box.right, box.top, box.bottom]);
+            }
+            """);
+        Assert.Equal(48, geometry.Length);
+        (double Left, double Right, double Top, double Bottom) Box(int index) =>
+            (geometry[index * 4], geometry[index * 4 + 1], geometry[index * 4 + 2], geometry[index * 4 + 3]);
+
+        var grid = Box(0);
+        var listAColumn = Box(1);
+        var listBColumn = Box(2);
+        var listCColumn = Box(3);
+        var spanning = Box(4);
+        var orConnector = Box(5);
+        var andConnector = Box(6);
+        var listAText = Box(7);
+        var listAHeading = Box(8);
+        var listBHeading = Box(9);
+        var listCHeading = Box(10);
+        var centeredLeadIn = Box(11);
+        Assert.InRange(Math.Abs(listAColumn.Left - grid.Left), 0d, 2d);
+        Assert.True(listAColumn.Right < listBColumn.Left);
+        Assert.True(listBColumn.Right <= listCColumn.Left + 1d);
+        Assert.InRange(Math.Abs(listCColumn.Right - grid.Right), 0d, 2d);
+        Assert.InRange(orConnector.Left + (orConnector.Right - orConnector.Left) / 2d,
+            listAColumn.Right,
+            listBColumn.Left);
+        Assert.InRange(andConnector.Left + (andConnector.Right - andConnector.Left) / 2d,
+            listBColumn.Right - 1d,
+            listCColumn.Left + 1d);
+        Assert.InRange(Math.Abs(spanning.Left - grid.Left), 0d, 2d);
+        Assert.InRange(Math.Abs(spanning.Right - grid.Right), 0d, 2d);
+        Assert.InRange(listAText.Left, listAColumn.Left, listAColumn.Right);
+        Assert.InRange(listAText.Right, listAColumn.Left, listAColumn.Right);
+        Assert.InRange(Math.Abs(listAHeading.Bottom - listBHeading.Bottom), 0d, 1d);
+        Assert.InRange(Math.Abs(listBHeading.Bottom - listCHeading.Bottom), 0d, 1d);
+        Assert.InRange(
+            Math.Abs(
+                centeredLeadIn.Left + (centeredLeadIn.Right - centeredLeadIn.Left) / 2d -
+                (grid.Left + (grid.Right - grid.Left) / 2d)),
+            0d,
+            2d);
+        Assert.InRange(centeredLeadIn.Right - centeredLeadIn.Left, 719d, 721d);
+        string[] headingAlignments = await page.EvaluateAsync<string[]>(
+            """
+            () => Array.from(
+              document.querySelectorAll(".pdf-semantic-ruled-grid-column-heading"),
+              heading => getComputedStyle(heading).textAlign
+            )
+            """);
+        Assert.Equal(3, headingAlignments.Length);
+        Assert.All(headingAlignments, static alignment => Assert.Equal("center", alignment));
+    }
+
+    [Fact]
     public async Task Convert_SemanticContinuousFlow_RendersResponsiveMeasuredThreeColumnGeometry()
     {
         using PDDocument document = CreateThreeColumnDocument(includeRuledTable: false);
@@ -8390,11 +8606,99 @@ public class PdfHtmlConverterTest
         return CreateSemanticHtmlFixture(lines, [diagram]);
     }
 
-    private static PdfLayoutDocument WithTaggedParagraphs(PdfLayoutDocument layout)
+    private static PdfLayoutDocument WithTaggedParagraphs(
+        PdfLayoutDocument layout,
+        bool groupReceiptGuidance = false,
+        bool groupRuledHeadings = false)
     {
         PdfLayoutPage page = Assert.Single(layout.Pages);
-        PdfTaggedStructureKid[] paragraphs = page.Runs
-            .Select((run, index) => new PdfTaggedElementKid(new PdfTaggedStructureElement(
+        PdfTextRun[] pageRuns = page.Runs.ToArray();
+        PdfTextRun[] receiptGuidanceRuns = groupReceiptGuidance
+            ? pageRuns.Where(static run =>
+                run.Text.StartsWith("Shared receipt guidance", StringComparison.Ordinal) ||
+                run.Text.StartsWith("May be presented", StringComparison.Ordinal) ||
+                run.Text.StartsWith("For receipt validity dates", StringComparison.Ordinal))
+                .ToArray()
+            : [];
+        PdfTextRun[][] ruledHeadingRuns = groupRuledHeadings
+            ? new[]
+                {
+                    new[] { "List A heading", "List A detail" },
+                    new[] { "List B heading", "List B detail" },
+                    new[] { "List C heading", "List C detail" },
+                    new[] { "Centered lead-in first line", "Centered lead-in second line" }
+                }
+                .Select(texts => pageRuns
+                    .Where(run => texts.Contains(run.Text, StringComparer.Ordinal))
+                    .OrderBy(static run => run.Bounds.Y)
+                    .ToArray())
+                .ToArray()
+            : [];
+        List<PdfTaggedStructureKid> paragraphs = [];
+        for (int index = 0; index < pageRuns.Length; index++)
+        {
+            PdfTextRun run = pageRuns[index];
+            PdfTextRun[]? ruledHeadingGroup = ruledHeadingRuns.FirstOrDefault(group =>
+                group.Contains(
+                    run,
+                    (IEqualityComparer<PdfTextRun>)ReferenceEqualityComparer.Instance));
+            if (ruledHeadingGroup != null)
+            {
+                if (!ReferenceEquals(run, ruledHeadingGroup[0]))
+                {
+                    continue;
+                }
+
+                paragraphs.Add(new PdfTaggedElementKid(new PdfTaggedStructureElement(
+                    "P",
+                    "P",
+                    PdfTaggedStructureKind.Paragraph,
+                    actualText: null,
+                    alternateDescription: null,
+                    language: null,
+                    title: null,
+                    new PdfTaggedStructureAttributes(),
+                    ruledHeadingGroup.Select(groupedRun =>
+                        new PdfTaggedContentKid(new PdfTaggedContentReference(
+                            page.PageNumber,
+                            Array.IndexOf(pageRuns, groupedRun),
+                            [groupedRun],
+                            [])))
+                        .Cast<PdfTaggedStructureKid>()
+                        .ToArray())));
+                continue;
+            }
+
+            if (receiptGuidanceRuns.Contains(
+                run,
+                (IEqualityComparer<PdfTextRun>)ReferenceEqualityComparer.Instance))
+            {
+                if (!ReferenceEquals(run, receiptGuidanceRuns[0]))
+                {
+                    continue;
+                }
+
+                paragraphs.Add(new PdfTaggedElementKid(new PdfTaggedStructureElement(
+                    "P",
+                    "P",
+                    PdfTaggedStructureKind.Paragraph,
+                    actualText: null,
+                    alternateDescription: null,
+                    language: null,
+                    title: null,
+                    new PdfTaggedStructureAttributes(),
+                    receiptGuidanceRuns.Select(groupedRun =>
+                        new PdfTaggedContentKid(new PdfTaggedContentReference(
+                            page.PageNumber,
+                            Array.IndexOf(pageRuns, groupedRun),
+                            [groupedRun],
+                            [])))
+                        .Cast<PdfTaggedStructureKid>()
+                        .ToArray())));
+                continue;
+            }
+
+            paragraphs.Add(new PdfTaggedElementKid(new PdfTaggedStructureElement(
                 "P",
                 "P",
                 PdfTaggedStructureKind.Paragraph,
@@ -8407,9 +8711,9 @@ public class PdfHtmlConverterTest
                     page.PageNumber,
                     index,
                     [run],
-                    []))])))
-            .Cast<PdfTaggedStructureKid>()
-            .ToArray();
+                    []))])));
+        }
+
         PdfTaggedStructureElement document = new(
             "Document",
             "Document",
@@ -8426,6 +8730,70 @@ public class PdfHtmlConverterTest
             layout.FontAssets,
             layout.Diagnostics,
             new PdfTaggedStructureDocument([document]));
+    }
+
+    private static PdfLayoutDocument CreateTaggedRuledThreeLaneLayoutFixture()
+    {
+        List<PdfTextLine> lines =
+        [
+            CreateScientificFixtureLine("Tagged ruled layout reference", 186f, 52f, 240f, 14f, "Times-Bold"),
+            CreateScientificFixtureLine("Centered lead-in first line", 176f, 70f, 260f, 10f),
+            CreateScientificFixtureLine("Centered lead-in second line", 196f, 82f, 220f, 10f),
+            CreateScientificFixtureLine("List A heading", 82f, 112f, 70f, 8f, "Helvetica-Bold"),
+            CreateScientificFixtureLine("List A detail", 54f, 124f, 126f, 8f, "Helvetica-Bold"),
+            CreateScientificFixtureLine("List A primary content", 54f, 152f, 132f, 8f),
+            CreateScientificFixtureLine("OR", 200f, 136f, 14f, 8f, "Helvetica-Bold"),
+            CreateScientificFixtureLine("List B heading", 268f, 112f, 72f, 8f, "Helvetica-Bold"),
+            CreateScientificFixtureLine("List B detail", 234f, 124f, 140f, 8f, "Helvetica-Bold"),
+            CreateScientificFixtureLine("List B primary content", 234f, 152f, 150f, 8f),
+            CreateScientificFixtureLine("AND", 390f, 136f, 20f, 8f, "Helvetica-Bold"),
+            CreateScientificFixtureLine("List C heading", 452f, 112f, 72f, 8f, "Helvetica-Bold"),
+            CreateScientificFixtureLine("List C detail", 420f, 124f, 136f, 8f, "Helvetica-Bold"),
+            CreateScientificFixtureLine("List C primary content", 420f, 152f, 144f, 8f),
+            CreateScientificFixtureLine("Shared receipt guidance", 216f, 318f, 180f, 10f, "Helvetica-Bold"),
+            CreateScientificFixtureLine("May be presented in place of a document listed above.", 126f, 330f, 360f, 10f),
+            CreateScientificFixtureLine("For receipt validity dates, see the source guidance.", 156f, 342f, 300f, 10f),
+            CreateScientificFixtureLine("List A receipt", 54f, 372f, 126f, 8f),
+            CreateScientificFixtureLine("List B receipt", 234f, 372f, 140f, 8f),
+            CreateScientificFixtureLine("List C receipt", 420f, 372f, 136f, 8f),
+            CreateScientificFixtureLine("Closing prose remains outside the ruled region.", 72f, 548f, 360f)
+        ];
+        PdfLayoutColor color = new(0f, 0f, 0f, 1f, "DeviceGray");
+        PdfLayoutRectangle region = new(36f, 100f, 540f, 400f);
+        PdfLayoutPath[] paths =
+        [
+            CreateRuledGridOutlinePath(201, region, color),
+            CreateSemanticRulePath(202, 198f, region.Y, 198f, region.Bottom, 0.5f, color),
+            CreateSemanticRulePath(203, 216f, region.Y, 216f, region.Bottom, 0.5f, color),
+            CreateSemanticRulePath(204, 402f, 142f, 402f, region.Bottom, 0.5f, color),
+            CreateSemanticRulePath(205, region.X, 312f, region.Right, 312f, 0.5f, color),
+            CreateSemanticRulePath(206, region.X, 350f, region.Right, 350f, 0.5f, color),
+            CreateSemanticRulePath(207, 39f, 36f, 573f, 36f, 6f, color),
+            CreateSemanticRulePath(208, region.X, 42f, region.Right, 42f, 0.72f, color),
+            CreateSemanticRulePath(209, region.X, 142f, region.Right, 142f, 0.5f, color)
+        ];
+        return CreateSemanticHtmlFixture(lines, paths);
+    }
+
+    private static PdfLayoutPath CreateRuledGridOutlinePath(
+        int index,
+        PdfLayoutRectangle bounds,
+        PdfLayoutColor color)
+    {
+        PdfLayoutStrokeStyle stroke = new(color, 0.5f, 0, 0, 10f, [], 0f);
+        return new PdfLayoutPath(
+            index,
+            [
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.MoveTo, bounds.X, bounds.Y, 0f, 0f, 0f, 0f),
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, bounds.Right, bounds.Y, 0f, 0f, 0f, 0f),
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, bounds.Right, bounds.Bottom, 0f, 0f, 0f, 0f),
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.LineTo, bounds.X, bounds.Bottom, 0f, 0f, 0f, 0f),
+                new PdfLayoutPathCommand(PdfLayoutPathCommandKind.ClosePath, 0f, 0f, 0f, 0f, 0f, 0f)
+            ],
+            bounds,
+            null,
+            stroke,
+            null);
     }
 
     private static PdfLayoutDocument CreateSideBySideSemanticRuleLayoutFixture()

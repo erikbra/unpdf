@@ -84,6 +84,63 @@ public sealed class PdfHtmlTaggedStructureTest
     }
 
     [Fact]
+    public void Convert_SemanticMode_PromotesEmbeddedMarkersToNativeLists()
+    {
+        using TaggedFixture fixture = new();
+        PDStructureElement document = fixture.AddElement(fixture.Root, StandardStructureTypes.Document);
+
+        PDStructureElement decimalList = fixture.AddElement(document, StandardStructureTypes.L);
+        AddEmbeddedListItem(fixture, decimalList, "10.Tenth item", 700);
+        AddEmbeddedListItem(fixture, decimalList, "11.Eleventh item", 675);
+
+        PDStructureElement alphaList = fixture.AddElement(document, StandardStructureTypes.L);
+        AddEmbeddedListItem(fixture, alphaList, "a.Alpha item", 640);
+        AddEmbeddedListItem(fixture, alphaList, "b.Beta item", 615);
+
+        // Some tagged PDFs put a nested list directly after the preceding LI
+        // instead of inside its LBody.
+        PDStructureElement parenthesizedList = fixture.AddElement(alphaList, StandardStructureTypes.L);
+        AddEmbeddedListItem(fixture, parenthesizedList, "(1)Parenthesized item", 580);
+        AddEmbeddedListItem(fixture, parenthesizedList, "(2)Another parenthesized item", 555);
+
+        PDStructureElement bulletList = fixture.AddElement(document, StandardStructureTypes.L);
+        AddEmbeddedListItem(fixture, bulletList, "•First bullet", 520);
+        AddEmbeddedListItem(fixture, bulletList, "•Second bullet", 495);
+
+        XDocument dom = Convert(fixture);
+
+        XElement[] orderedLists = dom.Descendants("ol").ToArray();
+        Assert.Equal(3, orderedLists.Length);
+        XElement decimalResult = Assert.Single(orderedLists, static list =>
+            list.Attribute("start")?.Value == "10");
+        Assert.Equal(
+            ["Tenth item", "Eleventh item"],
+            decimalResult.Elements("li").Select(static item => item.Value.Trim()));
+        Assert.Equal(["10", "11"], decimalResult.Elements("li").Select(static item => item.Attribute("value")?.Value));
+
+        XElement alphaResult = Assert.Single(orderedLists, static list =>
+            list.Attribute("type")?.Value == "a");
+        XElement[] alphaItems = alphaResult.Elements("li").ToArray();
+        Assert.Equal(2, alphaItems.Length);
+        Assert.Equal("Alpha item", alphaItems[0].Value.Trim());
+        Assert.StartsWith("Beta item", alphaItems[1].Value.Trim(), StringComparison.Ordinal);
+
+        XElement parenthesizedResult = Assert.Single(orderedLists, static list =>
+            (list.Attribute("class")?.Value ?? "").Split(' ')
+                .Contains("pdf-semantic-list-marker-parenthesized", StringComparer.Ordinal));
+        Assert.Same(alphaItems[1], parenthesizedResult.Parent);
+        Assert.Equal(
+            ["Parenthesized item", "Another parenthesized item"],
+            parenthesizedResult.Elements("li").Select(static item => item.Value.Trim()));
+
+        XElement unorderedList = Assert.Single(dom.Descendants("ul"));
+        Assert.Equal(
+            ["First bullet", "Second bullet"],
+            unorderedList.Elements("li").Select(static item => item.Value.Trim()));
+        Assert.DoesNotContain("•", unorderedList.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Convert_SemanticMode_OmitsMarkerOnlyTaggedLists()
     {
         using TaggedFixture fixture = new();
@@ -130,6 +187,17 @@ public sealed class PdfHtmlTaggedStructureTest
         PDStructureElement item = fixture.AddElement(list, StandardStructureTypes.LI);
         fixture.WriteText(fixture.AddElement(item, StandardStructureTypes.Lbl), label, y, labelX);
         fixture.WriteText(fixture.AddElement(item, StandardStructureTypes.LBody), body, y, labelX + 24);
+        return item;
+    }
+
+    private static PDStructureElement AddEmbeddedListItem(
+        TaggedFixture fixture,
+        PDStructureElement list,
+        string text,
+        float y)
+    {
+        PDStructureElement item = fixture.AddElement(list, StandardStructureTypes.LI);
+        fixture.WriteText(item, text, y);
         return item;
     }
 

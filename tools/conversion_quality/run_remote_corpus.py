@@ -211,16 +211,25 @@ def _validate_expectations(expectations: dict[str, Any], prefix: str) -> None:
                     f"{prefix} expectations.minImagePlacementsByPage values must be non-negative integers"
                 )
 
-    semantic_lists_by_page = expectations.get("semanticOrderedListItemCountsByPage")
-    if semantic_lists_by_page is not None:
+    for expectation_name in (
+        "semanticOrderedListItemCountsByPage",
+        "semanticUnorderedListItemCountsByPage",
+    ):
+        semantic_lists_by_page = expectations.get(expectation_name)
+        if semantic_lists_by_page is None:
+            continue
         if not isinstance(semantic_lists_by_page, dict) or not semantic_lists_by_page:
             raise ValueError(
-                f"{prefix} expectations.semanticOrderedListItemCountsByPage must be a non-empty object"
+                f"{prefix} expectations.{expectation_name} must be a non-empty object"
             )
         for page_number, item_counts in semantic_lists_by_page.items():
-            if not isinstance(page_number, str) or not page_number.isdigit() or int(page_number) < 1:
+            if (
+                not isinstance(page_number, str)
+                or not page_number.isdigit()
+                or int(page_number) < 1
+            ):
                 raise ValueError(
-                    f"{prefix} expectations.semanticOrderedListItemCountsByPage keys must be positive page numbers"
+                    f"{prefix} expectations.{expectation_name} keys must be positive page numbers"
                 )
             if (
                 not isinstance(item_counts, list)
@@ -233,7 +242,7 @@ def _validate_expectations(expectations: dict[str, Any], prefix: str) -> None:
                 )
             ):
                 raise ValueError(
-                    f"{prefix} expectations.semanticOrderedListItemCountsByPage values must be non-empty positive integer arrays"
+                    f"{prefix} expectations.{expectation_name} values must be non-empty positive integer arrays"
                 )
 
     semantic_mixed_regions_by_page = expectations.get("semanticMixedRegionCountsByPage")
@@ -250,6 +259,48 @@ def _validate_expectations(expectations: dict[str, Any], prefix: str) -> None:
             if not isinstance(count, int) or isinstance(count, bool) or count < 1:
                 raise ValueError(
                     f"{prefix} expectations.semanticMixedRegionCountsByPage values must be positive integers"
+                )
+
+    semantic_ruled_grid_columns_by_page = expectations.get(
+        "semanticRuledGridColumnCountsByPage"
+    )
+    if semantic_ruled_grid_columns_by_page is not None:
+        if (
+            not isinstance(semantic_ruled_grid_columns_by_page, dict)
+            or not semantic_ruled_grid_columns_by_page
+        ):
+            raise ValueError(
+                f"{prefix} expectations.semanticRuledGridColumnCountsByPage must be a non-empty object"
+            )
+        for page_number, count in semantic_ruled_grid_columns_by_page.items():
+            if not isinstance(page_number, str) or not page_number.isdigit() or int(page_number) < 1:
+                raise ValueError(
+                    f"{prefix} expectations.semanticRuledGridColumnCountsByPage keys must be positive page numbers"
+                )
+            if not isinstance(count, int) or isinstance(count, bool) or count < 2:
+                raise ValueError(
+                    f"{prefix} expectations.semanticRuledGridColumnCountsByPage values must be integers of at least two"
+                )
+
+    semantic_ruled_grid_borders_by_page = expectations.get(
+        "semanticRuledGridSourceBorderCountsByPage"
+    )
+    if semantic_ruled_grid_borders_by_page is not None:
+        if (
+            not isinstance(semantic_ruled_grid_borders_by_page, dict)
+            or not semantic_ruled_grid_borders_by_page
+        ):
+            raise ValueError(
+                f"{prefix} expectations.semanticRuledGridSourceBorderCountsByPage must be a non-empty object"
+            )
+        for page_number, count in semantic_ruled_grid_borders_by_page.items():
+            if not isinstance(page_number, str) or not page_number.isdigit() or int(page_number) < 1:
+                raise ValueError(
+                    f"{prefix} expectations.semanticRuledGridSourceBorderCountsByPage keys must be positive page numbers"
+                )
+            if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+                raise ValueError(
+                    f"{prefix} expectations.semanticRuledGridSourceBorderCountsByPage values must be positive integers"
                 )
 
 
