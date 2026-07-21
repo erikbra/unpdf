@@ -214,8 +214,9 @@ public class PdfHtmlComputerModernTest
             narrow.FormulaScrollWidth <= narrow.FormulaClientWidth + 1,
             $"Numbered formula overflowed horizontally: {narrow.FormulaScrollWidth:0.###}px > {narrow.FormulaClientWidth:0.###}px.");
         Assert.True(
-            narrow.ExpressionScrollWidth > narrow.ExpressionClientWidth,
-            "Expected the narrow MathML expression slot to scroll internally.");
+            narrow.ExpressionScrollWidth <= narrow.ExpressionClientWidth + 1,
+            $"MathML expression overflowed its widened narrow-screen slot: " +
+            $"{narrow.ExpressionScrollWidth:0.###}px > {narrow.ExpressionClientWidth:0.###}px.");
     }
 
     [Fact]

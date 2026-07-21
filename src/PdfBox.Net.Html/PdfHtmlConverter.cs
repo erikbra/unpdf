@@ -75,14 +75,21 @@ public static class PdfHtmlConverter
           --pdf-page-background: #fff;
           --pdf-page-corner-shadow: 22pt;
           --pdf-page-edge-shadow: rgba(17, 24, 39, 0.16);
+          --pdf-page-gutter: 24pt;
           --pdf-page-shadow-mask: 6pt;
           --pdf-page-surround: #f3f4f6;
-          --pdf-page-width: min(612pt, calc(100vw - 48pt));
+          --pdf-page-width: min(612pt, calc(100vw - var(--pdf-page-gutter) - var(--pdf-page-gutter)));
+          --pdf-semantic-content-gutter: 72pt;
           background: var(--pdf-page-surround);
           color: #111827;
           font-family: Arial, Helvetica, sans-serif;
           margin: 0;
-          padding: 24pt;
+          padding: 24pt var(--pdf-page-gutter);
+        }
+
+        .pdf-document-continuous {
+          --pdf-page-gutter: min(24pt, 4vw);
+          --pdf-semantic-content-gutter: min(72pt, 10vw);
         }
 
         .pdf-page {
@@ -639,7 +646,7 @@ public static class PdfHtmlConverter
           box-shadow: 0 1pt 4pt var(--pdf-page-edge-shadow);
           box-sizing: border-box;
           margin: 0 auto 24pt;
-          padding: 54pt 72pt 48pt;
+          padding: 54pt var(--pdf-semantic-content-gutter) 48pt;
           position: relative;
           width: var(--pdf-page-width);
         }

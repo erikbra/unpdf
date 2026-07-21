@@ -5025,7 +5025,13 @@ public class PdfHtmlConverterTest
         Assert.Contains("pdf-document-continuous", dom.Descendants("body").Single().Attribute("class")?.Value);
         Assert.Contains(".pdf-semantic-page-break", html.Css, StringComparison.Ordinal);
         Assert.Contains(".pdf-semantic-continuous-flow .pdf-semantic-page-break::after", html.Css, StringComparison.Ordinal);
-        Assert.Contains("--pdf-page-width: min(612pt, calc(100vw - 48pt))", html.Css, StringComparison.Ordinal);
+        Assert.Contains(".pdf-document-continuous", html.Css, StringComparison.Ordinal);
+        Assert.Contains("--pdf-page-gutter: min(24pt, 4vw)", html.Css, StringComparison.Ordinal);
+        Assert.Contains(
+            "--pdf-page-width: min(612pt, calc(100vw - var(--pdf-page-gutter) - var(--pdf-page-gutter)))",
+            html.Css,
+            StringComparison.Ordinal);
+        Assert.Contains("--pdf-semantic-content-gutter: min(72pt, 10vw)", html.Css, StringComparison.Ordinal);
         Assert.Contains("--pdf-page-corner-shadow: 22pt", html.Css, StringComparison.Ordinal);
         Assert.Contains("background: var(--pdf-page-surround)", html.Css, StringComparison.Ordinal);
         Assert.Contains("radial-gradient(ellipse at right top", html.Css, StringComparison.Ordinal);
@@ -5750,6 +5756,26 @@ public class PdfHtmlConverterTest
         Assert.True(
             metrics.ChildRightOverflow <= 1.0,
             $"Continuous semantic flow extends {metrics.ChildRightOverflow:0.###} CSS pixels outside the document column.");
+
+        await page.SetViewportSizeAsync(390, 1400);
+        double[] narrowGeometry = await page.EvaluateAsync<double[]>(
+            """
+            () => {
+              const documentBox = document.querySelector(".pdf-semantic-document-flow").getBoundingClientRect();
+              const flowBox = document.querySelector(".pdf-semantic-continuous-flow").getBoundingClientRect();
+              return [
+                documentBox.left / window.innerWidth,
+                documentBox.width / window.innerWidth,
+                flowBox.left / window.innerWidth,
+                flowBox.width / window.innerWidth
+              ];
+            }
+            """);
+
+        Assert.InRange(narrowGeometry[0], 0.039, 0.041);
+        Assert.InRange(narrowGeometry[1], 0.919, 0.921);
+        Assert.InRange(narrowGeometry[2], 0.139, 0.141);
+        Assert.InRange(narrowGeometry[3], 0.719, 0.721);
     }
 
     [Fact]
