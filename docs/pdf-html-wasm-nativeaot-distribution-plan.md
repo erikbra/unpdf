@@ -49,7 +49,8 @@ Deliver a standalone Blazor WebAssembly application that:
 - reads the file into memory without uploading it;
 - extracts layout with images and raster fallbacks disabled;
 - creates continuous semantic HTML;
-- inlines generated CSS and browser-safe assets into an iframe preview; and
+- stores generated HTML, CSS, and browser-safe assets in a revocable Blob URL
+  session for the iframe preview, with a `srcdoc` fallback; and
 - displays conversion time, page count, input size, and diagnostics.
 
 Quality gates:

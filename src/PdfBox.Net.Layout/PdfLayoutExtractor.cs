@@ -73,31 +73,137 @@ public static class PdfLayoutExtractor
         ArgumentNullException.ThrowIfNull(document);
 
         options ??= new PdfLayoutOptions();
-        LayoutTextStripper stripper = new(options);
+        return ExtractRange(document, options, 1, int.MaxValue, includeTaggedStructure: true);
+    }
+
+    /// <summary>
+    /// Extracts a PDF one page at a time, yielding to the caller between pages so progress
+    /// can be rendered and cancellation can be observed without retaining intermediate extractors.
+    /// </summary>
+    /// <param name="document">The PDF document.</param>
+    /// <param name="options">Extraction options.</param>
+    /// <param name="progress">Optional page-boundary progress receiver.</param>
+    /// <param name="cancellationToken">Token observed before every page and before final document assembly.</param>
+    /// <returns>The extracted layout document.</returns>
+    public static async Task<PdfLayoutDocument> ExtractAsync(
+        PDDocument document,
+        PdfLayoutOptions? options = null,
+        IProgress<PdfLayoutExtractionProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        options ??= new PdfLayoutOptions();
+        int totalPages = document.GetNumberOfPages();
+        List<PdfLayoutPage> pages = new(totalPages);
+        IncrementalExtractionState state = new(options);
+
+        for (int pageNumber = 1; pageNumber <= totalPages; pageNumber++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            PdfLayoutDocument pageDocument = ExtractRange(
+                document,
+                options,
+                pageNumber,
+                pageNumber,
+                includeTaggedStructure: false,
+                state);
+            pages.AddRange(pageDocument.Pages);
+            foreach (PdfLayoutDiagnostic diagnostic in pageDocument.Diagnostics)
+            {
+                if (!state.Diagnostics.Contains(diagnostic))
+                {
+                    state.Diagnostics.Add(diagnostic);
+                }
+            }
+
+            progress?.Report(new PdfLayoutExtractionProgress(pageNumber, totalPages));
+            await Task.Yield();
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        PdfLayoutPage[] extractedPages = pages.OrderBy(static page => page.PageNumber).ToArray();
+        (PdfTaggedStructureDocument? taggedStructure, IReadOnlyList<PdfLayoutDiagnostic> taggedDiagnostics) =
+            PdfTaggedStructureExtractor.Extract(document, extractedPages);
+        return new PdfLayoutDocument(
+            extractedPages,
+            state.ImageAssets.Assets,
+            state.FontAssets.Assets,
+            state.Diagnostics.Concat(taggedDiagnostics).Distinct().ToArray(),
+            taggedStructure);
+    }
+
+    private static PdfLayoutDocument ExtractRange(
+        PDDocument document,
+        PdfLayoutOptions options,
+        int startPage,
+        int endPage,
+        bool includeTaggedStructure,
+        IncrementalExtractionState? incrementalState = null)
+    {
+        LayoutTextStripper stripper = new(
+            options,
+            startPage,
+            endPage,
+            includeTaggedStructure,
+            incrementalState);
         using StringWriter output = new(CultureInfo.InvariantCulture);
         stripper.WriteText(document, output);
         return stripper.CreateDocument();
     }
 
+    private sealed class IncrementalExtractionState
+    {
+        public IncrementalExtractionState(PdfLayoutOptions options)
+        {
+            FontAssets = new EmbeddedFontAssetCollector(options.IncludeFontAssets, Diagnostics);
+        }
+
+        public List<PdfLayoutDiagnostic> Diagnostics { get; } = [];
+
+        public ImageAssetCollector ImageAssets { get; } = new();
+
+        public EmbeddedFontAssetCollector FontAssets { get; }
+    }
+
     private sealed class LayoutTextStripper : PDFTextStripper
     {
         private readonly PdfLayoutOptions _options;
+        private readonly int _startPage;
+        private readonly int _endPage;
+        private readonly bool _includeTaggedStructure;
         private readonly List<PageBuilder> _pages = new();
-        private readonly List<PdfLayoutDiagnostic> _diagnostics = new();
+        private readonly Dictionary<int, PageBuilder> _pagesByNumber = [];
+        private readonly List<PdfLayoutDiagnostic> _diagnostics;
+        private readonly bool _resetExtractionState;
         private readonly Dictionary<TextPosition, PdfLayoutColor> _textColors = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<TextPosition, bool> _textPaintStates = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<TextPosition, int?> _textMarkedContentIds = new(ReferenceEqualityComparer.Instance);
         private readonly Stack<MarkedContentCapture> _markedContent = new();
-        private readonly ImageAssetCollector _imageAssets = new();
+        private readonly ImageAssetCollector _imageAssets;
         private readonly EmbeddedFontAssetCollector _fontAssets;
         private PDColorManagementContext? _colorManagementContext;
         private PageBuilder? _currentPage;
         private PDDocument? _document;
 
-        public LayoutTextStripper(PdfLayoutOptions options)
+        public LayoutTextStripper(
+            PdfLayoutOptions options,
+            int startPage,
+            int endPage,
+            bool includeTaggedStructure,
+            IncrementalExtractionState? incrementalState)
         {
             _options = options;
-            _fontAssets = new EmbeddedFontAssetCollector(options.IncludeFontAssets, _diagnostics);
+            _startPage = startPage;
+            _endPage = endPage;
+            _includeTaggedStructure = includeTaggedStructure;
+            _resetExtractionState = incrementalState == null;
+            _diagnostics = incrementalState?.Diagnostics ?? [];
+            _imageAssets = incrementalState?.ImageAssets ?? new ImageAssetCollector();
+            _fontAssets = incrementalState?.FontAssets ??
+                new EmbeddedFontAssetCollector(options.IncludeFontAssets, _diagnostics);
+            SetStartPage(startPage);
+            SetEndPage(endPage);
             SetSortByPosition(options.SortTextByPosition);
             SetSuppressDuplicateOverlappingText(options.SuppressDuplicateOverlappingText);
             SetShouldSeparateByBeads(options.SeparateByBeads);
@@ -106,13 +212,17 @@ public static class PdfLayoutExtractor
         protected override void StartDocument(PDDocument document)
         {
             _pages.Clear();
-            _diagnostics.Clear();
+            _pagesByNumber.Clear();
             _textColors.Clear();
             _textPaintStates.Clear();
             _textMarkedContentIds.Clear();
             _markedContent.Clear();
-            _imageAssets.Clear();
-            _fontAssets.Clear();
+            if (_resetExtractionState)
+            {
+                _diagnostics.Clear();
+                _imageAssets.Clear();
+                _fontAssets.Clear();
+            }
             _colorManagementContext = PDColorManagementContext.Create(document);
             _currentPage = null;
             _document = document;
@@ -130,15 +240,21 @@ public static class PdfLayoutExtractor
             int pageIndex = 0;
             foreach (PDPage page in document.GetPages())
             {
-                _pages.Add(new PageBuilder(
-                    pageNumber,
-                    pageIndex,
-                    page,
-                    document,
-                    _options,
-                    _imageAssets,
-                    _colorManagementContext,
-                    acroForm));
+                if (pageNumber >= _startPage && pageNumber <= _endPage)
+                {
+                    PageBuilder builder = new(
+                        pageNumber,
+                        pageIndex,
+                        page,
+                        document,
+                        _options,
+                        _imageAssets,
+                        _colorManagementContext,
+                        acroForm);
+                    _pages.Add(builder);
+                    _pagesByNumber.Add(pageNumber, builder);
+                }
+
                 pageNumber++;
                 pageIndex++;
             }
@@ -148,9 +264,7 @@ public static class PdfLayoutExtractor
         {
             _markedContent.Clear();
             int pageNumber = GetCurrentPageNo();
-            _currentPage = pageNumber >= 1 && pageNumber <= _pages.Count
-                ? _pages[pageNumber - 1]
-                : null;
+            _currentPage = _pagesByNumber.GetValueOrDefault(pageNumber);
         }
 
         protected override void WritePage()
@@ -228,7 +342,7 @@ public static class PdfLayoutExtractor
             PdfLayoutImageAsset[] imageAssets = _imageAssets.Assets.ToArray();
             PdfLayoutFontAsset[] fontAssets = _fontAssets.Assets.ToArray();
             (PdfTaggedStructureDocument? taggedStructure, IReadOnlyList<PdfLayoutDiagnostic> taggedDiagnostics) =
-                _document == null
+                _document == null || !_includeTaggedStructure
                     ? (null, [])
                     : PdfTaggedStructureExtractor.Extract(_document, pages);
             PdfLayoutDiagnostic[] diagnostics = _diagnostics

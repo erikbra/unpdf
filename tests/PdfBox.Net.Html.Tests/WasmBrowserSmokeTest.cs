@@ -69,7 +69,13 @@ public sealed class WasmBrowserSmokeTest
             });
             IPage page = await browser.NewPageAsync();
             List<string> conversionRequests = [];
-            page.Request += (_, request) => conversionRequests.Add($"{request.Method} {request.Url}");
+            page.Request += (_, request) =>
+            {
+                if (IsNetworkRequest(request.Url))
+                {
+                    conversionRequests.Add($"{request.Method} {request.Url}");
+                }
+            };
 
             await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
             WasmPerformanceBaseline performanceBaseline = ReadPerformanceBaseline(repositoryRoot);
@@ -107,6 +113,35 @@ public sealed class WasmBrowserSmokeTest
                 conversionRequests.Count <= performanceBaseline.DeterministicConversion.MaximumNetworkRequests);
             Assert.Equal("1", await page.Locator(".metrics dd").Nth(1).InnerTextAsync());
             Assert.Equal(1, await preview.Locator("[data-page-number='1']").CountAsync());
+            string? previewSource = await page.Locator("iframe[title='Converted HTML preview']").GetAttributeAsync("src");
+            Assert.StartsWith("blob:", previewSource, StringComparison.Ordinal);
+            Assert.Equal(
+                1,
+                await page.EvaluateAsync<int>("() => window.unpdf.preview.activeSessionCount()"));
+            int fullInputCopies = int.Parse(
+                (await page.Locator("[data-metric='input-copies'] dd").InnerTextAsync())
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)[0],
+                System.Globalization.CultureInfo.InvariantCulture);
+            Assert.InRange(
+                fullInputCopies,
+                1,
+                performanceBaseline.DeterministicConversion.MaximumFullInputCopies);
+            long managedHeapGrowth = long.Parse(
+                await page.Locator("[data-metric='managed-heap'] dd").GetAttributeAsync("data-growth-bytes")
+                    ?? "-1",
+                System.Globalization.CultureInfo.InvariantCulture);
+            Assert.InRange(
+                managedHeapGrowth,
+                0,
+                performanceBaseline.DeterministicConversion.MaximumManagedHeapGrowthBytes);
+            long wasmMemoryGrowth = long.Parse(
+                await page.Locator("[data-metric='wasm-memory'] dd").GetAttributeAsync("data-growth-bytes")
+                    ?? "-1",
+                System.Globalization.CultureInfo.InvariantCulture);
+            Assert.InRange(
+                wasmMemoryGrowth,
+                0,
+                performanceBaseline.DeterministicConversion.MaximumWasmMemoryGrowthBytes);
             string applicationDuration = await page.Locator(".metrics dd").Nth(2).InnerTextAsync();
             long applicationMilliseconds = long.Parse(
                 applicationDuration.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0],
@@ -210,7 +245,13 @@ public sealed class WasmBrowserSmokeTest
             });
             IPage page = await browser.NewPageAsync();
             List<string> conversionRequests = [];
-            page.Request += (_, request) => conversionRequests.Add($"{request.Method} {request.Url}");
+            page.Request += (_, request) =>
+            {
+                if (IsNetworkRequest(request.Url))
+                {
+                    conversionRequests.Add($"{request.Method} {request.Url}");
+                }
+            };
             await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
             conversionRequests.Clear();
 
@@ -317,7 +358,13 @@ public sealed class WasmBrowserSmokeTest
             });
             IPage page = await browser.NewPageAsync();
             List<string> conversionRequests = [];
-            page.Request += (_, request) => conversionRequests.Add($"{request.Method} {request.Url}");
+            page.Request += (_, request) =>
+            {
+                if (IsNetworkRequest(request.Url))
+                {
+                    conversionRequests.Add($"{request.Method} {request.Url}");
+                }
+            };
             await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
             conversionRequests.Clear();
 
@@ -333,6 +380,189 @@ public sealed class WasmBrowserSmokeTest
             Assert.Empty(conversionRequests);
             Assert.True(await preview.Locator("img.pdf-image").CountAsync() > 0);
             Assert.Equal(0, await page.Locator(".status.error").CountAsync());
+        }
+        finally
+        {
+            StopServer(server);
+            Directory.Delete(Path.GetDirectoryName(fixture)!, recursive: true);
+        }
+    }
+
+    [Fact(Timeout = 120_000)]
+    public async Task BrowserAdaptive_PreviewBlobSessionsAreRevokedAndSrcdocFallbackRemainsFunctional()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        int port = ReservePort();
+        using Process server = StartServer(repositoryRoot, port);
+
+        try
+        {
+            Uri appUri = new($"http://127.0.0.1:{port}");
+            await WaitForServerAsync(appUri, server);
+
+            using IPlaywright playwright = await Playwright.CreateAsync();
+            await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
+            IPage page = await browser.NewPageAsync();
+            await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            string fixture = Path.Combine(
+                repositoryRoot,
+                "tests",
+                "SharedFixtures",
+                "classic-xref-fixture.pdf");
+
+            await page.Locator("input[type=file]").SetInputFilesAsync(fixture);
+            await page.Locator("[data-metric='preview-store'] dd").WaitForAsync();
+            Assert.Equal(
+                "revocable Blob URLs",
+                await page.Locator("[data-metric='preview-store'] dd").InnerTextAsync());
+            Assert.Equal(
+                1,
+                await page.EvaluateAsync<int>("() => window.unpdf.preview.activeSessionCount()"));
+
+            ILocator sampleButton = page.GetByRole(AriaRole.Button, new PageGetByRoleOptions
+            {
+                Name = "Try the built-in sample",
+                Exact = true
+            });
+            await sampleButton.ClickAsync();
+            await page.GetByText("hello.pdf", new PageGetByTextOptions { Exact = true }).WaitForAsync();
+            Assert.Equal(
+                1,
+                await page.EvaluateAsync<int>("() => window.unpdf.preview.activeSessionCount()"));
+
+            await page.EvaluateAsync("() => window.unpdf.preview.setBlobSupportOverride(false)");
+            await sampleButton.ClickAsync();
+            await page.GetByText("srcdoc fallback", new PageGetByTextOptions { Exact = true }).WaitForAsync();
+            Assert.Equal(
+                0,
+                await page.EvaluateAsync<int>("() => window.unpdf.preview.activeSessionCount()"));
+            string? inlinePreview = await page.Locator("iframe[title='Converted HTML preview']")
+                .GetAttributeAsync("srcdoc");
+            Assert.False(string.IsNullOrWhiteSpace(inlinePreview));
+            await page.FrameLocator("iframe[title='Converted HTML preview']")
+                .GetByText("Hello", new FrameLocatorGetByTextOptions { Exact = true })
+                .WaitForAsync();
+        }
+        finally
+        {
+            StopServer(server);
+        }
+    }
+
+    [Fact(Timeout = 120_000)]
+    public async Task BrowserAdaptive_TruncatedInputReportsErrorAndReleasesPreviewResources()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        int port = ReservePort();
+        string temporaryDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        string truncatedFixture = Path.Combine(temporaryDirectory, "truncated.pdf");
+        Directory.CreateDirectory(temporaryDirectory);
+        byte[] validInput = File.ReadAllBytes(Path.Combine(
+            repositoryRoot,
+            "tests",
+            "SharedFixtures",
+            "classic-xref-fixture.pdf"));
+        File.WriteAllBytes(truncatedFixture, validInput[..Math.Min(64, validInput.Length)]);
+        using Process server = StartServer(repositoryRoot, port);
+
+        try
+        {
+            Uri appUri = new($"http://127.0.0.1:{port}");
+            await WaitForServerAsync(appUri, server);
+
+            using IPlaywright playwright = await Playwright.CreateAsync();
+            await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
+            IPage page = await browser.NewPageAsync();
+            await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            string validFixture = Path.Combine(
+                repositoryRoot,
+                "tests",
+                "SharedFixtures",
+                "classic-xref-fixture.pdf");
+            await page.Locator("input[type=file]").SetInputFilesAsync(validFixture);
+            await page.Locator("[data-metric='preview-store'] dd").WaitForAsync();
+            Assert.Equal(
+                1,
+                await page.EvaluateAsync<int>("() => window.unpdf.preview.activeSessionCount()"));
+
+            await page.Locator("input[type=file]").SetInputFilesAsync(truncatedFixture);
+            await page.Locator(".status.error").WaitForAsync();
+
+            Assert.Contains(
+                "Conversion failed:",
+                await page.Locator(".status.error").InnerTextAsync(),
+                StringComparison.Ordinal);
+            Assert.Equal(
+                0,
+                await page.EvaluateAsync<int>("() => window.unpdf.preview.activeSessionCount()"));
+            Assert.True(await page.Locator("input[type=file]").IsEnabledAsync());
+            Assert.Equal(0, await page.Locator("iframe[title='Converted HTML preview']").CountAsync());
+        }
+        finally
+        {
+            StopServer(server);
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Fact(Timeout = 120_000)]
+    public async Task BrowserAdaptive_MultiPageFixtureReportsFirstPageAndKeepsInputCopiesBounded()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        WasmPerformanceBaseline performanceBaseline = ReadPerformanceBaseline(repositoryRoot);
+        int port = ReservePort();
+        string fixture = CreateRepeatedPagePdf(pageCount: 24);
+        using Process server = StartServer(repositoryRoot, port);
+
+        try
+        {
+            Uri appUri = new($"http://127.0.0.1:{port}");
+            await WaitForServerAsync(appUri, server);
+
+            using IPlaywright playwright = await Playwright.CreateAsync();
+            await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
+            IPage page = await browser.NewPageAsync();
+            await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+
+            await page.Locator("input[type=file]").SetInputFilesAsync(fixture);
+            await page.GetByText("wasm-many-pages.pdf", new PageGetByTextOptions { Exact = true }).WaitForAsync();
+
+            Assert.Equal("24", await page.Locator("[data-metric='pages'] dd").InnerTextAsync());
+            Assert.Equal(
+                24,
+                await page.FrameLocator("iframe[title='Converted HTML preview']")
+                    .Locator("[data-page-number]")
+                    .CountAsync());
+            int fullInputCopies = int.Parse(
+                (await page.Locator("[data-metric='input-copies'] dd").InnerTextAsync())
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)[0],
+                System.Globalization.CultureInfo.InvariantCulture);
+            Assert.Equal(performanceBaseline.DeterministicConversion.MaximumFullInputCopies, fullInputCopies);
+            long firstPageMilliseconds = MetricMilliseconds(
+                await page.Locator("[data-metric='first-page'] dd").InnerTextAsync());
+            long totalMilliseconds = MetricMilliseconds(
+                await page.Locator("[data-metric='time'] dd").InnerTextAsync());
+            Assert.InRange(firstPageMilliseconds, 1, totalMilliseconds);
+            long managedHeapGrowth = long.Parse(
+                await page.Locator("[data-metric='managed-heap'] dd").GetAttributeAsync("data-growth-bytes")
+                    ?? "-1",
+                System.Globalization.CultureInfo.InvariantCulture);
+            Assert.InRange(
+                managedHeapGrowth,
+                0,
+                performanceBaseline.DeterministicConversion.MaximumManagedHeapGrowthBytes);
+            Assert.Equal(
+                1,
+                await page.EvaluateAsync<int>("() => window.unpdf.preview.activeSessionCount()"));
         }
         finally
         {
@@ -427,6 +657,35 @@ public sealed class WasmBrowserSmokeTest
         return path;
     }
 
+    private static string CreateRepeatedPagePdf(int pageCount)
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}", "wasm-many-pages.pdf");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using PDDocument document = new();
+        PDImageXObject image = LosslessFactory.CreateFromRawData(
+            document,
+            [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255],
+            2,
+            2,
+            8,
+            3);
+        for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+        {
+            PDPage page = new();
+            document.AddPage(page);
+            using PDPageContentStream content = new(document, page);
+            content.DrawImage(image, 72, 600, 120, 60);
+        }
+
+        document.Save(path);
+        return path;
+    }
+
+    private static long MetricMilliseconds(string value) =>
+        long.Parse(
+            value.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0],
+            System.Globalization.CultureInfo.InvariantCulture);
+
     private static async Task WaitForServerAsync(Uri uri, Process server)
     {
         using HttpClient client = new();
@@ -464,6 +723,10 @@ public sealed class WasmBrowserSmokeTest
         listener.Stop();
         return port;
     }
+
+    private static bool IsNetworkRequest(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
     private static void StopServer(Process server)
     {
@@ -503,6 +766,9 @@ public sealed class WasmBrowserSmokeTest
 
     private sealed record DeterministicConversionBudget(
         long MaximumApplicationMilliseconds,
+        int MaximumFullInputCopies,
+        long MaximumManagedHeapGrowthBytes,
         int MaximumNetworkRequests,
-        long MaximumWallMilliseconds);
+        long MaximumWallMilliseconds,
+        long MaximumWasmMemoryGrowthBytes);
 }

@@ -173,31 +173,69 @@ JavaScript interop adapter before extraction retries the failed image.
 
 ## Browser memory model
 
-The file picker reads into one exactly sized byte array rather than copying via
-`MemoryStream` and `ToArray`. PDFBox still requires random access to the PDF,
-and browser file streams are not a general seekable backing store, so the input
-currently remains resident for conversion. True bounded-memory input requires
-a core random-access source backed by browser `Blob.slice()` calls. The UI
-rejects files larger than 32 MiB before opening their stream, clears prior
-preview output before a new conversion, and disposes its cancellation source at
-completion or component teardown. Automated browser tests cover the oversize
-path and cancellation of an in-flight input request, including re-enabling the
-controls afterwards.
+The normal file-picker path reads directly into one exactly sized managed byte
+array. It does not grow a `MemoryStream` or call `ToArray`. PdfBox.Net's current
+parser then creates two transient full-file buffers: a staging `MemoryStream`
+buffer and the parser's working `byte[]`. The browser's read-only loader avoids
+the additional source copy that the normal incremental-save path would retain
+after parsing. The browser converter never edits or saves the loaded PDF, so
+retaining that source has no benefit.
 
-Cancellation is honored while reading and between conversion stages;
-interrupting synchronous PDFBox extraction itself requires moving extraction to
-a worker or adding cancellation points in the core parser. True bounded-memory
-input, incremental page/output processing, and worker evaluation remain tracked
-by [unpdf #99](https://github.com/erikbra/unpdf/issues/99).
+The current input buffers are:
+
+| Buffer | Lifetime | Limit / ownership |
+| --- | --- | --- |
+| Browser `File` | Until the selection is replaced | Browser-owned; no object URL is created |
+| Exactly sized managed input | File read through parser bootstrap | At most 32 MiB |
+| PdfBox.Net parser staging buffer | Synchronous parse only | One full-file transient buffer, with implementation-dependent growth capacity |
+| PdfBox.Net parser working array | Synchronous parse only | One full-file transient copy |
+| Current page extraction state | One page at a time | Released at the next page boundary |
+| Completed layout and generated HTML/assets | Until preview replacement | User-visible output retained by design |
+| Preview Blob URLs | Until next conversion or component teardown | Explicitly revoked as one session |
+
+`PdfLayoutExtractor.ExtractAsync` extracts one page per asynchronous boundary.
+It shares image and font deduplication across pages, accumulates only the final
+layout model, reports time to the first completed page, and yields so the UI can
+render progress or process cancellation before the next page. The final HTML is
+still a document-wide conversion because semantic heading, bibliography, and
+section inference need cross-page context.
+
+Generated HTML, CSS, fonts, and images are placed in a browser Blob session.
+The iframe uses the document Blob URL instead of retaining an expanded Base64
+`srcdoc` string in the component. Starting another conversion, a corrupt-input
+failure, cancellation, and component teardown all revoke every URL in the old
+session. Browsers without Blob URL support use the previous `srcdoc` path as a
+graceful fallback.
+
+Cancellation is honored while reading, before parsing, at every extracted-page
+boundary, before HTML generation, and while transferring preview assets. The
+current PdfBox.Net parser and HTML converter are synchronous inside their
+respective stages, so a single pathological page or parse cannot yet be
+preempted. Moving those stages to a worker remains independent from the storage
+design.
+
+True Blob-backed random access is still blocked below this repository:
+PdfBox.Net.Core's public random-access overload eagerly calls `ReadAllBytes`,
+`PDFParser` stores a complete `byte[]`, and browser `Blob.slice()` reads are
+asynchronous on the window thread. This is tracked by
+[pdfbox-net #652](https://github.com/erikbra/pdfbox-net/issues/652). Until the
+core parser consumes a paged random-access source, unpdf cannot truthfully claim
+sublinear input memory or add meaningful Blob-range/truncated-range tests.
 
 ## Performance and offline behavior
 
 `eng/wasm-performance-baseline.json` ratchets gross cold-load and deterministic
-conversion ceilings in Playwright. The payload ratchet separately records every
-framework asset's raw and Brotli bytes. CI fails if startup, conversion, network
-request count, or payload exceeds its accepted budget. The intentionally broad
-timing ceilings catch major regressions across shared CI hardware; stable hosted
-percentiles should tighten them later.
+conversion ceilings in Playwright. It also caps complete managed input copies,
+sampled managed-heap growth, and WebAssembly linear-memory growth. The UI
+reports those measurements together with browser heap when Chromium exposes it,
+time to first page, total conversion time, copied input bytes, and retained
+output size. The reported copied-input value is a lower bound derived from the
+three complete input-sized buffers; allocator capacity and transient growth can
+make the actual byte-copy traffic larger. The payload ratchet separately records
+every framework asset's raw and Brotli bytes. CI fails if startup, conversion,
+memory, network request count, or payload exceeds its accepted budget. The
+intentionally broad ceilings catch major regressions across shared CI hardware;
+stable hosted percentiles should tighten them later.
 
 Offline/PWA caching is deliberately disabled for now. Framework assets already
 benefit from browser and immutable-host caching, while a service worker would

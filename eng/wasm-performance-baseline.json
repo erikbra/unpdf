@@ -5,8 +5,11 @@
   "description": "Gross browser performance ceilings for the deterministic local fixture. Tighten these after stable hosted measurements are available.",
   "deterministicConversion": {
     "maximumApplicationMilliseconds": 30000,
+    "maximumFullInputCopies": 3,
+    "maximumManagedHeapGrowthBytes": 134217728,
     "maximumNetworkRequests": 0,
-    "maximumWallMilliseconds": 60000
+    "maximumWallMilliseconds": 60000,
+    "maximumWasmMemoryGrowthBytes": 134217728
   },
   "schemaVersion": 1
 }
