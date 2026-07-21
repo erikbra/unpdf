@@ -914,6 +914,68 @@ public class PdfLayoutExtractorTest
     }
 
     [Fact]
+    public async Task ExtractAsync_YieldsEveryPageAndMatchesSinglePassOutput()
+    {
+        using PDDocument document = CreateRepeatedImageDocument(pageCount: 3);
+        PdfLayoutOptions options = new()
+        {
+            IncludeImageAssets = true
+        };
+        List<PdfLayoutExtractionProgress> updates = [];
+
+        PdfLayoutDocument expected = PdfLayoutExtractor.Extract(document, options);
+        PdfLayoutDocument actual = await PdfLayoutExtractor.ExtractAsync(
+            document,
+            options,
+            new InlineProgress<PdfLayoutExtractionProgress>(updates.Add),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            [
+                new PdfLayoutExtractionProgress(1, 3),
+                new PdfLayoutExtractionProgress(2, 3),
+                new PdfLayoutExtractionProgress(3, 3)
+            ],
+            updates);
+        Assert.Equal(Snapshot(expected), Snapshot(actual));
+        Assert.Equal(
+            expected.Pages.SelectMany(static page => page.Images).Select(static image => image.AssetId),
+            actual.Pages.SelectMany(static page => page.Images).Select(static image => image.AssetId));
+        PdfLayoutImageAsset expectedAsset = Assert.Single(expected.ImageAssets);
+        PdfLayoutImageAsset actualAsset = Assert.Single(actual.ImageAssets);
+        Assert.Equal(expectedAsset.AssetId, actualAsset.AssetId);
+        Assert.Equal(expectedAsset.ContentType, actualAsset.ContentType);
+        Assert.Equal(expectedAsset.Data, actualAsset.Data);
+        Assert.Equal(expected.Diagnostics, actual.Diagnostics);
+        Assert.Equal(
+            3,
+            actual.Diagnostics.Count(static diagnostic =>
+                diagnostic.Code == "shape-alpha-vector-unsupported"));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_CancellationAfterPageBoundaryStopsBeforeNextPage()
+    {
+        using PDDocument document = CreateUnnamedType3TextDocument(pageCount: 4);
+        using CancellationTokenSource cancellation = new();
+        List<PdfLayoutExtractionProgress> updates = [];
+        InlineProgress<PdfLayoutExtractionProgress> progress = new(update =>
+        {
+            updates.Add(update);
+            cancellation.Cancel();
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            PdfLayoutExtractor.ExtractAsync(
+                document,
+                new PdfLayoutOptions { IncludeFontAssets = true },
+                progress,
+                cancellation.Token));
+
+        Assert.Equal([new PdfLayoutExtractionProgress(1, 4)], updates);
+    }
+
+    [Fact]
     public void Extract_UnnamedType3FontUsesFallbackTextAndReportsUnsupportedWebFont()
     {
         using PDDocument document = CreateUnnamedType3TextDocument();
@@ -1039,6 +1101,34 @@ public class PdfLayoutExtractorTest
         if (!imageFirst)
         {
             content.DrawImage(image, 72, 600, 120, 60);
+        }
+
+        return document;
+    }
+
+    private static PDDocument CreateRepeatedImageDocument(int pageCount)
+    {
+        PDDocument document = new();
+        PDImageXObject image = LosslessFactory.CreateFromRawData(
+            document,
+            [0b1010_0000],
+            3,
+            1,
+            1,
+            1);
+        image.GetCOSObject()!.SetItem(COSName.DECODE, COSArray.Of(1f, 0f));
+        PDExtendedGraphicsState graphicsState = new();
+        graphicsState.SetAlphaSourceFlag(true);
+        graphicsState.SetNonStrokingAlphaConstant(0.75f);
+        for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+        {
+            PDPage page = new();
+            document.AddPage(page);
+            using PDPageContentStream content = new(document, page);
+            content.DrawImage(image, 72, 600, 120, 60);
+            content.SetGraphicsStateParameters(graphicsState);
+            content.AddRect(72, 500, 120, 24);
+            content.Fill();
         }
 
         return document;
@@ -1408,6 +1498,11 @@ public class PdfLayoutExtractorTest
             BT /F1 10 Tf 282 574 Td (Phone) Tj ET
             """));
         return document;
+    }
+
+    private sealed class InlineProgress<T>(Action<T> callback) : IProgress<T>
+    {
+        public void Report(T value) => callback(value);
     }
 
     private static void SetWidgets(

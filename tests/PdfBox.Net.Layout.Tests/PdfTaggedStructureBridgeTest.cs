@@ -213,6 +213,28 @@ public sealed class PdfTaggedStructureBridgeTest
             diagnostic.Code == "tagged-structure-mcid-unresolved" && diagnostic.PageNumber == 1);
     }
 
+    [Fact]
+    public async Task ExtractAsync_RebuildsTaggedStructureAfterIncrementalPages()
+    {
+        using TaggedFixture fixture = new();
+        PDStructureElement heading = fixture.AddElement(fixture.Root, StandardStructureTypes.H1);
+        heading.SetActualText("Incremental heading");
+        fixture.WriteText(heading, "Visible heading", 700);
+        fixture.Complete();
+
+        PdfLayoutDocument layout = await PdfLayoutExtractor.ExtractAsync(
+            fixture.Document,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        PdfTaggedStructureElement taggedHeading = Assert.Single(
+            Assert.IsType<PdfTaggedStructureDocument>(layout.TaggedStructure).Elements,
+            static element => element.Kind == PdfTaggedStructureKind.Heading);
+        Assert.Equal("Incremental heading", taggedHeading.ActualText);
+        PdfTaggedContentReference content = Assert.Single(taggedHeading.ContentReferences);
+        Assert.True(content.IsResolved);
+        Assert.Equal("Visible heading", Assert.Single(content.TextRuns).Text);
+    }
+
     private static void AddTableRow(
         TaggedFixture fixture,
         PDStructureElement table,
@@ -329,7 +351,7 @@ public sealed class PdfTaggedStructureBridgeTest
             return markedContentId;
         }
 
-        private void Complete()
+        public void Complete()
         {
             if (_completed)
             {

@@ -5,7 +5,8 @@
 @using PdfBox.Net.Layout
 @using PdfBox.Net.PDModel
 @inject HttpClient Http
-@implements IDisposable
+@inject IJSRuntime JavaScript
+@implements IAsyncDisposable
 
 <PageTitle>unpdf - PDF to HTML</PageTitle>
 
@@ -28,20 +29,27 @@
 
         @if (_isConverting)
         {
-            <p class="status" role="status">Converting @_fileName...</p>
+            <p class="status" role="status">@_statusMessage</p>
             <button type="button" class="sample-button" @onclick="CancelConversion">Cancel</button>
         }
         else if (_error is not null)
         {
             <p class="status error" role="alert">@_error</p>
         }
-        else if (_previewHtml is not null)
+        else if (HasPreview)
         {
             <dl class="metrics" aria-label="Conversion measurements">
-                <div><dt>File</dt><dd>@_fileName</dd></div>
-                <div><dt>Pages</dt><dd>@_pageCount</dd></div>
-                <div><dt>Time</dt><dd>@_elapsedMilliseconds ms</dd></div>
-                <div><dt>Input</dt><dd>@FormatBytes(_inputBytes)</dd></div>
+                <div data-metric="file"><dt>File</dt><dd>@_fileName</dd></div>
+                <div data-metric="pages"><dt>Pages</dt><dd>@_pageCount</dd></div>
+                <div data-metric="time"><dt>Time</dt><dd>@_elapsedMilliseconds ms</dd></div>
+                <div data-metric="input"><dt>Input</dt><dd>@FormatBytes(_inputBytes)</dd></div>
+                <div data-metric="first-page"><dt>First page</dt><dd>@_timeToFirstPageMilliseconds ms</dd></div>
+                <div data-metric="input-copies"><dt>Input buffers</dt><dd>@_fullInputCopies (at least @FormatBytes(_inputBytesCopied) copied)</dd></div>
+                <div data-metric="managed-heap"><dt>Managed heap</dt><dd data-growth-bytes="@ManagedHeapGrowthBytes">@FormatBytes(_peakManagedHeapBytes) peak</dd></div>
+                <div data-metric="wasm-memory"><dt>WASM memory</dt><dd data-growth-bytes="@WasmMemoryGrowthBytes">@FormatOptionalBytes(_peakWasmMemoryBytes)</dd></div>
+                <div data-metric="browser-heap"><dt>Browser heap</dt><dd data-growth-bytes="@JavaScriptHeapGrowthBytes">@FormatOptionalBytes(_peakJavaScriptHeapBytes)</dd></div>
+                <div data-metric="output"><dt>Output</dt><dd>@FormatBytes(_outputBytes)</dd></div>
+                <div data-metric="preview-store"><dt>Preview store</dt><dd>@(_usesBlobPreview ? "revocable Blob URLs" : "srcdoc fallback")</dd></div>
             </dl>
         }
 
@@ -69,12 +77,16 @@
     </div>
 
     <div class="preview-shell">
-        @if (_previewHtml is null)
+        @if (!HasPreview)
         {
             <div class="empty-state">
                 <h2>Choose a PDF to begin</h2>
                 <p>The continuous semantic HTML preview will appear here.</p>
             </div>
+        }
+        else if (_previewUrl is not null)
+        {
+            <iframe title="Converted HTML preview" src="@_previewUrl"></iframe>
         }
         else
         {
@@ -87,14 +99,43 @@
     private const long MaxInputBytes = 32 * 1024 * 1024;
 
     private readonly List<PdfLayoutDiagnostic> _diagnostics = [];
+    private BrowserPreviewHost? _previewHost;
+    private string? _previewSessionId;
+    private string? _previewUrl;
     private string? _previewHtml;
     private string? _fileName;
     private string? _error;
+    private string _statusMessage = string.Empty;
     private bool _isConverting;
+    private bool _usesBlobPreview;
     private int _pageCount;
+    private int _fullInputCopies;
     private long _elapsedMilliseconds;
+    private long _timeToFirstPageMilliseconds;
     private long _inputBytes;
+    private long _inputBytesCopied;
+    private long _outputBytes;
+    private long _managedHeapBaselineBytes;
+    private long _peakManagedHeapBytes;
+    private long? _javaScriptHeapBaselineBytes;
+    private long? _peakJavaScriptHeapBytes;
+    private long? _wasmMemoryBaselineBytes;
+    private long? _peakWasmMemoryBytes;
     private CancellationTokenSource? _conversionCancellation;
+
+    private bool HasPreview => _previewUrl is not null || _previewHtml is not null;
+
+    private long ManagedHeapGrowthBytes => Math.Max(0, _peakManagedHeapBytes - _managedHeapBaselineBytes);
+
+    private long JavaScriptHeapGrowthBytes => Math.Max(
+        0,
+        (_peakJavaScriptHeapBytes ?? 0) - (_javaScriptHeapBaselineBytes ?? 0));
+
+    private long WasmMemoryGrowthBytes => Math.Max(
+        0,
+        (_peakWasmMemoryBytes ?? 0) - (_wasmMemoryBaselineBytes ?? 0));
+
+    private BrowserPreviewHost PreviewHost => _previewHost ??= new BrowserPreviewHost(JavaScript);
 
     private async Task ConvertPdfAsync(InputFileChangeEventArgs args)
     {
@@ -102,10 +143,10 @@
         _conversionCancellation?.Dispose();
         _conversionCancellation = new CancellationTokenSource();
         CancellationToken cancellationToken = _conversionCancellation.Token;
-        BeginConversion(args.File.Name, args.File.Size);
 
         try
         {
+            await BeginConversionAsync(args.File.Name, args.File.Size, cancellationToken);
             if (args.File.Size > MaxInputBytes)
             {
                 throw new IOException($"The selected PDF exceeds {FormatBytes(MaxInputBytes)}.");
@@ -114,14 +155,20 @@
             await using Stream stream = args.File.OpenReadStream(MaxInputBytes);
             byte[] input = GC.AllocateUninitializedArray<byte>(checked((int)args.File.Size));
             await stream.ReadExactlyAsync(input, cancellationToken);
-            await ConvertBytesAsync(args.File.Name, input, cancellationToken);
+            _fullInputCopies = 1;
+            _inputBytesCopied = input.LongLength;
+            Task conversion = ConvertBytesAsync(args.File.Name, input, cancellationToken);
+            input = [];
+            await conversion;
         }
         catch (OperationCanceledException)
         {
+            await ClearPreviewAsync();
             _error = "Conversion cancelled.";
         }
         catch (Exception exception)
         {
+            await ClearPreviewAsync();
             _error = exception is IOException && args.File.Size > MaxInputBytes
                 ? $"The browser preview currently accepts PDFs up to {FormatBytes(MaxInputBytes)}."
                 : $"Conversion failed: {exception.Message}";
@@ -138,19 +185,25 @@
         _conversionCancellation?.Dispose();
         _conversionCancellation = new CancellationTokenSource();
         CancellationToken cancellationToken = _conversionCancellation.Token;
-        BeginConversion("hello.pdf", 0);
 
         try
         {
+            await BeginConversionAsync("hello.pdf", 0, cancellationToken);
             byte[] sample = await Http.GetByteArrayAsync("samples/hello.pdf", cancellationToken);
-            await ConvertBytesAsync("hello.pdf", sample, cancellationToken);
+            _fullInputCopies = 1;
+            _inputBytesCopied = sample.LongLength;
+            Task conversion = ConvertBytesAsync("hello.pdf", sample, cancellationToken);
+            sample = [];
+            await conversion;
         }
         catch (OperationCanceledException)
         {
+            await ClearPreviewAsync();
             _error = "Conversion cancelled.";
         }
         catch (Exception exception)
         {
+            await ClearPreviewAsync();
             _error = $"Conversion failed: {exception.Message}";
         }
         finally
@@ -162,34 +215,77 @@
     private async Task ConvertBytesAsync(string fileName, byte[] input, CancellationToken cancellationToken)
     {
         _inputBytes = input.LongLength;
+        _statusMessage = $"Parsing {_fileName}...";
+        SampleManagedHeap();
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
 
         cancellationToken.ThrowIfCancellationRequested();
-        await Task.Yield();
         Stopwatch stopwatch = Stopwatch.StartNew();
-        using PDDocument document = Loader.LoadPDF(input);
-        cancellationToken.ThrowIfCancellationRequested();
-        PdfLayoutDocument layout = PdfLayoutExtractor.Extract(document, new PdfLayoutOptions
+        PdfLayoutDocument layout;
+        using (PDDocument document = BrowserReadOnlyPdfLoader.Load(input))
         {
-            IncludeAnnotationAppearances = true,
-            IncludeFontAssets = true,
-            IncludeImageAssets = true,
-            IncludeImages = true,
-            IncludeTransparencyGroupFallbacks = true,
-            ImageExportPolicy = PdfImageExportPolicy.Degraded
-        });
+            _fullInputCopies = BrowserReadOnlyPdfLoader.PeakFullInputBufferCount;
+            _inputBytesCopied = checked(_inputBytes * _fullInputCopies);
+            input = [];
+            GC.Collect();
+            SampleManagedHeap();
+
+            _statusMessage = $"Extracting page 0 of {document.GetNumberOfPages()}...";
+            await InvokeAsync(StateHasChanged);
+            InlineProgress<PdfLayoutExtractionProgress> progress = new(update =>
+            {
+                if (_timeToFirstPageMilliseconds == 0)
+                {
+                    _timeToFirstPageMilliseconds = Math.Max(1, stopwatch.ElapsedMilliseconds);
+                }
+
+                _statusMessage = $"Extracting page {update.CompletedPages} of {update.TotalPages}...";
+                SampleManagedHeap();
+                _ = InvokeAsync(StateHasChanged);
+            });
+            layout = await PdfLayoutExtractor.ExtractAsync(document, new PdfLayoutOptions
+            {
+                IncludeAnnotationAppearances = true,
+                IncludeFontAssets = true,
+                IncludeImageAssets = true,
+                IncludeImages = true,
+                IncludeTransparencyGroupFallbacks = true,
+                ImageExportPolicy = PdfImageExportPolicy.Degraded
+            }, progress, cancellationToken);
+        }
+
+        GC.Collect();
+        SampleManagedHeap();
         cancellationToken.ThrowIfCancellationRequested();
+
+        _statusMessage = "Generating HTML...";
+        await InvokeAsync(StateHasChanged);
         PdfHtmlDocument html = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
         {
             SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow,
             TextMode = PdfHtmlTextMode.Semantic,
             Title = Path.GetFileNameWithoutExtension(fileName)
         });
+        SampleManagedHeap();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _statusMessage = "Preparing browser preview...";
+        await InvokeAsync(StateHasChanged);
+        BrowserPreviewHandle preview = await PreviewHost.CreateAsync(html, cancellationToken);
+        _previewSessionId = preview.SessionId;
+        _previewUrl = preview.Url;
+        _previewHtml = preview.InlineHtml;
+        _outputBytes = preview.OutputBytes;
+        _usesBlobPreview = preview.UsesBlobUrls;
+        BrowserMemorySnapshot memory = await PreviewHost.MeasureMemoryAsync(cancellationToken);
+        RecordBrowserMemory(memory);
+        SampleManagedHeap();
         stopwatch.Stop();
 
         _diagnostics.AddRange(layout.Diagnostics);
         _pageCount = layout.Pages.Count;
         _elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
-        _previewHtml = BrowserHtmlDocument.InlineAssets(html);
     }
 
     private void CancelConversion() => _conversionCancellation?.Cancel();
@@ -201,14 +297,35 @@
         _conversionCancellation = null;
     }
 
-    private void BeginConversion(string fileName, long inputBytes)
+    private async Task BeginConversionAsync(
+        string fileName,
+        long inputBytes,
+        CancellationToken cancellationToken)
     {
+        await ClearPreviewAsync();
         _isConverting = true;
         _error = null;
-        _previewHtml = null;
         _diagnostics.Clear();
         _fileName = fileName;
+        _statusMessage = $"Reading {fileName}...";
         _inputBytes = inputBytes;
+        _fullInputCopies = 0;
+        _inputBytesCopied = 0;
+        _outputBytes = 0;
+        _pageCount = 0;
+        _elapsedMilliseconds = 0;
+        _timeToFirstPageMilliseconds = 0;
+        _usesBlobPreview = false;
+        _managedHeapBaselineBytes = GC.GetTotalMemory(forceFullCollection: false);
+        _peakManagedHeapBytes = _managedHeapBaselineBytes;
+        _javaScriptHeapBaselineBytes = null;
+        _peakJavaScriptHeapBytes = null;
+        _wasmMemoryBaselineBytes = null;
+        _peakWasmMemoryBytes = null;
+        BrowserMemorySnapshot baseline = await PreviewHost.MeasureMemoryAsync(cancellationToken);
+        _javaScriptHeapBaselineBytes = baseline.JavaScriptHeapBytes;
+        _wasmMemoryBaselineBytes = baseline.WasmMemoryBytes;
+        RecordBrowserMemory(baseline);
     }
 
     private static string FormatBytes(long bytes)
@@ -218,9 +335,46 @@
             : $"{Math.Max(1, bytes / 1024d):0.0} KB";
     }
 
-    public void Dispose()
+    private static string FormatOptionalBytes(long? bytes) =>
+        bytes is long value ? FormatBytes(value) : "unavailable";
+
+    private void SampleManagedHeap()
+    {
+        _peakManagedHeapBytes = Math.Max(
+            _peakManagedHeapBytes,
+            GC.GetTotalMemory(forceFullCollection: false));
+    }
+
+    private void RecordBrowserMemory(BrowserMemorySnapshot snapshot)
+    {
+        if (snapshot.JavaScriptHeapBytes is long javaScriptHeap)
+        {
+            _peakJavaScriptHeapBytes = Math.Max(_peakJavaScriptHeapBytes ?? 0, javaScriptHeap);
+        }
+
+        if (snapshot.WasmMemoryBytes is long wasmMemory)
+        {
+            _peakWasmMemoryBytes = Math.Max(_peakWasmMemoryBytes ?? 0, wasmMemory);
+        }
+    }
+
+    private async ValueTask ClearPreviewAsync()
+    {
+        await PreviewHost.ReleaseAsync(_previewSessionId);
+        _previewSessionId = null;
+        _previewUrl = null;
+        _previewHtml = null;
+    }
+
+    public async ValueTask DisposeAsync()
     {
         _conversionCancellation?.Cancel();
         _conversionCancellation?.Dispose();
+        await ClearPreviewAsync();
+    }
+
+    private sealed class InlineProgress<T>(Action<T> callback) : IProgress<T>
+    {
+        public void Report(T value) => callback(value);
     }
 }

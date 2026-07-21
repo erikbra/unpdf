@@ -141,7 +141,7 @@ body {
 .metrics div {
     display: grid;
     gap: 8px;
-    grid-template-columns: 64px minmax(0, 1fr);
+    grid-template-columns: 96px minmax(0, 1fr);
 }
 
 .metrics dt {
