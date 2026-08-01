@@ -2033,6 +2033,25 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_SemanticContinuousFlow_PrefersTaggedRuledGridOverMapHeuristic()
+    {
+        PdfLayoutDocument layout = WithTaggedParagraphs(
+            CreateTaggedRuledThreeLaneLayoutFixture(includeMapLikePathDensity: true),
+            groupReceiptGuidance: true,
+            groupRuledHeadings: true);
+
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        }).Html);
+
+        Assert.Single(ElementsByClass(dom, "pdf-semantic-ruled-grid"));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-map-figure-page"));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-layout-fallback-page"));
+    }
+
+    [Fact]
     public async Task Convert_SemanticContinuousFlow_RendersTaggedRuledGridGeometryInBrowser()
     {
         PdfHtmlDocument html = PdfHtmlConverter.Convert(
@@ -9266,7 +9285,8 @@ public class PdfHtmlConverterTest
             new PdfTaggedStructureDocument([document]));
     }
 
-    private static PdfLayoutDocument CreateTaggedRuledThreeLaneLayoutFixture()
+    private static PdfLayoutDocument CreateTaggedRuledThreeLaneLayoutFixture(
+        bool includeMapLikePathDensity = false)
     {
         List<PdfTextLine> lines =
         [
@@ -9294,7 +9314,7 @@ public class PdfHtmlConverterTest
         ];
         PdfLayoutColor color = new(0f, 0f, 0f, 1f, "DeviceGray");
         PdfLayoutRectangle region = new(36f, 100f, 540f, 400f);
-        PdfLayoutPath[] paths =
+        List<PdfLayoutPath> paths =
         [
             CreateRuledGridOutlinePath(201, region, color),
             CreateSemanticRulePath(202, 198f, region.Y, 198f, region.Bottom, 0.5f, color),
@@ -9306,6 +9326,15 @@ public class PdfHtmlConverterTest
             CreateSemanticRulePath(208, region.X, 42f, region.Right, 42f, 0.72f, color),
             CreateSemanticRulePath(209, region.X, 142f, region.Right, 142f, 0.5f, color)
         ];
+        if (includeMapLikePathDensity)
+        {
+            for (int index = 0; index < 31; index++)
+            {
+                float x = 12f + index * 18f;
+                paths.Add(CreateSemanticRulePath(300 + index, x, 740f, x + 4f, 740f, 0.5f, color));
+            }
+        }
+
         return CreateSemanticHtmlFixture(lines, paths);
     }
 

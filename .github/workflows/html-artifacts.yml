@@ -110,6 +110,7 @@ jobs:
           path: artifacts/pages
 
   deploy:
+    if: github.ref == 'refs/heads/main'
     needs: generate
     runs-on: ubuntu-latest
     environment:
