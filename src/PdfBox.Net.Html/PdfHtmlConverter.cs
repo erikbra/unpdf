@@ -4705,13 +4705,13 @@ public static class PdfHtmlConverter
         FootnoteContext? footnotes = null)
     {
         bool hasAuthoredStructure = semanticPage.Elements.Any(static element => element.TaggedStructure != null);
-        bool isMapOrDiagram = IsMapOrDiagramDominantPage(page, semanticPage);
+        PdfSemanticRuledGrid? ruledGrid = hasAuthoredStructure
+            ? TryCreateSemanticRuledGrid(page, semanticPage)
+            : null;
+        bool isMapOrDiagram = ruledGrid == null && IsMapOrDiagramDominantPage(page, semanticPage);
         PdfSemanticLineGrid? lineGrid = hasAuthoredStructure || isMapOrDiagram
             ? null
             : TryCreateSemanticLineGrid(page, semanticPage);
-        PdfSemanticRuledGrid? ruledGrid = hasAuthoredStructure && !isMapOrDiagram
-            ? TryCreateSemanticRuledGrid(page, semanticPage)
-            : null;
         PdfSemanticColumns? columns = null;
         if (!isMapOrDiagram && lineGrid == null && ruledGrid == null)
         {
