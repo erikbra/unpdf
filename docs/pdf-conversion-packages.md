@@ -13,6 +13,10 @@ PdfBox.Net.Markdown ───┘
 `PdfBox.Net.Html` and `PdfBox.Net.Markdown` are independent. Installing one
 must not restore or bundle the other.
 
+Dependency edges between conversion packages must point toward lower layers.
+HTML and Markdown may depend directly on Layout and Core, Layout may depend on
+Core, and Core must not depend on Layout, HTML, or Markdown.
+
 ## Package responsibilities
 
 | Package | Supported modes | Important limitations |

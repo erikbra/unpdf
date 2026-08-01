@@ -60,6 +60,38 @@ class ConversionPackageValidatorTest(unittest.TestCase):
 
             self.assertEqual({"PdfBox.Net.Layout": "4.0.0-test.1"}, dependencies)
 
+    def test_nupkg_validation_accepts_core_as_direct_html_dependency(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "PdfBox.Net.Html.4.0.0-test.1.nupkg"
+            with zipfile.ZipFile(archive, "w") as package:
+                package.writestr(
+                    "PdfBox.Net.Html.nuspec",
+                    nuspec(
+                        "PdfBox.Net.Html",
+                        "4.0.0-test.1",
+                        [
+                            ("PdfBox.Net.Layout", "4.0.0-test.1"),
+                            ("PdfBox.Net.Core", "4.0.0-preview.6"),
+                        ],
+                    ),
+                )
+                package.writestr("README.md", "# README")
+                package.writestr("lib/net10.0/PdfBox.Net.Html.dll", b"assembly")
+
+            dependencies = MODULE.validate_nupkg(
+                archive,
+                MODULE.PACKAGES[1],
+                "4.0.0-test.1",
+            )
+
+            self.assertEqual(
+                {
+                    "PdfBox.Net.Layout": "4.0.0-test.1",
+                    "PdfBox.Net.Core": "4.0.0-preview.6",
+                },
+                dependencies,
+            )
+
     def test_nupkg_validation_rejects_html_markdown_cross_dependency(self):
         with tempfile.TemporaryDirectory() as temporary:
             archive = Path(temporary) / "PdfBox.Net.Html.4.0.0-test.1.nupkg"
@@ -78,7 +110,7 @@ class ConversionPackageValidatorTest(unittest.TestCase):
                 package.writestr("README.md", "# README")
                 package.writestr("lib/net10.0/PdfBox.Net.Html.dll", b"assembly")
 
-            with self.assertRaisesRegex(ValueError, "direct dependencies"):
+            with self.assertRaisesRegex(ValueError, "same- or higher-layer"):
                 MODULE.validate_nupkg(
                     archive,
                     MODULE.PACKAGES[1],
@@ -108,6 +140,15 @@ class ConversionPackageValidatorTest(unittest.TestCase):
                             "PdfBox.Net.Layout/4.0.0-test.1": {},
                             "PdfBox.Net.Core/4.0.0-preview.6": {},
                         },
+                        "targets": {
+                            "net10.0": {
+                                "PdfBox.Net.Core/4.0.0-preview.6": {
+                                    "dependencies": {
+                                        "PdfBox.Net.IO": "4.0.0-preview.6"
+                                    }
+                                }
+                            }
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -118,6 +159,50 @@ class ConversionPackageValidatorTest(unittest.TestCase):
                 "PdfBox.Net.Markdown",
                 "4.0.0-test.1",
             )
+
+    def test_consumer_assets_reject_core_dependency_on_layout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            assets_path = Path(temporary) / "project.assets.json"
+            assets_path.write_text(
+                json.dumps(
+                    {
+                        "project": {
+                            "frameworks": {
+                                "net10.0": {
+                                    "dependencies": {
+                                        "PdfBox.Net.Html": {
+                                            "target": "Package",
+                                            "version": "[4.0.0-test.1, )",
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "libraries": {
+                            "PdfBox.Net.Html/4.0.0-test.1": {},
+                            "PdfBox.Net.Layout/4.0.0-test.1": {},
+                            "PdfBox.Net.Core/4.0.0-preview.6": {},
+                        },
+                        "targets": {
+                            "net10.0": {
+                                "PdfBox.Net.Core/4.0.0-preview.6": {
+                                    "dependencies": {
+                                        "PdfBox.Net.Layout": "4.0.0-test.1"
+                                    }
+                                }
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "same- or higher-layer"):
+                MODULE.validate_consumer_assets(
+                    assets_path,
+                    "PdfBox.Net.Html",
+                    "4.0.0-test.1",
+                )
 
     def test_sample_projects_have_one_conversion_package_reference(self):
         for primary_package, project, _ in MODULE.CONSUMERS:

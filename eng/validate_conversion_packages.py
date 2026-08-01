@@ -21,7 +21,7 @@ NUGET_ORG = "https://api.nuget.org/v3/index.json"
 class PackageSpec:
     package_id: str
     project: Path
-    direct_dependencies: tuple[str, ...]
+    required_direct_dependencies: tuple[str, ...]
 
 
 PACKAGES = (
@@ -41,6 +41,13 @@ PACKAGES = (
         ("PdfBox.Net.Layout",),
     ),
 )
+
+PACKAGE_LAYERS = {
+    "PdfBox.Net.Core": 0,
+    "PdfBox.Net.Layout": 1,
+    "PdfBox.Net.Html": 2,
+    "PdfBox.Net.Markdown": 2,
+}
 
 CONSUMERS = (
     (
@@ -92,6 +99,27 @@ def nuspec_dependencies(metadata: ET.Element) -> dict[str, str]:
     return dependencies
 
 
+def validate_dependency_direction(
+    package_id: str,
+    dependencies: dict[str, object],
+) -> None:
+    package_layer = PACKAGE_LAYERS.get(package_id)
+    if package_layer is None:
+        return
+
+    invalid = sorted(
+        dependency
+        for dependency in dependencies
+        if dependency in PACKAGE_LAYERS
+        and PACKAGE_LAYERS[dependency] >= package_layer
+    )
+    if invalid:
+        raise ValueError(
+            f"{package_id} must not depend on same- or higher-layer "
+            f"packages {invalid}"
+        )
+
+
 def validate_nupkg(
     archive: Path,
     spec: PackageSpec,
@@ -138,11 +166,15 @@ def validate_nupkg(
             raise ValueError(f"{archive} repository commit must be recorded")
 
         dependencies = nuspec_dependencies(metadata)
-        if tuple(sorted(dependencies)) != tuple(sorted(spec.direct_dependencies)):
+        missing_dependencies = sorted(
+            set(spec.required_direct_dependencies) - set(dependencies)
+        )
+        if missing_dependencies:
             raise ValueError(
-                f"{archive} direct dependencies are {sorted(dependencies)}, "
-                f"expected {sorted(spec.direct_dependencies)}"
+                f"{archive} is missing required direct dependencies "
+                f"{missing_dependencies}"
             )
+        validate_dependency_direction(spec.package_id, dependencies)
         if spec.package_id != "PdfBox.Net.Layout":
             layout_version = dependencies["PdfBox.Net.Layout"]
             if layout_version != version:
@@ -251,6 +283,12 @@ def validate_consumer_assets(
         raise ValueError(
             f"{assets_path} did not resolve PdfBox.Net.Layout {version}"
         )
+
+    for target in assets.get("targets", {}).values():
+        for identifier, package in target.items():
+            package_id = identifier.rsplit("/", 1)[0]
+            dependencies = package.get("dependencies", {})
+            validate_dependency_direction(package_id, dependencies)
 
 
 def pack_packages(
