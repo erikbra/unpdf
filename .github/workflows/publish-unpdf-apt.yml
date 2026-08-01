@@ -42,7 +42,7 @@ jobs:
       suite: ${{ steps.release.outputs.suite }}
       inrelease_sha256: ${{ steps.publish.outputs.inrelease_sha256 }}
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7.0.1
 
       - name: Install repository tools
         run: sudo apt-get update && sudo apt-get install -y apt-utils dpkg-dev gnupg
@@ -159,7 +159,7 @@ jobs:
             architecture: arm64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7.0.1
 
       - name: Configure public APT source
         env:
