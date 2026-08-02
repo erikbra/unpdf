@@ -38,6 +38,60 @@ runs:
           --branch=main
           --commit-hash=${{ github.sha }}
 
+    - name: Ensure unpdf.me custom domain
+      shell: bash
+      env:
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+      run: |
+        domain_api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/unpdf-me/domains/unpdf.me"
+        domain_response="$RUNNER_TEMP/cloudflare-domain.json"
+        request_domain() {
+          curl --retry 4 --retry-all-errors --retry-delay 2 -sS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -o "$domain_response" -w '%{http_code}' "$@"
+        }
+
+        http_status="$(request_domain "$domain_api")"
+        case "$http_status" in
+          200)
+            domain_status="$(jq -r '.result.status // empty' "$domain_response")"
+            if [[ "$domain_status" == "error" || "$domain_status" == "deactivated" ]]; then
+              http_status="$(request_domain -X PATCH -d '{}' "$domain_api")"
+              test "$http_status" = 200
+              jq -e '.success == true' "$domain_response" >/dev/null
+            fi
+            ;;
+          404)
+            http_status="$(request_domain -X POST -d '{"name":"unpdf.me"}' "${domain_api%/unpdf.me}")"
+            test "$http_status" = 200
+            jq -e '.success == true' "$domain_response" >/dev/null
+            ;;
+          *)
+            jq -c '.errors // .' "$domain_response" >&2
+            exit 1
+            ;;
+        esac
+
+        domain_status=""
+        for _ in $(seq 1 90); do
+          http_status="$(request_domain "$domain_api")"
+          if [[ "$http_status" == 200 ]]; then
+            domain_status="$(jq -r '.result.status // empty' "$domain_response")"
+            printf 'unpdf.me Pages domain status: %s\n' "$domain_status"
+            case "$domain_status" in
+              active) break ;;
+              blocked|error)
+                jq -c '{status: .result.status, validation: .result.validation_data, verification: .result.verification_data}' "$domain_response" >&2
+                exit 1
+                ;;
+            esac
+          fi
+          sleep 10
+        done
+        test "$domain_status" = active
+
     - name: Verify Cloudflare Pages deployment
       shell: bash
       run: |
@@ -47,8 +101,12 @@ runs:
         }
         fetch "https://unpdf-me.pages.dev/?run=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/cloudflare-index.html"
         fetch "https://unpdf-me.pages.dev/now/?run=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/cloudflare-now.html"
+        fetch "https://unpdf.me/?run=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/cloudflare-custom-index.html"
+        fetch "https://unpdf.me/now/?run=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/cloudflare-custom-now.html"
         grep -Fq 'PdfBox.Net' "$RUNNER_TEMP/cloudflare-index.html"
         grep -Fq '<base href="/now/"' "$RUNNER_TEMP/cloudflare-now.html"
+        grep -Fq 'PdfBox.Net' "$RUNNER_TEMP/cloudflare-custom-index.html"
+        grep -Fq '<base href="/now/"' "$RUNNER_TEMP/cloudflare-custom-now.html"
         grep -F 'id="unpdf-csp"' "$RUNNER_TEMP/cloudflare-now.html"
         grep -F "connect-src 'self'" "$RUNNER_TEMP/cloudflare-now.html"
         headers="$(fetch -D - -o /dev/null "https://unpdf-me.pages.dev/now/?run=$GITHUB_RUN_ID" | tr -d '\r')"
