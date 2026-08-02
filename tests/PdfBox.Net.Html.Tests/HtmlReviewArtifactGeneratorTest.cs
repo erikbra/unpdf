@@ -57,10 +57,6 @@ public sealed class HtmlReviewArtifactGeneratorTest
         Assert.Equal(1, example.PageCount);
         string exampleDirectory = Path.Combine(outputDirectory, "review-artifact-sample");
         string copiedSource = Path.Combine(exampleDirectory, "source.pdf");
-        string convertedHtml = Path.Combine(exampleDirectory, "index.html");
-        string css = Path.Combine(exampleDirectory, "assets", "pdfbox-net-fixed.css");
-        string semanticHtml = Path.Combine(exampleDirectory, "semantic", "index.html");
-        string semanticCss = Path.Combine(exampleDirectory, "semantic", "assets", "pdfbox-net-semantic.css");
         string continuousSemanticHtml = Path.Combine(exampleDirectory, "semantic-continuous", "index.html");
         string continuousSemanticCss = Path.Combine(exampleDirectory, "semantic-continuous", "assets", "pdfbox-net-semantic-continuous.css");
         string compare = Path.Combine(exampleDirectory, "compare.html");
@@ -69,10 +65,9 @@ public sealed class HtmlReviewArtifactGeneratorTest
 
         Assert.True(File.Exists(Path.Combine(outputDirectory, "index.html")));
         Assert.True(File.Exists(copiedSource));
-        Assert.True(File.Exists(convertedHtml));
-        Assert.True(File.Exists(css));
-        Assert.True(File.Exists(semanticHtml));
-        Assert.True(File.Exists(semanticCss));
+        Assert.False(File.Exists(Path.Combine(exampleDirectory, "index.html")));
+        Assert.False(Directory.Exists(Path.Combine(exampleDirectory, "assets")));
+        Assert.False(Directory.Exists(Path.Combine(exampleDirectory, "semantic")));
         Assert.True(File.Exists(continuousSemanticHtml));
         Assert.True(File.Exists(continuousSemanticCss));
         Assert.True(File.Exists(compare));
@@ -96,7 +91,8 @@ public sealed class HtmlReviewArtifactGeneratorTest
         Assert.Contains("review-artifact-sample/compare.html", artifactIndex);
         Assert.DoesNotContain("review-artifact-sample/semantic/index.html", artifactIndex);
         Assert.DoesNotContain("figure-rendering-compare.html", artifactIndex);
-        Assert.Contains("review-artifact-sample/semantic-continuous/index.html", artifactIndex);
+        Assert.Contains("review-artifact-sample/semantic-continuous/index.html\">html</a>", artifactIndex);
+        Assert.DoesNotContain(">continuous semantic HTML</a>", artifactIndex);
         Assert.Contains("review-artifact-sample/quality/quality-report.md", artifactIndex);
         string summary = File.ReadAllText(Path.Combine(exampleDirectory, "summary.md"));
         Assert.Contains("semantic-continuous/index.html", summary);

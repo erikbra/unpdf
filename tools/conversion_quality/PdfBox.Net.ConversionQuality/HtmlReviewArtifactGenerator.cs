@@ -94,8 +94,6 @@ public static class HtmlReviewArtifactGenerator
         RecreateDirectory(exampleDirectory);
 
         PdfLayoutDocument layout;
-        PdfHtmlDocument html;
-        PdfHtmlDocument semanticHtml;
         PdfHtmlDocument continuousSemanticHtml;
         string capturedConversionWarnings;
         TextWriter originalError = Console.Error;
@@ -112,12 +110,6 @@ public static class HtmlReviewArtifactGenerator
                     IncludeTransparencyGroupFallbacks = true
                 });
                 ValidateExpectations(example, layout);
-                html = PdfHtmlConverter.Convert(layout);
-                semanticHtml = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
-                {
-                    CssPath = "assets/pdfbox-net-semantic.css",
-                    TextMode = PdfHtmlTextMode.Semantic
-                });
                 continuousSemanticHtml = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
                 {
                     CssPath = "assets/pdfbox-net-semantic-continuous.css",
@@ -134,8 +126,6 @@ public static class HtmlReviewArtifactGenerator
             capturedConversionWarnings = conversionWarnings.ToString();
         }
 
-        html.WriteToDirectory(exampleDirectory);
-        semanticHtml.WriteToDirectory(Path.Combine(exampleDirectory, "semantic"));
         continuousSemanticHtml.WriteToDirectory(Path.Combine(exampleDirectory, "semantic-continuous"));
         string copiedSourcePdf = Path.Combine(exampleDirectory, "source.pdf");
         File.Copy(sourcePdf, copiedSourcePdf, overwrite: true);
@@ -162,7 +152,7 @@ public static class HtmlReviewArtifactGenerator
             TextLines: layout.Pages.Sum(page => page.Lines.Count),
             ImagePlacements: layout.Pages.Sum(page => page.Images.Count),
             VectorPaths: layout.Pages.Sum(page => page.Paths.Count),
-            ExportedAssets: html.Assets.Count,
+            ExportedAssets: continuousSemanticHtml.Assets.Count,
             Links: layout.Pages.Sum(page => page.Links.Count),
             Diagnostics: layout.Diagnostics.Count + layout.Pages.Sum(page => page.Diagnostics.Count) +
                 CountNonEmptyLines(capturedConversionWarnings),
@@ -930,7 +920,7 @@ public static class HtmlReviewArtifactGenerator
             html.Append("</td><td>");
             html.Append($"<a href=\"{directoryName}/compare.html\">compare</a> ");
             html.Append($"<a href=\"{directoryName}/source.pdf\">source PDF</a> ");
-            html.Append($"<a href=\"{directoryName}/semantic-continuous/index.html\">continuous semantic HTML</a> ");
+            html.Append($"<a href=\"{directoryName}/semantic-continuous/index.html\">html</a> ");
             html.Append($"<a href=\"{directoryName}/summary.md\">summary</a>");
             AppendQualityArtifactLinks(html, directoryName, result.QualityArtifacts);
             html.Append("</td><td>");
