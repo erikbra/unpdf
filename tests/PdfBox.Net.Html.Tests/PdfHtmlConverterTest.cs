@@ -1748,7 +1748,10 @@ public class PdfHtmlConverterTest
     {
         PdfLayoutDocument layout = CreateDenseTableWithMapLikePathDensityFixture();
         PdfSemanticPage semanticPage = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
-        Assert.Contains(semanticPage.Elements, static element => element.Kind == PdfSemanticElementKind.Table);
+        PdfSemanticElement table = Assert.Single(
+            semanticPage.Elements,
+            static element => element.Kind == PdfSemanticElementKind.Table);
+        Assert.NotNull(table.TableCaption);
 
         XDocument dom = ParseHtml(PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
         {
@@ -1759,6 +1762,30 @@ public class PdfHtmlConverterTest
         Assert.Single(dom.Descendants("table"));
         Assert.Empty(ElementsByClass(dom, "pdf-semantic-map-figure-page"));
         Assert.Empty(ElementsByClass(dom, "pdf-semantic-layout-fallback-page"));
+    }
+
+    [Fact]
+    public void Convert_SemanticContinuousFlow_KeepsMapFallbackWhenLabelsResembleTable()
+    {
+        PdfLayoutDocument layout = CreateMapWithFalsePositiveTableFixture();
+        PdfSemanticPage semanticPage = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+        PdfSemanticElement table = Assert.Single(
+            semanticPage.Elements,
+            static element => element.Kind == PdfSemanticElementKind.Table);
+        Assert.Null(table.TaggedStructure);
+        Assert.Null(table.TableCaption);
+        Assert.True(table.TableRows.Count >= 3);
+
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        }).Html);
+
+        XElement mapFigure = Assert.Single(ElementsByClass(dom, "pdf-semantic-map-figure-page"));
+        Assert.True(HasClass(mapFigure, "pdf-semantic-layout-fallback-page"));
+        Assert.DoesNotContain(dom.Descendants(), element =>
+            element.Name.LocalName is "h1" or "h2" or "h3" or "h4" or "h5" or "h6" or "table");
     }
 
     [Fact]
@@ -9188,6 +9215,53 @@ public class PdfHtmlConverterTest
         }
 
         return CreateSemanticHtmlFixture(lines, paths);
+    }
+
+    private static PdfLayoutDocument CreateMapWithFalsePositiveTableFixture()
+    {
+        List<PdfTextLine> lines =
+        [
+            CreateSemanticBoldTableRowLine(92f,
+                ("North Gate", 36f, 82f),
+                ("Cedar Trail", 190f, 82f),
+                ("Lake Camp", 344f, 82f),
+                ("East Ridge", 498f, 78f)),
+            CreateSemanticTableRowLine(116f,
+                ("West Beach", 36f, 82f),
+                ("Creek Bend", 190f, 82f),
+                ("Pine Hollow", 344f, 82f),
+                ("Boat Launch", 498f, 78f)),
+            CreateSemanticTableRowLine(140f,
+                ("Old Quarry", 36f, 82f),
+                ("River Ford", 190f, 82f),
+                ("South Trail", 344f, 82f),
+                ("Park Exit", 498f, 78f))
+        ];
+        string[] labels =
+        [
+            "Visitor center", "Scenic point", "Marsh loop", "Historic cabin",
+            "Ranger station", "Picnic area", "Foot bridge", "Trail junction",
+            "Camp one", "Camp two", "Lookout tower", "Meadow path",
+            "Boundary marker", "Scale one km", "Creek crossing", "Hilltop",
+            "Legend item", "Parking area"
+        ];
+        float[] xPositions = [42f, 206f, 370f, 518f];
+        for (int index = 0; index < labels.Length; index++)
+        {
+            lines.Add(CreateScientificFixtureLine(
+                labels[index],
+                xPositions[index % xPositions.Length],
+                226f + index / xPositions.Length * 108f,
+                72f,
+                9f));
+        }
+
+        return CreateSemanticHtmlFixture(
+            lines,
+            [CreateFilledRectanglePath(
+                0,
+                new PdfLayoutRectangle(0f, 0f, 612f, 792f),
+                new PdfLayoutColor(0.84f, 0.93f, 0.82f, 1f, "DeviceRGB"))]);
     }
 
     private static PdfLayoutDocument CreateMixedDiagramAndTextLayoutFixture()

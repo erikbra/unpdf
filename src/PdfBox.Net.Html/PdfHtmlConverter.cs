@@ -4802,15 +4802,28 @@ public static class PdfHtmlConverter
             return false;
         }
 
+        bool hasOverwhelmingMapArtwork = HasFullPageVectorBackdrop(page) ||
+            page.Images.Count >= 8 ||
+            page.Paths.Count >= 100 && page.Images.Count >= 4;
         foreach (PdfSemanticElement element in semanticPage.Elements)
         {
             if (element.Kind is PdfSemanticElementKind.Bibliography or
                     PdfSemanticElementKind.DefinitionList or
                     PdfSemanticElementKind.CodeBlock or
-                    PdfSemanticElementKind.Algorithm or
-                    PdfSemanticElementKind.Table ||
+                    PdfSemanticElementKind.Algorithm ||
                 IsFigureCaption(element))
             {
+                return false;
+            }
+
+            if (element.Kind == PdfSemanticElementKind.Table &&
+                (!hasOverwhelmingMapArtwork ||
+                    element.TaggedStructure != null ||
+                    element.TableCaption != null))
+            {
+                // Authored and captioned tables are strong structural evidence. On image- or
+                // vector-dominant maps, however, scattered labels and paths can resemble an
+                // inferred border table and must not disqualify the bounded map fallback.
                 return false;
             }
         }
