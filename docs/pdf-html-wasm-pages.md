@@ -1,38 +1,51 @@
 # unpdf Browser Preview
 
 The `unpdf` browser PDF-to-HTML converter is published at
-[erikbra.github.io/unpdf/wasm/](https://erikbra.github.io/unpdf/wasm/).
+[unpdf.me/now/](https://unpdf.me/now/). A GitHub Pages mirror remains available
+at [erikbra.github.io/unpdf/now/](https://erikbra.github.io/unpdf/now/).
 It reads the selected PDF locally and does not upload the document or extracted
 content to a server.
 
-The repository root at
-[erikbra.github.io/unpdf/](https://erikbra.github.io/unpdf/) links to
+The site root at [unpdf.me](https://unpdf.me/) links to
 the browser converter and the existing signed `unpdf` APT repository.
 
 ## Deployment
 
 The `Publish PDF-to-HTML WASM Preview` workflow publishes the release build on
-relevant changes to `main` and can also be run manually. It checks out the
-existing `gh-pages` branch, replaces only the `wasm` directory, updates the
-root landing and fallback pages, and preserves the `apt` repository. WASM and
-APT publication share one concurrency lock so neither workflow can overwrite a
-concurrent update from the other.
+relevant changes to `main` and can also be run manually. It restores the latest
+assembled site, replaces only the `now` directory, replaces the former `wasm`
+application with a relative redirect, updates the root landing and fallback pages, and preserves the `apt`
+repository and conversion examples. WASM, examples, and APT publication share
+one concurrency lock so no workflow can overwrite a concurrent update from
+another.
 
-The deployment helper rewrites the application base URI to
-`/unpdf/wasm/`. The shared 404 page loads the application shell for paths
-below that base, allowing the Blazor router to handle direct navigation.
+The canonical assembled artifact keeps the GitHub Pages application base URI
+`/unpdf/now/`. A host-specific preparation step rewrites it to `/now/` for
+Cloudflare, creates the root `_headers` policy scoped to `/now/*`, removes
+provider files that should not be served from the application directory, and
+checks the Cloudflare Pages file-count and per-file limits. The shared 404 page
+loads the application shell for paths below the corresponding base, allowing
+the Blazor router to handle direct navigation.
+
+Every workflow that updates the assembled site deploys it to both hosts. The
+Cloudflare job uses the `cloudflare-pages` GitHub environment, its
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` secrets, the `unpdf-me`
+Direct Upload project, and Wrangler's `pages deploy` command. The stable
+`unpdf-me.pages.dev` URL is verified before the job succeeds.
 
 ## Static-host behavior
 
-Release builds fingerprint framework assets. GitHub Pages controls cache
-headers and transfer compression, so the deployment does not assume that the
-generated Brotli or Gzip sidecars will be selected by the host. The patched
-HTML shell is deliberately served without a generated compression sidecar;
-fingerprinted framework assets retain theirs.
+Release builds fingerprint framework assets. The deployment does not assume
+that generated Brotli or Gzip sidecars will be selected by either host. The
+patched HTML shell is deliberately served without a generated compression
+sidecar; fingerprinted framework assets retain theirs. Cloudflare applies the
+checked-in security and immutable framework-cache policy from the prepared
+root `_headers` file.
 
-The workflow verifies the deployed root and application documents byte for
-byte, confirms the sample PDF is public, and checks that GitHub Pages serves a
-framework binary with the `application/wasm` media type. The ordinary CI build
+The workflow verifies both deployed roots and application documents, confirms
+the sample PDF is public, checks the response security headers and no-cookie
+policy on Cloudflare, and checks that both hosts serve a framework binary with
+the `application/wasm` media type. The ordinary CI build
 publishes the `browser-wasm` application independently, then runs the
 Playwright conversion test against a deterministic one-page fixture. The test
 asserts expected text and page structure, records conversion duration, and
@@ -100,12 +113,11 @@ cross-origin boundary headers. Fingerprinted framework files receive an
 immutable one-year cache policy while `index.html` remains revalidatable.
 
 GitHub Pages does not apply these provider configuration files or allow this
-repository to set arbitrary response headers. The deployed preview therefore
-uses the checked CSP meta policy and verifies HTTPS content types, no cookies,
-and the exact staged document. A meta CSP cannot enforce `frame-ancestors`, so
-Pages remains the demo/preview host; production deployment must use the emitted
-Cloudflare/Azure response-header configuration or an equivalent CDN/server
-configuration.
+repository to set arbitrary response headers. The mirror therefore uses the
+checked CSP meta policy and verifies HTTPS content types, no cookies, and the
+exact staged document. A meta CSP cannot enforce `frame-ancestors`, which is
+why Cloudflare Pages is the production host and applies the emitted response
+headers.
 
 Primary guidance:
 

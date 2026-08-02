@@ -60,3 +60,20 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5.0.0
+
+  cloudflare:
+    needs: refresh
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+    environment:
+      name: cloudflare-pages
+      url: https://unpdf-me.pages.dev/
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/deploy-cloudflare-pages
+        with:
+          cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import html
+import posixpath
 import re
 import shutil
 from pathlib import Path
@@ -27,6 +29,17 @@ def normalize_base_path(value: str) -> str:
     return parsed.path
 
 
+def normalize_application_path(value: str) -> str:
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+        raise ValueError("application path must be a relative URL path")
+    if not parsed.path or parsed.path.startswith("/") or parsed.path.endswith("/"):
+        raise ValueError("application path must not start or end with a slash")
+    if "\\" in parsed.path or any(part in {"", ".", ".."} for part in parsed.path.split("/")):
+        raise ValueError("application path must not contain empty or relative segments")
+    return parsed.path
+
+
 def rewrite_base_href(index_path: Path, base_path: str) -> None:
     document = index_path.read_text(encoding="utf-8-sig")
     matches = list(BASE_HREF_PATTERN.finditer(document))
@@ -46,14 +59,41 @@ def rewrite_base_href(index_path: Path, base_path: str) -> None:
         index_path.with_name(index_path.name + suffix).unlink(missing_ok=True)
 
 
+def write_application_redirect(site: Path, source_path: str, destination_path: str) -> None:
+    redirect_directory = site / source_path
+    shutil.rmtree(redirect_directory, ignore_errors=True)
+    redirect_directory.mkdir(parents=True)
+    relative_target = posixpath.relpath(
+        f"/{destination_path}/",
+        f"/{source_path}/",
+    ).rstrip("/") + "/"
+    escaped_target = html.escape(relative_target, quote=True)
+    (redirect_directory / "index.html").write_text(
+        "<!doctype html>\n"
+        '<html lang="en"><head><meta charset="utf-8">\n'
+        f'<meta http-equiv="refresh" content="0;url={escaped_target}">\n'
+        f'<link rel="canonical" href="{escaped_target}">\n'
+        '<title>unpdf</title></head><body>\n'
+        f'<p><a href="{escaped_target}">Open unpdf now</a></p>\n'
+        "</body></html>\n",
+        encoding="utf-8",
+    )
+
+
 def publish_site(
     application: Path,
     site: Path,
     landing_page: Path,
     not_found_page: Path,
     base_path: str,
+    application_path: str = "wasm",
+    legacy_application_paths: tuple[str, ...] = (),
 ) -> None:
     base_path = normalize_base_path(base_path)
+    application_path = normalize_application_path(application_path)
+    legacy_application_paths = tuple(
+        normalize_application_path(path) for path in legacy_application_paths
+    )
     required_paths = (
         application / "index.html",
         application / "_framework",
@@ -66,7 +106,11 @@ def publish_site(
         if not template.is_file():
             raise FileNotFoundError(f"Pages template does not exist: {template}")
 
-    destination = site / "wasm"
+    for legacy_application_path in legacy_application_paths:
+        if legacy_application_path != application_path:
+            write_application_redirect(site, legacy_application_path, application_path)
+
+    destination = site / application_path
     shutil.rmtree(destination, ignore_errors=True)
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(application, destination)
@@ -90,6 +134,8 @@ def main() -> int:
     parser.add_argument("--landing-page", required=True, type=Path)
     parser.add_argument("--not-found-page", required=True, type=Path)
     parser.add_argument("--base-path", required=True)
+    parser.add_argument("--application-path", default="wasm")
+    parser.add_argument("--redirect-application-path", action="append", default=[])
     args = parser.parse_args()
     publish_site(
         args.application.resolve(),
@@ -97,6 +143,8 @@ def main() -> int:
         args.landing_page.resolve(),
         args.not_found_page.resolve(),
         args.base_path,
+        args.application_path,
+        tuple(args.redirect_application_path),
     )
     return 0
 

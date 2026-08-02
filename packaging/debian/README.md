@@ -15,14 +15,14 @@ python3 eng/build_unpdf_apt_repository.py \
 
 ## Public repository
 
-GitHub Pages hosts the repository at
-`https://erikbra.github.io/unpdf/apt`. Install the preview channel with:
+Cloudflare Pages hosts the repository at
+`https://unpdf.me/apt`. Install the preview channel with:
 
 ```console
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://erikbra.github.io/unpdf/apt/unpdf-archive-keyring.gpg \
+curl -fsSL https://unpdf.me/apt/unpdf-archive-keyring.gpg \
   | sudo tee /etc/apt/keyrings/unpdf.gpg >/dev/null
-curl -fsSL https://erikbra.github.io/unpdf/apt/unpdf-preview.sources \
+curl -fsSL https://unpdf.me/apt/unpdf-preview.sources \
   | sudo tee /etc/apt/sources.list.d/unpdf.sources >/dev/null
 sudo apt update
 sudo apt install unpdf

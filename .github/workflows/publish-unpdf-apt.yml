@@ -29,7 +29,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APT_BASE_URL: https://erikbra.github.io/unpdf/apt
+  APT_BASE_URL: https://unpdf.me/apt
   RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
   APT_SUITE: ${{ github.event_name == 'release' && (github.event.release.prerelease && 'preview' || 'stable') || inputs.suite }}
 
@@ -146,6 +146,23 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5.0.0
+
+  cloudflare:
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+    environment:
+      name: cloudflare-pages
+      url: https://unpdf-me.pages.dev/
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/deploy-cloudflare-pages
+        with:
+          cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
   public-install:
     needs: [publish, deploy]
