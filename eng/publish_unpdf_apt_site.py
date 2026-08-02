@@ -62,7 +62,7 @@ sudo apt install unpdf</code></pre>
     {''.join(suite_sections)}
     <h2>Signing key</h2>
     <p>Fingerprint: <code>{grouped_fingerprint}</code></p>
-    <p><a href="unpdf-archive-key.asc">Armored public key</a> · <a href="https://github.com/erikbra/pdfbox-net">source</a></p>
+    <p><a href="unpdf-archive-key.asc">Armored public key</a> · <a href="https://github.com/erikbra/unpdf">source</a></p>
   </main>
 </body>
 </html>
