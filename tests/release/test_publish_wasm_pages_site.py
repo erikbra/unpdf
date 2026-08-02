@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "eng" / "publish_wasm_pages_site.py"
+LANDING_PAGE = Path(__file__).resolve().parents[2] / "packaging" / "pages" / "index.html"
 SPEC = importlib.util.spec_from_file_location("publish_wasm_pages_site", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -40,6 +41,13 @@ def create_templates(root: Path) -> tuple[Path, Path]:
 
 
 class WasmPagesPublisherTest(unittest.TestCase):
+    def test_production_landing_page_links_to_unpdf_source(self):
+        page = LANDING_PAGE.read_text(encoding="utf-8")
+
+        self.assertIn('href="https://github.com/erikbra/unpdf">View source</a>', page)
+        self.assertIn('href="https://github.com/erikbra/unpdf">unpdf on GitHub</a>', page)
+        self.assertNotIn('href="https://github.com/erikbra/pdfbox-net"', page)
+
     def test_publishes_app_and_preserves_existing_pages_content(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

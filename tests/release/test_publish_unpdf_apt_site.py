@@ -42,6 +42,8 @@ class AptPagesPublisherTest(unittest.TestCase):
             self.assertIn("Preview channel", page)
             self.assertIn("Stable channel", page)
             self.assertIn("0123 4567 89AB CDEF", page)
+            self.assertIn('href="https://github.com/erikbra/unpdf">source</a>', page)
+            self.assertNotIn('href="https://github.com/erikbra/pdfbox-net"', page)
 
     def test_rejects_invalid_fingerprint(self):
         with self.assertRaisesRegex(ValueError, "40 hexadecimal"):
