@@ -57,7 +57,8 @@ runs:
         case "$http_status" in
           200)
             domain_status="$(jq -r '.result.status // empty' "$domain_response")"
-            if [[ "$domain_status" == "error" || "$domain_status" == "deactivated" ]]; then
+            if [[ "$domain_status" != "active" && "$domain_status" != "blocked" ]]; then
+              printf 'Retrying unpdf.me Pages domain validation from status: %s\n' "$domain_status"
               http_status="$(request_domain -X PATCH -d '{}' "$domain_api")"
               test "$http_status" = 200
               jq -e '.success == true' "$domain_response" >/dev/null
@@ -90,7 +91,10 @@ runs:
           fi
           sleep 10
         done
-        test "$domain_status" = active
+        if [[ "$domain_status" != "active" ]]; then
+          jq -c '{status: .result.status, validation: .result.validation_data, verification: .result.verification_data}' "$domain_response" >&2
+          exit 1
+        fi
 
     - name: Verify Cloudflare Pages deployment
       shell: bash
