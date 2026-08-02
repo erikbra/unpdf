@@ -6,7 +6,7 @@ inputs:
     description: Cloudflare account that owns the Pages project.
     required: true
   cloudflare-api-token:
-    description: API token with Cloudflare Pages edit permission.
+    description: API token with Cloudflare Pages edit and Zone DNS edit permissions.
     required: true
 
 runs:
@@ -38,7 +38,7 @@ runs:
           --branch=main
           --commit-hash=${{ github.sha }}
 
-    - name: Ensure unpdf.me custom domain
+    - name: Register unpdf.me custom domain
       shell: bash
       env:
         CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
@@ -56,13 +56,6 @@ runs:
         http_status="$(request_domain "$domain_api")"
         case "$http_status" in
           200)
-            domain_status="$(jq -r '.result.status // empty' "$domain_response")"
-            if [[ "$domain_status" != "active" && "$domain_status" != "blocked" ]]; then
-              printf 'Retrying unpdf.me Pages domain validation from status: %s\n' "$domain_status"
-              http_status="$(request_domain -X PATCH -d '{}' "$domain_api")"
-              test "$http_status" = 200
-              jq -e '.success == true' "$domain_response" >/dev/null
-            fi
             ;;
           404)
             http_status="$(request_domain -X POST -d '{"name":"unpdf.me"}' "${domain_api%/unpdf.me}")"
@@ -74,6 +67,84 @@ runs:
             exit 1
             ;;
         esac
+
+    - name: Point unpdf.me DNS to Cloudflare Pages
+      shell: bash
+      env:
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+      run: |
+        api="https://api.cloudflare.com/client/v4"
+        api_response="$RUNNER_TEMP/cloudflare-dns.json"
+        request_cloudflare() {
+          curl --retry 4 --retry-all-errors --retry-delay 2 -sS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -o "$api_response" -w '%{http_code}' "$@"
+        }
+        require_success() {
+          local http_status="$1"
+          if [[ "$http_status" != 200 ]] || ! jq -e '.success == true' "$api_response" >/dev/null; then
+            jq -c '.errors // .' "$api_response" >&2
+            echo "The Cloudflare token needs Zone / DNS / Edit permission for unpdf.me." >&2
+            exit 1
+          fi
+        }
+
+        http_status="$(request_cloudflare --get \
+          --data-urlencode 'name=unpdf.me' \
+          --data-urlencode "account.id=$CLOUDFLARE_ACCOUNT_ID" \
+          "$api/zones")"
+        require_success "$http_status"
+        zone_id="$(jq -er '.result | map(select(.name == "unpdf.me" and .status == "active")) | if length == 1 then .[0].id else error("Expected one active unpdf.me zone") end' "$api_response")"
+
+        http_status="$(request_cloudflare --get \
+          --data-urlencode 'name=unpdf.me' \
+          --data-urlencode 'per_page=100' \
+          "$api/zones/$zone_id/dns_records")"
+        require_success "$http_status"
+
+        mapfile -t routing_record_ids < <(jq -r '.result[] | select(.type == "A" or .type == "AAAA" or .type == "CNAME") | .id' "$api_response")
+        if [[ "${#routing_record_ids[@]}" == 1 ]] &&
+          jq -e '.result[] | select((.type == "CNAME") and (.content == "unpdf-me.pages.dev") and (.proxied == true))' "$api_response" >/dev/null; then
+          echo "unpdf.me DNS already points to unpdf-me.pages.dev"
+          exit 0
+        fi
+
+        for record_id in "${routing_record_ids[@]}"; do
+          http_status="$(request_cloudflare -X DELETE "$api/zones/$zone_id/dns_records/$record_id")"
+          require_success "$http_status"
+        done
+
+        dns_record="$(jq -nc '{type:"CNAME", name:"unpdf.me", content:"unpdf-me.pages.dev", proxied:true, ttl:1}')"
+        http_status="$(request_cloudflare -X POST -d "$dns_record" "$api/zones/$zone_id/dns_records")"
+        require_success "$http_status"
+        echo "Pointed unpdf.me DNS to unpdf-me.pages.dev"
+
+    - name: Activate unpdf.me custom domain
+      shell: bash
+      env:
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+      run: |
+        domain_api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/unpdf-me/domains/unpdf.me"
+        domain_response="$RUNNER_TEMP/cloudflare-domain.json"
+        request_domain() {
+          curl --retry 4 --retry-all-errors --retry-delay 2 -sS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -o "$domain_response" -w '%{http_code}' "$@"
+        }
+
+        http_status="$(request_domain "$domain_api")"
+        test "$http_status" = 200
+        domain_status="$(jq -r '.result.status // empty' "$domain_response")"
+        if [[ "$domain_status" != "active" && "$domain_status" != "blocked" ]]; then
+          printf 'Retrying unpdf.me Pages domain validation from status: %s\n' "$domain_status"
+          http_status="$(request_domain -X PATCH -d '{}' "$domain_api")"
+          test "$http_status" = 200
+          jq -e '.success == true' "$domain_response" >/dev/null
+        fi
 
         domain_status=""
         for _ in $(seq 1 90); do
