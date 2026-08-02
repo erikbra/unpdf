@@ -41,8 +41,8 @@
       "rawBytes": 46869
     },
     "Microsoft.Extensions.Logging.Abstractions.wasm": {
-      "brotliBytes": 10897,
-      "rawBytes": 27413
+      "brotliBytes": 12226,
+      "rawBytes": 30485
     },
     "Microsoft.Extensions.Logging.wasm": {
       "brotliBytes": 7646,
@@ -65,8 +65,8 @@
       "rawBytes": 47893
     },
     "PdfBox.Net.FontBox.wasm": {
-      "brotliBytes": 139864,
-      "rawBytes": 497941
+      "brotliBytes": 144492,
+      "rawBytes": 514837
     },
     "PdfBox.Net.Html.Wasm.wasm": {
       "brotliBytes": 15784,
@@ -77,20 +77,20 @@
       "rawBytes": 746261
     },
     "PdfBox.Net.IO.wasm": {
-      "brotliBytes": 14685,
-      "rawBytes": 36629
+      "brotliBytes": 15706,
+      "rawBytes": 39189
     },
     "PdfBox.Net.Layout.wasm": {
       "brotliBytes": 194639,
       "rawBytes": 641301
     },
     "PdfBox.Net.SkiaSharp.wasm": {
-      "brotliBytes": 41276,
-      "rawBytes": 103701
+      "brotliBytes": 41947,
+      "rawBytes": 106261
     },
     "PdfBox.Net.wasm": {
-      "brotliBytes": 403218,
-      "rawBytes": 1773845
+      "brotliBytes": 419590,
+      "rawBytes": 1830677
     },
     "SkiaSharp.wasm": {
       "brotliBytes": 30012,
