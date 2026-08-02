@@ -279,6 +279,11 @@ public static class PdfHtmlConverter
           margin-top: 0;
         }
 
+        .pdf-semantic-document-flow > .pdf-semantic-layout-fallback-page:first-child {
+          background: transparent;
+          box-shadow: none;
+        }
+
         .pdf-semantic-layout-fallback-page-with-islands {
           display: grid;
           grid-template-columns: minmax(0, 1fr);
@@ -933,6 +938,49 @@ public static class PdfHtmlConverter
           margin: 12pt auto;
           max-width: 100%;
           width: min(100%, var(--pdf-semantic-figure-width, 100%));
+        }
+
+        .pdf-semantic-header-graphic {
+          align-self: start;
+          grid-column: 1;
+          margin: 0;
+          pointer-events: none;
+          position: relative;
+          z-index: 1;
+        }
+
+        .pdf-semantic-flow .pdf-semantic-page-header {
+          align-items: start;
+          align-self: stretch;
+          border-bottom: var(--pdf-semantic-page-header-rule-width, 0.5pt) solid
+            var(--pdf-semantic-page-header-rule-color, currentColor);
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr);
+          margin-bottom: 18pt;
+          padding-bottom: var(--pdf-semantic-page-header-rule-gap, 3pt);
+          width: 100%;
+        }
+
+        .pdf-semantic-page-header-text {
+          align-items: flex-end;
+          align-self: start;
+          display: flex;
+          flex-direction: column;
+          grid-column: 2;
+          line-height: 1.2;
+          margin: 0;
+          max-width: none;
+          min-width: 0;
+          text-align: right;
+          text-align-last: right;
+          width: 100%;
+        }
+
+        .pdf-semantic-page-header-line {
+          display: block;
+          text-align: right;
+          text-align-last: right;
+          width: 100%;
         }
 
         .pdf-semantic-cover-region {
@@ -4759,7 +4807,8 @@ public static class PdfHtmlConverter
             if (element.Kind is PdfSemanticElementKind.Bibliography or
                     PdfSemanticElementKind.DefinitionList or
                     PdfSemanticElementKind.CodeBlock or
-                    PdfSemanticElementKind.Algorithm ||
+                    PdfSemanticElementKind.Algorithm or
+                    PdfSemanticElementKind.Table ||
                 IsFigureCaption(element))
             {
                 return false;
@@ -9078,6 +9127,40 @@ public static class PdfHtmlConverter
                 ? FigureCaptionsByRegion(page, semanticPage, figureRegions)
                 : [];
         PdfLayoutRectangle[] captionedFigureRegions = captionsByFigure.Keys.ToArray();
+        SemanticPageHeader? pageHeader = figureRendering == SemanticFigureRendering.Content && imageAssets != null
+            ? TryCreateSemanticPageHeader(page, semanticPage, flowElements)
+            : null;
+        if (pageHeader != null && imageAssets != null)
+        {
+            WriteSemanticPageHeader(
+                html,
+                page,
+                semanticPage,
+                pageHeader,
+                footnotes,
+                imageAssets,
+                scale);
+        }
+        else if (figureRendering == SemanticFigureRendering.Content && imageAssets != null)
+        {
+            foreach (PdfLayoutRectangle headerGraphic in SemanticHeaderGraphicRegions(page, semanticPage))
+            {
+                WriteSemanticFigure(
+                    html,
+                    page,
+                    semanticPage,
+                    headerGraphic,
+                    imageAssets,
+                    scale,
+                    inline: false,
+                    additionalClass: "pdf-semantic-header-graphic",
+                    additionalStyle: "--pdf-semantic-header-graphic-height:" +
+                        CssPoints(headerGraphic.Height * scale),
+                    accessibleText: "Page header graphic",
+                    constrainSourceDecorationsToRegion: true);
+            }
+        }
+
         HashSet<FormulaGlyphKey> claimedFormulaGlyphs = [];
         List<PdfSemanticElement> deferredPageArtifacts = [];
         int nextFigureRegion = 0;
@@ -9085,7 +9168,8 @@ public static class PdfHtmlConverter
         for (int index = 0; index < flowElements.Count; index++)
         {
             PdfSemanticElement element = flowElements[index];
-            if (skippedElements?.Contains(element) == true)
+            if (skippedElements?.Contains(element) == true ||
+                pageHeader?.TextElements.Any(candidate => ReferenceEquals(candidate, element)) == true)
             {
                 continue;
             }
@@ -9800,6 +9884,7 @@ public static class PdfHtmlConverter
 
         PdfLayoutPath[] candidatePaths = page.Paths
             .Where(path => !IsSemanticFlowRulePath(page, semanticPage, path))
+            .Where(path => !IsCompactHeaderGraphicPath(page, path))
             .Where(path => path.Bounds.Width > 2f && path.Bounds.Height > 2f)
             .ToArray();
         PdfLayoutRectangle[] largePathBounds = candidatePaths
@@ -9808,6 +9893,9 @@ public static class PdfHtmlConverter
             .ToArray();
         regions.AddRange(largePathBounds);
         regions.AddRange(GraphicRowRegions(page, largePathBounds));
+        regions.AddRange(page.VectorGroups
+            .Where(group => ShouldUseTopLevelVectorGroupBounds(page, group, candidatePaths))
+            .Select(static group => group.Bounds));
 
         if (candidatePaths.Length >= 8)
         {
@@ -9823,6 +9911,218 @@ public static class PdfHtmlConverter
         {
             yield return region;
         }
+    }
+
+    private static bool ShouldUseTopLevelVectorGroupBounds(
+        PdfLayoutPage page,
+        PdfLayoutVectorGroup group,
+        IReadOnlyList<PdfLayoutPath> candidatePaths)
+    {
+        if (group.ParentIndex != null ||
+            !group.HasPaths ||
+            group.Opacity <= 0.01f ||
+            IsCompactHeaderGraphicGroup(page, group) ||
+            !IsSubstantialGraphic(page, group.Bounds) ||
+            page.VectorGroups.Any(candidate => candidate.ParentIndex == group.Index))
+        {
+            return false;
+        }
+
+        PdfLayoutPath[] groupCandidates = candidatePaths
+            .Where(path => path.Index >= group.FirstPathIndex && path.Index <= group.LastPathIndex)
+            .ToArray();
+        if (groupCandidates.Length == 0)
+        {
+            return false;
+        }
+
+        PdfLayoutRectangle candidateBounds = UnionRectangles(groupCandidates.Select(static path => path.Bounds));
+        int pathCount = group.LastPathIndex - group.FirstPathIndex + 1;
+        return pathCount >= 1000 ||
+            group.Bounds.Width >= candidateBounds.Width * 1.12f ||
+            group.Bounds.Height >= candidateBounds.Height * 1.12f;
+    }
+
+    private static IEnumerable<PdfLayoutRectangle> SemanticHeaderGraphicRegions(
+        PdfLayoutPage page,
+        PdfSemanticPage semanticPage)
+    {
+        if (IsCoverPage(page, semanticPage) ||
+            !semanticPage.Elements.Any(element =>
+                element.Lines.Count > 0 &&
+                !string.IsNullOrWhiteSpace(element.Text) &&
+                element.Bounds.Y < page.Height * 0.12f &&
+                element.Bounds.Right > page.Width * 0.45f))
+        {
+            yield break;
+        }
+
+        IEnumerable<PdfLayoutRectangle> vectorRegions = page.VectorGroups
+            .Where(group => IsCompactHeaderGraphicGroup(page, group))
+            .Select(static group => group.Bounds);
+        IEnumerable<PdfLayoutRectangle> imageRegions = page.Images
+            .Where(static image => !IsVisualFallbackImage(image))
+            .Select(VisibleImageBounds)
+            .Where(bounds => IsCompactHeaderGraphicBounds(page, bounds));
+        foreach (PdfLayoutRectangle region in MergeGraphicRegions(vectorRegions.Concat(imageRegions)))
+        {
+            yield return region;
+        }
+    }
+
+    private static SemanticPageHeader? TryCreateSemanticPageHeader(
+        PdfLayoutPage page,
+        PdfSemanticPage semanticPage,
+        IReadOnlyList<PdfSemanticElement> flowElements)
+    {
+        PdfLayoutRectangle? graphic = SemanticHeaderGraphicRegions(page, semanticPage)
+            .OrderBy(static region => region.X)
+            .ThenBy(static region => region.Y)
+            .Select(static region => (PdfLayoutRectangle?)region)
+            .FirstOrDefault();
+        if (graphic == null)
+        {
+            return null;
+        }
+
+        PdfSemanticElement[] textElements = flowElements
+            .Where(static element => element.Kind is PdfSemanticElementKind.Paragraph or PdfSemanticElementKind.Header)
+            .Where(element => element.Lines.Count > 0 &&
+                element.Text.Length <= 240 &&
+                element.Bounds.Y < page.Height * 0.12f &&
+                element.Bounds.Bottom <= page.Height * 0.14f &&
+                element.Bounds.X >= page.Width * 0.45f &&
+                element.Bounds.Right >= page.Width * 0.75f)
+            .OrderBy(static element => element.Bounds.Y)
+            .ThenByDescending(static element => element.Bounds.Right)
+            .Take(3)
+            .ToArray();
+        if (textElements.Sum(static element => element.Lines.Count) < 2)
+        {
+            return null;
+        }
+
+        PdfLayoutRectangle graphicBounds = graphic.Value;
+        float contentBottom = MathF.Max(
+            graphicBounds.Bottom,
+            textElements.Max(static element => element.Bounds.Bottom));
+        float horizontalTolerance = MathF.Max(10f, page.Width * 0.025f);
+        SemanticPageRule? rule = page.Paths
+            .Select(path => TryCreateSemanticPageRule(path, out SemanticPageRule candidate)
+                ? candidate
+                : (SemanticPageRule?)null)
+            .Where(static candidate => candidate != null)
+            .Select(static candidate => candidate!.Value)
+            .Where(candidate =>
+                candidate.Width >= page.Width * 0.65f &&
+                candidate.Left >= graphicBounds.X - horizontalTolerance &&
+                candidate.Left <= graphicBounds.X + horizontalTolerance &&
+                candidate.Right >= page.Width * 0.80f &&
+                candidate.Top >= contentBottom - 2f &&
+                candidate.Top <= contentBottom + page.Height * 0.035f &&
+                candidate.Bottom <= page.Height * 0.16f &&
+                candidate.Thickness <= 3f)
+            .OrderBy(static candidate => candidate.Top)
+            .Select(static candidate => (SemanticPageRule?)candidate)
+            .FirstOrDefault();
+        return rule == null
+            ? null
+            : new SemanticPageHeader(graphicBounds, textElements, rule.Value);
+    }
+
+    private static void WriteSemanticPageHeader(
+        StringBuilder html,
+        PdfLayoutPage page,
+        PdfSemanticPage semanticPage,
+        SemanticPageHeader header,
+        FootnoteContext footnotes,
+        IReadOnlyDictionary<string, PdfLayoutImageAsset> imageAssets,
+        float scale)
+    {
+        float sourceContentBottom = MathF.Max(
+            header.GraphicRegion.Bottom,
+            header.TextElements.Max(static element => element.Bounds.Bottom));
+        float ruleGap = MathF.Max(0f, header.Rule.Top - sourceContentBottom);
+        html.Append("<header class=\"pdf-semantic-page-header\" data-source-page=\"")
+            .Append(page.PageNumber.ToString(CultureInfo.InvariantCulture))
+            .Append("\" style=\"--pdf-semantic-page-header-rule-width:")
+            .Append(CssPoints(header.Rule.Thickness * scale))
+            .Append(";--pdf-semantic-page-header-rule-color:")
+            .Append(CssRgba(header.Rule.Color))
+            .Append(";--pdf-semantic-page-header-rule-gap:")
+            .Append(CssPoints(ruleGap * scale))
+            .AppendLine("\">");
+        WriteSemanticFigure(
+            html,
+            page,
+            semanticPage,
+            header.GraphicRegion,
+            imageAssets,
+            scale,
+            inline: false,
+            additionalClass: "pdf-semantic-header-graphic",
+            additionalStyle: "--pdf-semantic-header-graphic-height:" +
+                CssPoints(header.GraphicRegion.Height * scale),
+            accessibleText: "Page header graphic",
+            constrainSourceDecorationsToRegion: true);
+        html.Append("<div class=\"pdf-semantic-page-header-text ")
+            .Append(SemanticClassNames(header.TextElements[0], page, allowMeasuredWidth: false))
+            .Append('\"');
+        AppendTextDirectionAttribute(html, string.Join(' ', header.TextElements.Select(static element => element.Text)));
+        html.AppendLine(">");
+        foreach ((PdfSemanticElement element, PdfSemanticLine line) in header.TextElements
+            .SelectMany(static element => element.Lines.Select(line => (element, line)))
+            .OrderBy(static item => item.line.Bounds.Y)
+            .ThenBy(static item => item.line.Bounds.X))
+        {
+            html.Append("<span class=\"pdf-semantic-page-header-line ")
+                .Append(SemanticLineClassNames(line))
+                .Append("\">");
+            PdfSemanticElement lineElement = new(
+                element.Kind,
+                line.Text,
+                line.Bounds,
+                [line],
+                element.HeadingLevel);
+            if (CanWriteRichSemanticText(lineElement))
+            {
+                WriteRichSemanticText(html, lineElement, footnotes, page);
+            }
+            else
+            {
+                WriteTextWithFootnoteReferences(html, line.Text, footnotes);
+            }
+
+            html.AppendLine("</span>");
+        }
+
+        html.AppendLine("</div>");
+        html.AppendLine("</header>");
+    }
+
+    private static bool IsCompactHeaderGraphicPath(PdfLayoutPage page, PdfLayoutPath path)
+    {
+        return page.VectorGroups.Any(group =>
+            IsCompactHeaderGraphicGroup(page, group) &&
+            path.Index >= group.FirstPathIndex &&
+            path.Index <= group.LastPathIndex);
+    }
+
+    private static bool IsCompactHeaderGraphicGroup(PdfLayoutPage page, PdfLayoutVectorGroup group)
+    {
+        return group.ParentIndex == null &&
+            group.HasPaths &&
+            IsCompactHeaderGraphicBounds(page, group.Bounds);
+    }
+
+    private static bool IsCompactHeaderGraphicBounds(PdfLayoutPage page, PdfLayoutRectangle bounds)
+    {
+        return bounds.Width >= 8f &&
+            bounds.Height >= 8f &&
+            bounds.Width <= page.Width * 0.20f &&
+            bounds.Height <= page.Height * 0.12f &&
+            bounds.Y >= 0f &&
+            bounds.Bottom <= page.Height * 0.14f;
     }
 
     private static bool IsCoverPage(PdfLayoutPage page, PdfSemanticPage semanticPage)
@@ -17653,6 +17953,11 @@ public static class PdfHtmlConverter
 
         public IReadOnlyList<SemanticPageRule> Rules { get; }
     }
+
+    private sealed record SemanticPageHeader(
+        PdfLayoutRectangle GraphicRegion,
+        IReadOnlyList<PdfSemanticElement> TextElements,
+        SemanticPageRule Rule);
 
     private readonly record struct SemanticPageRule(
         int SourcePathIndex,

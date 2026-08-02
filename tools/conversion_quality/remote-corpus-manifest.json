@@ -584,7 +584,12 @@
         "minTextRuns": 1500,
         "minImagePlacements": 1,
         "minVectorPaths": 1800,
-        "minLinks": 30
+        "minLinks": 30,
+        "semanticTableCountsByPage": {
+          "8": 1,
+          "9": 2,
+          "11": 1
+        }
       }
     },
     {

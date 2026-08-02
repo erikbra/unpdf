@@ -1370,6 +1370,25 @@ public sealed class PdfSemanticExtractorTest
     }
 
     [Fact]
+    public void Extract_NestedEnDashList_PreservesEachSubitem()
+    {
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(CreateListFixture(
+            CreateStyledFixtureLine(72f, 120f, ("• ", "Symbol"), ("Interface options:", "Times-Roman")),
+            CreateStyledFixtureLine(96f, 136f, ("– ", "Times-Roman"), ("UART", "Times-Roman")),
+            CreateStyledFixtureLine(96f, 152f, ("– ", "Times-Roman"), ("I2C", "Times-Roman")),
+            CreateStyledFixtureLine(96f, 168f, ("– ", "Times-Roman"), ("SPI", "Times-Roman")),
+            CreateStyledFixtureLine(72f, 184f, ("• ", "Symbol"), ("Another capability", "Times-Roman")))).Pages);
+
+        PdfSemanticList root = Assert.IsType<PdfSemanticList>(
+            Assert.Single(page.Elements, static element => element.Kind == PdfSemanticElementKind.List).SemanticList);
+        Assert.Equal(2, root.Items.Count);
+        PdfSemanticList nested = Assert.Single(root.Items[0].NestedLists);
+        Assert.Equal(PdfSemanticListMarkerKind.Hyphen, nested.MarkerKind);
+        Assert.Equal(["UART", "I2C", "SPI"], nested.Items.Select(static item => item.Text));
+        Assert.Empty(root.Items[1].NestedLists);
+    }
+
+    [Fact]
     public void Extract_RepeatedInlineTerms_CreateStructuredDefinitionListWithWrappedDefinitions()
     {
         PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(
@@ -1977,6 +1996,35 @@ public sealed class PdfSemanticExtractorTest
         Assert.Contains(page.Elements, static element =>
             element.Kind == PdfSemanticElementKind.Paragraph &&
             element.Text == "Closing prose remains outside the ruled table.");
+    }
+
+    [Fact]
+    public void Extract_CompactCaptionedHorizontalRuleTable_PreservesTwoRowsAndBorders()
+    {
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(
+            CreateCompactCaptionedHorizontalRuleTableFixture()).Pages);
+
+        PdfSemanticElement table = Assert.Single(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Table);
+        Assert.Equal(
+            [
+                ["Symbol", "Parameter", "Minimum", "Maximum", "Unit"],
+                ["VIN", "Input Voltage", "-0.5", "6.0", "V"]
+            ],
+            table.TableRows.Select(row => row.Cells.Select(static cell => cell.Text).ToArray()).ToArray());
+        Assert.True(table.TableRows[0].IsHeader);
+        Assert.All(table.TableRows[0].Cells, static cell =>
+        {
+            Assert.True(cell.BorderTop);
+            Assert.True(cell.BorderBottom);
+        });
+        Assert.All(table.TableRows[1].Cells, static cell => Assert.True(cell.BorderBottom));
+        Assert.Equal(
+            "Table 2: Absolute Maximum Ratings",
+            Assert.IsType<PdfSemanticTableCaption>(table.TableCaption).Text);
+        Assert.Contains(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Paragraph &&
+            element.Text == "The surrounding reliability guidance remains ordinary prose.");
     }
 
     [Fact]
@@ -3015,6 +3063,38 @@ public sealed class PdfSemanticExtractorTest
         foreach (float y in new[] { 130f, 150f, 170f, 190f })
         {
             paths.Add(CreateRulePath(paths.Count, 106f, y, 487f, y));
+        }
+
+        return CreateSemanticPassageFixture(lines, paths);
+    }
+
+    private static PdfLayoutDocument CreateCompactCaptionedHorizontalRuleTableFixture()
+    {
+        List<PdfTextLine> lines =
+        [
+            CreateFixtureLine("Opening prose establishes the ordinary body font.", 72f, 72f, 320f),
+            CreateFixtureLine("The surrounding reliability guidance remains ordinary prose.", 72f, 108f, 360f),
+            CreateCompositeFixtureLine(
+                136f,
+                ("Symbol", 160f, 36f, "Times-Bold"),
+                ("Parameter", 218f, 52f, "Times-Bold"),
+                ("Minimum", 292f, 48f, "Times-Bold"),
+                ("Maximum", 360f, 52f, "Times-Bold"),
+                ("Unit", 432f, 24f, "Times-Bold")),
+            CreateCompositeFixtureLine(
+                156f,
+                ("VIN", 160f, 20f, "Times-Roman"),
+                ("Input Voltage", 218f, 66f, "Times-Roman"),
+                ("-0.5", 292f, 24f, "Times-Roman"),
+                ("6.0", 360f, 18f, "Times-Roman"),
+                ("V", 432f, 8f, "Times-Roman")),
+            CreateFixtureLine("Table 2: Absolute Maximum Ratings", 222f, 184f, 168f),
+            CreateFixtureLine("Closing prose resumes after the compact table.", 72f, 220f, 320f)
+        ];
+        List<PdfLayoutPath> paths = [];
+        foreach (float y in new[] { 130f, 150f, 170f })
+        {
+            paths.Add(CreateRulePath(paths.Count, 154f, y, 458f, y));
         }
 
         return CreateSemanticPassageFixture(lines, paths);

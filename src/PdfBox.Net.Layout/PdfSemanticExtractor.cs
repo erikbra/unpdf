@@ -5331,7 +5331,7 @@ public static class PdfSemanticExtractor
         }
 
         char first = text[start];
-        if (IsBulletMarker(first) || first == '-')
+        if (IsBulletMarker(first) || IsHyphenListMarker(first))
         {
             int bodyStart = start + 1;
             if (bodyStart >= text.Length || !char.IsWhiteSpace(text[bodyStart]))
@@ -5353,7 +5353,7 @@ public static class PdfSemanticExtractor
                 line,
                 first.ToString(),
                 bodyStart,
-                first == '-' ? ListMarkerCategory.Hyphen : ListMarkerCategory.Bullet,
+                IsHyphenListMarker(first) ? ListMarkerCategory.Hyphen : ListMarkerCategory.Bullet,
                 ListMarkerShape.Symbol,
                 "",
                 null,
@@ -5554,6 +5554,11 @@ public static class PdfSemanticExtractor
     private static bool IsBulletMarker(char character)
     {
         return character is '\u0095' or '\u2022' or '\u2023' or '\u2043' or '\u25e6' or '\u25aa' or '\u2219';
+    }
+
+    private static bool IsHyphenListMarker(char character)
+    {
+        return character is '-' or '\u2013' or '\u2014';
     }
 
     private static RuledTableRegion[] DetectRuledTableRegions(PdfLayoutPage page)
@@ -5853,11 +5858,15 @@ public static class PdfSemanticExtractor
                 return new PdfLayoutRectangle(left, top, right - left, bottom - top);
             })
             .Where(region =>
-                region.Width >= page.Width * 0.60f &&
+                region.Width >= page.Width * 0.40f &&
                 region.Width <= page.Width * 0.90f &&
                 region.Height >= 16f &&
                 region.Height <= page.Height * 0.55f)
-            .Where(region => HasAlignedTableRows(region, sourceRows, page))
+            .Where(region =>
+                region.Width >= page.Width * 0.60f
+                    ? HasAlignedTableRows(region, sourceRows, page, minimumRowCount: 3)
+                    : HasNearbyTableCaption(page, region, page.Height * 0.08f) &&
+                        HasAlignedTableRows(region, sourceRows, page, minimumRowCount: 2))
             .Distinct()
             .ToArray();
     }
@@ -5865,7 +5874,8 @@ public static class PdfSemanticExtractor
     private static bool HasAlignedTableRows(
         PdfLayoutRectangle region,
         IReadOnlyList<TableSourceRow> sourceRows,
-        PdfLayoutPage page)
+        PdfLayoutPage page,
+        int minimumRowCount)
     {
         TableSourceRow[] rows = sourceRows
             .Where(row => row.Cells.Count >= 3 && row.Cells.Count <= MaximumDetectedTableColumnCount)
@@ -5873,13 +5883,13 @@ public static class PdfSemanticExtractor
             .OrderBy(static row => row.Bounds.Y)
             .ThenBy(static row => row.Bounds.X)
             .ToArray();
-        if (rows.Length < 3)
+        if (rows.Length < minimumRowCount)
         {
             return false;
         }
 
         float[] anchors = TableColumnAnchors(rows);
-        return rows.Count(row => IsCompatibleWithTableColumns(row, anchors, page)) >= 3;
+        return rows.Count(row => IsCompatibleWithTableColumns(row, anchors, page)) >= minimumRowCount;
     }
 
     private static PdfLayoutRectangle[] MergeHorizontalRuleSegments(IEnumerable<PdfLayoutRectangle> source)
@@ -6460,11 +6470,26 @@ public static class PdfSemanticExtractor
                 break;
             }
 
-            PrependTableLeadRows(rows, start, group, page, lineStep, bodyFontSize, consumed);
+            PrependTableLeadRows(
+                rows,
+                start,
+                group,
+                page,
+                lineStep,
+                bodyFontSize,
+                consumed,
+                horizontalRuleTableRegions);
             int firstGroupIndex = Array.IndexOf(rows, group[0]);
             bool hasCaptionLead = firstGroupIndex > 0 &&
                 IsTableCaptionLeadRow(rows, firstGroupIndex - 1, group[0], lineStep, bodyFontSize);
-            if (!IsValidTableGroup(group, tableLikeRowCount, page, hasCaptionLead))
+            bool hasCaptionedHorizontalRuleEvidence = horizontalRuleTableRegion.HasValue &&
+                HasNearbyTableCaption(page, horizontalRuleTableRegion.Value, page.Height * 0.08f);
+            if (!IsValidTableGroup(
+                    group,
+                    tableLikeRowCount,
+                    page,
+                    hasCaptionLead,
+                    hasCaptionedHorizontalRuleEvidence))
             {
                 index = start + 1;
                 continue;
@@ -6481,9 +6506,13 @@ public static class PdfSemanticExtractor
         PdfLayoutPage page,
         float lineStep,
         float bodyFontSize,
-        HashSet<int> consumed)
+        HashSet<int> consumed,
+        IReadOnlyList<PdfLayoutRectangle> horizontalRuleTableRegions)
     {
         float[] anchors = TableColumnAnchors(group);
+        PdfLayoutRectangle? horizontalRuleTableRegion = FindHorizontalRuleTableRegion(
+            group[0].Bounds,
+            horizontalRuleTableRegions);
         for (int index = startIndex - 1; index >= 0; index--)
         {
             TableSourceRow row = rows[index];
@@ -6492,6 +6521,11 @@ public static class PdfSemanticExtractor
                 break;
             }
 
+            if (horizontalRuleTableRegion.HasValue &&
+                !IsInsideHorizontalRuleTable(row.Bounds, [horizontalRuleTableRegion.Value]))
+            {
+                break;
+            }
 
             if (row.TableLaneIndex != group[0].TableLaneIndex)
             {
@@ -6820,10 +6854,12 @@ public static class PdfSemanticExtractor
         IReadOnlyList<TableSourceRow> rows,
         int tableLikeRowCount,
         PdfLayoutPage page,
-        bool hasCaptionLead)
+        bool hasCaptionLead,
+        bool hasCaptionedHorizontalRuleEvidence)
     {
         int maximumColumnCount = MaximumTableColumnCount(rows);
-        if (rows.Count < 3 || tableLikeRowCount < 2 || maximumColumnCount < 3)
+        int minimumRowCount = hasCaptionedHorizontalRuleEvidence ? 2 : 3;
+        if (rows.Count < minimumRowCount || tableLikeRowCount < 2 || maximumColumnCount < 3)
         {
             return false;
         }

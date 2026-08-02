@@ -1670,6 +1670,13 @@ public class PdfHtmlConverterTest
             ViewportSize = new ViewportSize { Width = 1200, Height = 1200 }
         });
         await browserPage.GotoAsync(new Uri(Path.Combine(tempDirectory.Path, "index.html")).AbsoluteUri);
+        string[] nestedPagePresentation = await browserPage.EvaluateAsync<string[]>(
+            """
+            () => {
+              const style = getComputedStyle(document.querySelector(".pdf-semantic-map-figure-page"));
+              return [style.boxShadow, style.backgroundColor];
+            }
+            """);
         double[] geometry = await browserPage.EvaluateAsync<double[]>(
             """
             () => {
@@ -1684,6 +1691,7 @@ public class PdfHtmlConverterTest
             """);
 
         double expectedPageHeight = layout.Pages[0].Height * 4d / 3d;
+        Assert.Equal(["none", "rgba(0, 0, 0, 0)"], nestedPagePresentation);
         Assert.InRange(geometry[0], expectedPageHeight - 1, expectedPageHeight + 1);
         Assert.True(
             geometry[1] <= expectedPageHeight * 1.2d,
@@ -1733,6 +1741,63 @@ public class PdfHtmlConverterTest
         Assert.Empty(ElementsByClass(dom, "pdf-semantic-layout-fallback-page"));
         Assert.Contains(dom.Descendants(), element =>
             element.Value.Contains("sustained prose for the reader", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Convert_SemanticContinuousFlow_KeepsDenseNativeTableOutOfMapFallback()
+    {
+        PdfLayoutDocument layout = CreateDenseTableWithMapLikePathDensityFixture();
+        PdfSemanticPage semanticPage = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+        Assert.Contains(semanticPage.Elements, static element => element.Kind == PdfSemanticElementKind.Table);
+
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        }).Html);
+
+        Assert.Single(dom.Descendants("table"));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-map-figure-page"));
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-layout-fallback-page"));
+    }
+
+    [Fact]
+    public void Convert_SemanticContinuousFlow_RendersCompactRecurringHeaderVectorGroup()
+    {
+        PdfLayoutDocument layout = CreateCompactHeaderGraphicLayoutFixture();
+        PdfHtmlDocument document = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(document.Html);
+
+        XElement pageHeader = Assert.Single(ElementsByClass(dom, "pdf-semantic-page-header"));
+        XElement headerGraphic = Assert.Single(ElementsByClass(dom, "pdf-semantic-header-graphic"));
+        Assert.Same(pageHeader, headerGraphic.Parent);
+        Assert.Equal("Page header graphic", headerGraphic.Attribute("aria-label")?.Value);
+        Assert.Equal("1", headerGraphic.Attribute("data-source-page")?.Value);
+        Assert.Equal(3, headerGraphic.Descendants().Count(static element =>
+            element.Name.LocalName == "path" && element.Attribute("data-path-index") is not null));
+        XElement[] headerLines = ElementsByClass(dom, "pdf-semantic-page-header-line").ToArray();
+        Assert.Equal(
+            ["Raspberry Pi 4 Model B Datasheet", "Copyright Raspberry Pi (Trading) Ltd. 2024"],
+            headerLines.Select(static line => line.Value).ToArray());
+        Assert.All(headerLines, line => Assert.Same(pageHeader, line.Parent?.Parent));
+        Dictionary<string, string> headerStyle = ParseStyle(pageHeader.Attribute("style")?.Value ?? "");
+        Assert.Equal("0.5pt", headerStyle["--pdf-semantic-page-header-rule-width"]);
+        Assert.Equal("rgba(0,0,0,1)", headerStyle["--pdf-semantic-page-header-rule-color"]);
+        Assert.DoesNotContain(dom.Descendants("p"), element =>
+            element.Value.Contains("Raspberry Pi 4 Model B Datasheet", StringComparison.Ordinal));
+        string css = document.Css;
+        Assert.Contains("border-bottom: var(--pdf-semantic-page-header-rule-width", css, StringComparison.Ordinal);
+        Assert.Contains(".pdf-semantic-page-header-text", css, StringComparison.Ordinal);
+        Assert.Contains("text-align: right", css, StringComparison.Ordinal);
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-layout-fallback-page"));
+        Assert.DoesNotContain(
+            ElementsByClass(dom, "pdf-semantic-figure"),
+            element => !HasClass(element, "pdf-semantic-header-graphic") &&
+                element.Descendants().Any(path => path.Attribute("data-path-index") is not null));
     }
 
     [Fact]
@@ -5053,6 +5118,8 @@ public class PdfHtmlConverterTest
         Assert.Contains("--pdf-semantic-content-gutter: min(72pt, 10vw)", html.Css, StringComparison.Ordinal);
         Assert.Contains("--pdf-page-corner-shadow: 22pt", html.Css, StringComparison.Ordinal);
         Assert.Contains("background: var(--pdf-page-surround)", html.Css, StringComparison.Ordinal);
+        Assert.Contains(".pdf-semantic-document-flow > .pdf-semantic-layout-fallback-page:first-child", html.Css, StringComparison.Ordinal);
+        Assert.Contains("background: transparent", html.Css, StringComparison.Ordinal);
         Assert.Contains("radial-gradient(ellipse at right top", html.Css, StringComparison.Ordinal);
         Assert.Contains("calc(100% - var(--pdf-page-shadow-mask) - var(--pdf-page-shadow-mask) - var(--pdf-page-corner-shadow) - var(--pdf-page-corner-shadow))", html.Css, StringComparison.Ordinal);
         Assert.Contains("text-align-last: center", html.Css, StringComparison.Ordinal);
@@ -9005,7 +9072,8 @@ public class PdfHtmlConverterTest
 
     private static PdfLayoutDocument CreateSemanticHtmlFixture(
         IReadOnlyList<PdfTextLine> lines,
-        IReadOnlyList<PdfLayoutPath>? paths = null)
+        IReadOnlyList<PdfLayoutPath>? paths = null,
+        IReadOnlyList<PdfLayoutVectorGroup>? vectorGroups = null)
     {
         PdfTextRun[] runs = lines.SelectMany(static line => line.Runs).ToArray();
         PdfTextGlyph[] glyphs = runs.SelectMany(static run => run.Glyphs).ToArray();
@@ -9023,10 +9091,103 @@ public class PdfHtmlConverterTest
             [],
             [],
             paths ?? [],
-            [],
+            vectorGroups ?? [],
             [],
             []);
         return new PdfLayoutDocument([page], []);
+    }
+
+    private static PdfLayoutDocument CreateCompactHeaderGraphicLayoutFixture()
+    {
+        PdfTextLine[] lines =
+        [
+            CreateScientificFixtureLine("Raspberry Pi 4 Model B Datasheet", 340f, 48f, 200f),
+            CreateScientificFixtureLine("Copyright Raspberry Pi (Trading) Ltd. 2024", 300f, 62f, 240f),
+            CreateScientificFixtureLine("5 Electrical Specification", 72f, 122f, 190f, 14f, "Times-Bold"),
+            CreateScientificFixtureLine("Opening prose establishes ordinary body text.", 72f, 154f, 300f),
+            CreateScientificFixtureLine("5.1 Timing", 72f, 196f, 90f, 12f, "Times-Bold"),
+            CreateScientificFixtureLine("A second paragraph keeps this page in semantic flow.", 72f, 224f, 330f)
+        ];
+        PdfLayoutColor raspberry = new(0.75f, 0.02f, 0.20f, 1f, "DeviceRGB");
+        PdfLayoutPath[] paths =
+        [
+            CreateFilledRectanglePath(0, new PdfLayoutRectangle(72f, 48f, 9f, 31f), raspberry),
+            CreateFilledRectanglePath(1, new PdfLayoutRectangle(81f, 55f, 9f, 24f), raspberry),
+            CreateFilledRectanglePath(2, new PdfLayoutRectangle(90f, 48f, 9f, 31f), raspberry),
+            CreateSemanticRulePath(
+                3,
+                72f,
+                84f,
+                540f,
+                84f,
+                0.5f,
+                new PdfLayoutColor(0f, 0f, 0f, 1f, "DeviceGray"))
+        ];
+        PdfLayoutVectorGroup group = new(
+            0,
+            null,
+            0,
+            2,
+            new PdfLayoutRectangle(72f, 48f, 27f, 31f),
+            null,
+            1f,
+            BlendMode.NORMAL,
+            false,
+            false);
+        return CreateSemanticHtmlFixture(lines, paths, [group]);
+    }
+
+    private static PdfLayoutDocument CreateDenseTableWithMapLikePathDensityFixture()
+    {
+        List<PdfTextLine> lines =
+        [
+            CreateScientificFixtureLine("GPIO Alternate Functions", 72f, 42f, 180f, 14f, "Times-Bold"),
+            CreateSemanticBoldTableRowLine(152f,
+                ("GPIO", 72f, 30f),
+                ("Pull", 130f, 30f),
+                ("ALT0", 190f, 35f),
+                ("ALT1", 250f, 35f),
+                ("ALT2", 310f, 35f),
+                ("ALT3", 370f, 35f),
+                ("ALT4", 430f, 35f),
+                ("ALT5", 500f, 35f))
+        ];
+        for (int index = 0; index < 18; index++)
+        {
+            lines.Add(CreateSemanticTableRowLine(
+                180f + index * 28f,
+                (index.ToString(CultureInfo.InvariantCulture), 72f, 30f),
+                (index < 9 ? "High" : "Low", 130f, 30f),
+                ($"SDA{index % 6}", 190f, 35f),
+                ($"SA{index % 6}", 250f, 35f),
+                ($"DPI{index}", 310f, 35f),
+                ($"SPI{index % 6}", 370f, 35f),
+                ($"TXD{index % 6}", 430f, 35f),
+                ($"SCL{index % 6}", 500f, 35f)));
+        }
+
+        lines.Add(CreateScientificFixtureLine(
+            "Table 5: GPIO Alternate Functions",
+            218f,
+            696f,
+            176f));
+        PdfLayoutColor black = new(0f, 0f, 0f, 1f, "DeviceGray");
+        List<PdfLayoutPath> paths = [];
+        for (int index = 0; index < 20; index++)
+        {
+            float y = 145f + index * 28f;
+            paths.Add(CreateSemanticRulePath(index, 72f, y, 540f, y, 0.5f, black));
+        }
+
+        for (int index = 0; index < 21; index++)
+        {
+            paths.Add(CreateFilledRectanglePath(
+                20 + index,
+                new PdfLayoutRectangle(20f + index * 2f, 754f, 1f, 1f),
+                black));
+        }
+
+        return CreateSemanticHtmlFixture(lines, paths);
     }
 
     private static PdfLayoutDocument CreateMixedDiagramAndTextLayoutFixture()
