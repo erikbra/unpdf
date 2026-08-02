@@ -52,9 +52,9 @@ noise. Every result directory includes its `source.pdf`, `document.md`, and
 
 CI also writes and uploads `artifacts/conversion-quality-smoke/html-examples`.
 That directory is a human review bundle for real PDF fixtures: each example
-contains the original `source.pdf`, generated `index.html`, CSS/assets,
-`summary.md`, diagnostics, and a `compare.html` page that shows the PDF and
-continuous semantic HTML side by side. Each example also contains `quality/quality-report.md`
+contains the original `source.pdf`, generated continuous semantic HTML under
+`semantic-continuous/`, `summary.md`, diagnostics, and a `compare.html` page
+that shows the PDF and continuous semantic HTML side by side. Each example also contains `quality/quality-report.md`
 and `quality/quality-report.json`, plus page-level PNG artifacts from the
 source PDF render, browser-rendered continuous semantic HTML, a foreground-mask diff, and a
 perceptual color heatmap. These

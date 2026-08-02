@@ -7,7 +7,7 @@
       "title": "arxiv-sample",
       "sourcePdf": "../../tests/SharedFixtures/TextExtraction/Issue412/arxiv-sample.pdf",
       "qualityPages": 2,
-      "notes": "Existing multi-page regression fixture. This is useful for seeing current fixed-layout HTML behavior on a real paper-style PDF."
+      "notes": "Existing multi-page regression fixture. This is useful for reviewing continuous semantic HTML behavior on a real paper-style PDF."
     },
     {
       "id": "pdfbox-4pp-highlighting",
