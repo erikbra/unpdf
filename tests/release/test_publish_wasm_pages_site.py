@@ -56,26 +56,31 @@ class WasmPagesPublisherTest(unittest.TestCase):
                 site,
                 landing,
                 not_found,
-                "/pdfbox-net/wasm/",
+                "/unpdf/now/",
+                "now",
+                ("wasm",),
             )
 
             self.assertEqual(
                 "signed repository",
                 (site / "apt/InRelease").read_text(encoding="ascii"),
             )
-            self.assertFalse((site / "wasm/stale.txt").exists())
             self.assertIn(
-                '<base href="/pdfbox-net/wasm/">',
+                "../now/",
                 (site / "wasm/index.html").read_text(encoding="utf-8"),
             )
-            self.assertFalse((site / "wasm/index.html.br").exists())
-            self.assertFalse((site / "wasm/index.html.gz").exists())
-            self.assertTrue((site / "wasm/_framework/runtime.wasm.br").is_file())
-            self.assertTrue((site / "wasm/_headers").is_file())
-            self.assertTrue((site / "wasm/staticwebapp.config.json").is_file())
+            self.assertIn(
+                '<base href="/unpdf/now/">',
+                (site / "now/index.html").read_text(encoding="utf-8"),
+            )
+            self.assertFalse((site / "now/index.html.br").exists())
+            self.assertFalse((site / "now/index.html.gz").exists())
+            self.assertTrue((site / "now/_framework/runtime.wasm.br").is_file())
+            self.assertTrue((site / "now/_headers").is_file())
+            self.assertTrue((site / "now/staticwebapp.config.json").is_file())
             self.assertEqual(landing.read_text(encoding="utf-8"), (site / "index.html").read_text(encoding="utf-8"))
             self.assertIn(
-                'const appBase = "/pdfbox-net/wasm/";',
+                'const appBase = "/unpdf/now/";',
                 (site / "404.html").read_text(encoding="utf-8"),
             )
             self.assertTrue((site / ".nojekyll").is_file())
@@ -100,3 +105,9 @@ class WasmPagesPublisherTest(unittest.TestCase):
                     "/pdfbox-net/wasm/",
                 )
             self.assertIn(str(Path("samples") / "hello.pdf"), str(raised.exception))
+
+    def test_rejects_unsafe_application_path(self):
+        for value in ("/now", "now/", "../now", "now\\nested"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    MODULE.normalize_application_path(value)

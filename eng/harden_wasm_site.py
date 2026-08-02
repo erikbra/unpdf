@@ -79,16 +79,22 @@ def production_headers(script_hashes: list[str]) -> dict[str, str]:
     }
 
 
-def cloudflare_headers(headers: dict[str, str]) -> str:
-    lines = ["/*"]
+def cloudflare_headers(headers: dict[str, str], route_prefix: str = "/") -> str:
+    if not route_prefix.startswith("/") or not route_prefix.endswith("/"):
+        raise ValueError("Cloudflare route prefix must start and end with a slash")
+    if "//" in route_prefix or any(part in {".", ".."} for part in route_prefix.split("/")):
+        raise ValueError("Cloudflare route prefix must not contain empty or relative segments")
+
+    scoped_prefix = route_prefix.rstrip("/")
+    lines = [f"{scoped_prefix}/*"]
     lines.extend(f"  {name}: {value}" for name, value in headers.items())
     lines.extend(
         [
             "",
-            "/index.html",
+            f"{scoped_prefix}/index.html",
             "  Cache-Control: no-cache",
             "",
-            "/_framework/*",
+            f"{scoped_prefix}/_framework/*",
             "  Cache-Control: public, max-age=31536000, immutable",
             "",
         ]

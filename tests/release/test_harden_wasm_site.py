@@ -45,6 +45,14 @@ class HardenWasmSiteTest(unittest.TestCase):
             azure = json.loads((root / "staticwebapp.config.json").read_text(encoding="utf-8"))
             self.assertEqual("DENY", azure["globalHeaders"]["X-Frame-Options"])
 
+            scoped = MODULE.cloudflare_headers(
+                MODULE.production_headers(["'sha256-test'"]),
+                "/now/",
+            )
+            self.assertIn("/now/*\n", scoped)
+            self.assertIn("/now/index.html\n", scoped)
+            self.assertIn("/now/_framework/*\n", scoped)
+
     def test_verify_rejects_tampered_inline_script(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

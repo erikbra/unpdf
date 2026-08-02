@@ -6,10 +6,12 @@ on:
       - main
     paths:
       - ".github/actions/restore-pages-site/**"
+      - ".github/actions/deploy-cloudflare-pages/**"
       - ".github/workflows/publish-wasm-pages.yml"
       - "Directory.Packages.props"
       - "eng/harden_wasm_site.py"
       - "eng/publish_wasm_pages_site.py"
+      - "eng/prepare_cloudflare_pages_site.py"
       - "eng/wasm-performance-baseline.json"
       - "eng/wasm-payload-baseline.json"
       - "eng/wasm_payload_report.py"
@@ -34,7 +36,8 @@ concurrency:
 
 env:
   PAGES_BASE_URL: https://erikbra.github.io/unpdf
-  WASM_BASE_PATH: /unpdf/wasm/
+  WASM_BASE_PATH: /unpdf/now/
+  WASM_APPLICATION_PATH: now
 
 jobs:
   publish:
@@ -100,32 +103,34 @@ jobs:
           --landing-page packaging/pages/index.html
           --not-found-page packaging/pages/404.html
           --base-path "$WASM_BASE_PATH"
+          --application-path "$WASM_APPLICATION_PATH"
+          --redirect-application-path wasm
 
       - name: Verify staged site
         run: |
-          grep -F '<base href="/unpdf/wasm/"' artifacts/pages/wasm/index.html
-          grep -F 'id="unpdf-csp"' artifacts/pages/wasm/index.html
-          grep -F "connect-src 'self'" artifacts/pages/wasm/index.html
-          test -f artifacts/pages/wasm/_headers
-          test -f artifacts/pages/wasm/staticwebapp.config.json
+          grep -F '<base href="/unpdf/now/"' artifacts/pages/now/index.html
+          grep -F 'id="unpdf-csp"' artifacts/pages/now/index.html
+          grep -F "connect-src 'self'" artifacts/pages/now/index.html
+          test -f artifacts/pages/now/_headers
+          test -f artifacts/pages/now/staticwebapp.config.json
           grep -F 'PdfBox.Net' artifacts/pages/index.html
-          if grep -Fq 'PdfBox.Net.Html.Wasm.styles.css' artifacts/pages/wasm/index.html; then
+          if grep -Fq 'PdfBox.Net.Html.Wasm.styles.css' artifacts/pages/now/index.html; then
             echo "Published index references a missing scoped CSS bundle" >&2
             exit 1
           fi
-          test -n "$(find artifacts/pages/wasm/_framework -maxdepth 1 -name 'blazor.webassembly.*.js' -type f -print -quit)"
-          test -n "$(find artifacts/pages/wasm/_framework -maxdepth 1 -name 'dotnet.native.*.wasm' -type f -print -quit)"
-          test -f artifacts/pages/wasm/samples/hello.pdf
+          test -n "$(find artifacts/pages/now/_framework -maxdepth 1 -name 'blazor.webassembly.*.js' -type f -print -quit)"
+          test -n "$(find artifacts/pages/now/_framework -maxdepth 1 -name 'dotnet.native.*.wasm' -type f -print -quit)"
+          test -f artifacts/pages/now/samples/hello.pdf
           test -f artifacts/pages/apt/index.html
 
       - name: Record Pages update
         id: publish
         run: |
           echo "root_sha256=$(sha256sum artifacts/pages/index.html | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "wasm_sha256=$(sha256sum artifacts/pages/wasm/index.html | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          framework_wasm="$(find artifacts/pages/wasm/_framework -maxdepth 1 -name 'dotnet.native.*.wasm' -type f -print -quit)"
+          echo "wasm_sha256=$(sha256sum artifacts/pages/now/index.html | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          framework_wasm="$(find artifacts/pages/now/_framework -maxdepth 1 -name 'dotnet.native.*.wasm' -type f -print -quit)"
           test -n "$framework_wasm"
-          echo "framework_wasm=${framework_wasm#artifacts/pages/wasm/}" >> "$GITHUB_OUTPUT"
+          echo "framework_wasm=${framework_wasm#artifacts/pages/now/}" >> "$GITHUB_OUTPUT"
 
       - name: Save assembled Pages site
         uses: actions/upload-artifact@v7.0.1
@@ -163,7 +168,7 @@ jobs:
         run: |
           for _ in $(seq 1 60); do
             root_sha="$(curl -fsS "$PAGES_BASE_URL/?run=$GITHUB_RUN_ID" | sha256sum | cut -d' ' -f1 || true)"
-            wasm_sha="$(curl -fsS "$PAGES_BASE_URL/wasm/?run=$GITHUB_RUN_ID" | sha256sum | cut -d' ' -f1 || true)"
+            wasm_sha="$(curl -fsS "$PAGES_BASE_URL/now/?run=$GITHUB_RUN_ID" | sha256sum | cut -d' ' -f1 || true)"
             if test "$root_sha" = "$ROOT_SHA256" && test "$wasm_sha" = "$WASM_SHA256"; then
               exit 0
             fi
@@ -176,18 +181,35 @@ jobs:
         env:
           FRAMEWORK_WASM: ${{ steps.publish.outputs.framework_wasm }}
         run: |
-          curl -fsS "$PAGES_BASE_URL/wasm/" -o "$RUNNER_TEMP/wasm-index.html"
+          curl -fsS "$PAGES_BASE_URL/now/" -o "$RUNNER_TEMP/wasm-index.html"
           grep -F 'id="unpdf-csp"' "$RUNNER_TEMP/wasm-index.html"
           grep -F "connect-src 'self'" "$RUNNER_TEMP/wasm-index.html"
-          index_headers="$(curl -fsSI "$PAGES_BASE_URL/wasm/")"
+          index_headers="$(curl -fsSI "$PAGES_BASE_URL/now/")"
           if printf '%s' "$index_headers" | tr -d '\r' | grep -qi '^set-cookie:'; then
             echo "The static browser preview unexpectedly sets a cookie" >&2
             exit 1
           fi
-          curl -fsS "$PAGES_BASE_URL/wasm/samples/hello.pdf" -o "$RUNNER_TEMP/hello.pdf"
+          curl -fsS "$PAGES_BASE_URL/now/samples/hello.pdf" -o "$RUNNER_TEMP/hello.pdf"
           grep -a -q '%PDF-' "$RUNNER_TEMP/hello.pdf"
-          content_type="$(curl -fsSI "$PAGES_BASE_URL/wasm/$FRAMEWORK_WASM" | tr -d '\r' | awk -F': ' 'tolower($1) == "content-type" { print tolower($2) }')"
+          content_type="$(curl -fsSI "$PAGES_BASE_URL/now/$FRAMEWORK_WASM" | tr -d '\r' | awk -F': ' 'tolower($1) == "content-type" { print tolower($2) }')"
           case "$content_type" in
             application/wasm*) ;;
             *) echo "Unexpected WebAssembly content type: $content_type" >&2; exit 1 ;;
           esac
+
+  cloudflare:
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+    environment:
+      name: cloudflare-pages
+      url: https://unpdf-me.pages.dev/
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/deploy-cloudflare-pages
+        with:
+          cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}

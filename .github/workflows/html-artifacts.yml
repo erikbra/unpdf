@@ -81,7 +81,7 @@ jobs:
           mv artifacts/html-examples artifacts/pages/examples
           cp packaging/pages/index.html artifacts/pages/index.html
           test -f artifacts/pages/examples/index.html
-          test -f artifacts/pages/wasm/index.html
+          test -f artifacts/pages/now/index.html
           test -f artifacts/pages/apt/index.html
 
       - name: Save assembled Pages site
@@ -120,3 +120,21 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5.0.0
+
+  cloudflare:
+    if: github.ref == 'refs/heads/main'
+    needs: generate
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+    environment:
+      name: cloudflare-pages
+      url: https://unpdf-me.pages.dev/
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./.github/actions/deploy-cloudflare-pages
+        with:
+          cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
