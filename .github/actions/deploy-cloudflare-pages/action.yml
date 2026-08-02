@@ -41,30 +41,29 @@ runs:
     - name: Verify Cloudflare Pages deployment
       shell: bash
       run: |
-        for _ in $(seq 1 60); do
-          if curl -fsS "https://unpdf-me.pages.dev/?run=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/cloudflare-index.html" &&
-             curl -fsS "https://unpdf-me.pages.dev/now/?run=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/cloudflare-now.html" &&
-             grep -Fq 'PdfBox.Net' "$RUNNER_TEMP/cloudflare-index.html" &&
-             grep -Fq '<base href="/now/"' "$RUNNER_TEMP/cloudflare-now.html"; then
-            break
-          fi
-          sleep 10
-        done
+        fetch() {
+          curl --retry 24 --retry-all-errors --retry-delay 5 --retry-max-time 180 \
+            --connect-timeout 15 --max-time 60 -fsS "$@"
+        }
+        fetch "https://unpdf-me.pages.dev/?run=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/cloudflare-index.html"
+        fetch "https://unpdf-me.pages.dev/now/?run=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/cloudflare-now.html"
+        grep -Fq 'PdfBox.Net' "$RUNNER_TEMP/cloudflare-index.html"
+        grep -Fq '<base href="/now/"' "$RUNNER_TEMP/cloudflare-now.html"
         grep -F 'id="unpdf-csp"' "$RUNNER_TEMP/cloudflare-now.html"
         grep -F "connect-src 'self'" "$RUNNER_TEMP/cloudflare-now.html"
-        headers="$(curl -fsSI https://unpdf-me.pages.dev/now/ | tr -d '\r')"
+        headers="$(fetch -D - -o /dev/null "https://unpdf-me.pages.dev/now/?run=$GITHUB_RUN_ID" | tr -d '\r')"
         printf '%s\n' "$headers" | grep -qi '^content-security-policy:'
         printf '%s\n' "$headers" | grep -qi '^x-frame-options: DENY$'
         if printf '%s\n' "$headers" | grep -qi '^set-cookie:'; then
           echo "Cloudflare Pages unexpectedly set a cookie" >&2
           exit 1
         fi
-        curl -fsS https://unpdf-me.pages.dev/now/samples/hello.pdf -o "$RUNNER_TEMP/cloudflare-hello.pdf"
+        fetch https://unpdf-me.pages.dev/now/samples/hello.pdf -o "$RUNNER_TEMP/cloudflare-hello.pdf"
         grep -a -q '%PDF-' "$RUNNER_TEMP/cloudflare-hello.pdf"
         framework_wasm="$(find artifacts/pages/now/_framework -maxdepth 1 -name 'dotnet.native.*.wasm' -type f -print -quit)"
         test -n "$framework_wasm"
         framework_wasm="${framework_wasm#artifacts/pages/now/}"
-        content_type="$(curl -fsSI "https://unpdf-me.pages.dev/now/$framework_wasm" | tr -d '\r' | awk -F': ' 'tolower($1) == "content-type" { print tolower($2) }')"
+        content_type="$(fetch -o /dev/null -w '%{content_type}' "https://unpdf-me.pages.dev/now/$framework_wasm?run=$GITHUB_RUN_ID")"
         case "$content_type" in
           application/wasm*) ;;
           *) echo "Unexpected Cloudflare WebAssembly content type: $content_type" >&2; exit 1 ;;
