@@ -994,12 +994,17 @@ public static class PdfSemanticExtractor
                 .ToArray();
         }
 
-        foreach (PdfSemanticElement header in GroupHeaders(headerLines, lineStep, consumed))
+        foreach (PdfSemanticElement header in GroupHeaders(headerLines, lineStep, consumed, options))
         {
             elements.Add(header);
         }
 
-        foreach (LineCandidate line in lines.Where(line => IsFooter(line, page, bodyFontSize)))
+        foreach (LineCandidate line in lines.Where(line => IsFooter(
+            line,
+            page,
+            lines,
+            bodyFontSize,
+            lineStep)))
         {
             if (consumed.Add(line.Index))
             {
@@ -1803,32 +1808,75 @@ public static class PdfSemanticExtractor
     private static IEnumerable<PdfSemanticElement> GroupHeaders(
         IReadOnlyList<LineCandidate> lines,
         float lineStep,
-        HashSet<int> consumed)
+        HashSet<int> consumed,
+        PdfSemanticExtractionOptions options)
     {
-        List<LineCandidate> current = [];
-        foreach (LineCandidate line in lines.OrderBy(static line => line.Bounds.Y).ThenBy(static line => line.Bounds.X))
+        List<List<LineCandidate>> groups = [];
+        foreach (LineCandidate line in lines
+            .SelectMany(candidate => SplitHeaderCandidate(candidate, options))
+            .OrderBy(static line => line.Bounds.Y)
+            .ThenBy(static line => line.Bounds.X))
         {
-            if (current.Count == 0)
+            List<LineCandidate>? group = groups
+                .Where(group => ShouldGroupHeader(group[^1], line, lineStep))
+                .OrderBy(group => MathF.Abs(line.Bounds.Y - group[^1].Bounds.Y))
+                .ThenBy(group => MathF.Abs(line.Bounds.X - group[^1].Bounds.X))
+                .FirstOrDefault();
+            if (group == null)
             {
-                current.Add(line);
+                groups.Add([line]);
                 continue;
             }
 
-            LineCandidate previous = current[^1];
-            if (ShouldGroupHeader(previous, line, lineStep))
-            {
-                current.Add(line);
-                continue;
-            }
-
-            yield return CreateHeader(current, consumed);
-            current.Clear();
-            current.Add(line);
+            group.Add(line);
         }
 
-        if (current.Count > 0)
+        foreach (List<LineCandidate> group in groups
+            .OrderBy(static group => group[0].Bounds.Y)
+            .ThenBy(static group => group[0].Bounds.X))
         {
-            yield return CreateHeader(current, consumed);
+            yield return CreateHeader(group, consumed);
+        }
+    }
+
+    private static IEnumerable<LineCandidate> SplitHeaderCandidate(
+        LineCandidate line,
+        PdfSemanticExtractionOptions options)
+    {
+        PdfTextRun[] runs = line.Source.Runs
+            .Where(static run => !string.IsNullOrWhiteSpace(run.Text))
+            .OrderBy(static run => run.Bounds.X)
+            .ToArray();
+        if (runs.Length < 2)
+        {
+            yield return line;
+            yield break;
+        }
+
+        float splitGap = MathF.Max(24f, line.FontSize * 4f);
+        List<PdfTextRun> cluster = [runs[0]];
+        bool split = false;
+        for (int index = 1; index < runs.Length; index++)
+        {
+            if (HorizontalGap(runs[index - 1].Bounds, runs[index].Bounds) > splitGap)
+            {
+                yield return CreateLineCandidate(line.Index, CreateTextLine(cluster), options, line.TableLaneIndex);
+                cluster = [];
+                split = true;
+            }
+
+            cluster.Add(runs[index]);
+        }
+
+        if (!split)
+        {
+            yield return line;
+            yield break;
+        }
+
+        if (cluster.Count > 0)
+        {
+            yield return CreateLineCandidate(line.Index, CreateTextLine(cluster), options, line.TableLaneIndex);
         }
     }
 
@@ -2062,7 +2110,14 @@ public static class PdfSemanticExtractor
             return false;
         }
 
-        return current.Bounds.Y - previous.Bounds.Y <= lineStep * 1.6f;
+        float horizontalOverlap = HorizontalOverlap(previous.Bounds, current.Bounds);
+        float minimumWidth = MathF.Min(previous.Bounds.Width, current.Bounds.Width);
+        float edgeTolerance = MathF.Max(12f, lineStep * 1.5f);
+        bool sameHorizontalLane = horizontalOverlap >= minimumWidth * 0.20f ||
+            MathF.Abs(previous.Bounds.X - current.Bounds.X) <= edgeTolerance ||
+            MathF.Abs(previous.Bounds.Right - current.Bounds.Right) <= edgeTolerance;
+        return sameHorizontalLane &&
+            current.Bounds.Y - previous.Bounds.Y <= lineStep * 1.6f;
     }
 
     private static LineCandidate CreateLineCandidate(
@@ -2832,6 +2887,11 @@ public static class PdfSemanticExtractor
             return line.FontSize >= bodyFontSize + options.HeadingFontSizeDelta || line.IsBold;
         }
 
+        if (LooksLikeLabelValueRow(line, bodyFontSize))
+        {
+            return false;
+        }
+
         if (IsStandaloneBodySizeHeading(line, page, lines, bodyFontSize, lineStep))
         {
             return true;
@@ -2912,7 +2972,58 @@ public static class PdfSemanticExtractor
         }
 
         float gapBefore = line.Bounds.Y - previous.Bounds.Bottom;
-        return gapBefore >= MathF.Max(3f, lineStep * 0.65f);
+        if (gapBefore < MathF.Max(3f, lineStep * 0.65f))
+        {
+            return false;
+        }
+
+        LineCandidate? next = lines
+            .Where(candidate => candidate.Index != line.Index &&
+                candidate.Bounds.Y >= line.Bounds.Bottom - 0.5f)
+            .OrderBy(static candidate => candidate.Bounds.Y)
+            .ThenBy(static candidate => candidate.Bounds.X)
+            .FirstOrDefault();
+        return next != null &&
+            next.Bounds.Y - line.Bounds.Bottom <= MathF.Max(36f, lineStep * 2.75f);
+    }
+
+    private static bool LooksLikeLabelValueRow(LineCandidate line, float bodyFontSize)
+    {
+        if (line.FontSize < bodyFontSize - 0.75f ||
+            MathF.Abs(line.Direction) > 0.01f)
+        {
+            return false;
+        }
+
+        string text = line.Text.Trim();
+        int colonIndex = text.IndexOf(':');
+        if (colonIndex > 0 &&
+            colonIndex < Math.Min(32, text.Length - 1) &&
+            text[(colonIndex + 1)..].Any(char.IsDigit))
+        {
+            return true;
+        }
+
+        PdfTextRun[] runs = line.Source.Runs
+            .Where(static run => !string.IsNullOrWhiteSpace(run.Text))
+            .OrderBy(static run => run.PageBounds.X)
+            .ToArray();
+        if (runs.Length < 2)
+        {
+            return false;
+        }
+
+        PdfTextRun valueRun = runs[^1];
+        string value = valueRun.Text.Trim();
+        int digitCount = value.Count(char.IsDigit);
+        int letterCount = value.Count(char.IsLetter);
+        if (digitCount == 0 || letterCount > 3 || value.Length > 24)
+        {
+            return false;
+        }
+
+        float precedingRight = runs.Take(runs.Length - 1).Max(static run => run.PageBounds.Right);
+        return valueRun.PageBounds.X - precedingRight >= MathF.Max(12f, bodyFontSize * 2f);
     }
 
     private static bool IsUniformlyBold(LineCandidate line)
@@ -2933,7 +3044,7 @@ public static class PdfSemanticExtractor
             return Math.Clamp(depth, 1, 6);
         }
 
-        if (line.FontSize >= bodyFontSize + 5f)
+        if (line.FontSize >= bodyFontSize + 2f)
         {
             return 1;
         }
@@ -2946,7 +3057,18 @@ public static class PdfSemanticExtractor
         bool muchLargerThanBody = line.FontSize >= bodyFontSize + 4f;
         bool centered = MathF.Abs(line.CenterX - page.Width / 2f) < page.Width * 0.18f;
         bool highOnPage = line.Bounds.Y < page.Height * 0.30f;
-        return muchLargerThanBody && centered && highOnPage;
+        if (muchLargerThanBody && centered && highOnPage)
+        {
+            return true;
+        }
+
+        bool compactTopTitle = line.FontSize >= bodyFontSize + 2f &&
+            line.Bounds.Y < page.Height * 0.18f &&
+            MathF.Abs(line.CenterX - page.Width / 2f) < page.Width * 0.10f &&
+            line.Text.Length <= 48 &&
+            CountWords(line.Text) <= 6 &&
+            IsUniformlyBold(line);
+        return compactTopTitle;
     }
 
     private static LineCandidate[] GroupDocumentTitleLines(
@@ -3240,7 +3362,12 @@ public static class PdfSemanticExtractor
         return trimmed["Abstract".Length] is '.' or ':' or '-' or '\u2014';
     }
 
-    private static bool IsFooter(LineCandidate line, PdfLayoutPage page, float bodyFontSize)
+    private static bool IsFooter(
+        LineCandidate line,
+        PdfLayoutPage page,
+        IReadOnlyList<LineCandidate> lines,
+        float bodyFontSize,
+        float lineStep)
     {
         if (IsSymbolFootnoteMarker(line.Text))
         {
@@ -3253,10 +3380,65 @@ public static class PdfSemanticExtractor
         }
 
         bool centered = MathF.Abs(line.CenterX - page.Width / 2f) < page.Width * 0.08f;
-        return line.Bounds.Y > page.Height * 0.88f &&
+        if (line.Bounds.Y > page.Height * 0.88f &&
             line.Text.Length <= 4 &&
             line.FontSize <= bodyFontSize &&
-            centered;
+            centered)
+        {
+            return true;
+        }
+
+        if (line.Bounds.Y <= page.Height * 0.86f ||
+            line.FontSize > bodyFontSize + 0.75f ||
+            line.Bounds.Width > page.Width * 0.55f ||
+            MathF.Abs(line.Direction) > 0.01f)
+        {
+            return false;
+        }
+
+        LineCandidate[] band = lines
+            .Where(candidate => candidate.Bounds.Y >= page.Height * 0.86f &&
+                candidate.FontSize <= bodyFontSize + 0.75f &&
+                candidate.Bounds.Width <= page.Width * 0.55f &&
+                MathF.Abs(candidate.Direction) <= 0.01f)
+            .OrderBy(static candidate => candidate.Bounds.Y)
+            .ThenBy(static candidate => candidate.Bounds.X)
+            .ToArray();
+        Queue<LineCandidate> pending = new();
+        HashSet<int> visited = [line.Index];
+        pending.Enqueue(line);
+        float maximumGap = MathF.Max(6f, lineStep * 1.25f);
+        while (pending.Count > 0)
+        {
+            LineCandidate current = pending.Dequeue();
+            foreach (LineCandidate candidate in band.Where(candidate =>
+                !visited.Contains(candidate.Index) &&
+                candidate.Bounds.Y >= current.Bounds.Y &&
+                candidate.Bounds.Y - current.Bounds.Bottom <= maximumGap &&
+                FooterLinesAlign(current, candidate, page)))
+            {
+                if (candidate.Bounds.Y > page.Height * 0.92f)
+                {
+                    return true;
+                }
+
+                visited.Add(candidate.Index);
+                pending.Enqueue(candidate);
+            }
+        }
+
+        return false;
+    }
+
+    private static bool FooterLinesAlign(
+        LineCandidate first,
+        LineCandidate second,
+        PdfLayoutPage page)
+    {
+        float tolerance = page.Width * 0.08f;
+        return MathF.Abs(first.Bounds.X - second.Bounds.X) <= tolerance ||
+            MathF.Abs(first.Bounds.Right - second.Bounds.Right) <= tolerance ||
+            MathF.Abs(first.CenterX - second.CenterX) <= tolerance;
     }
 
     private static IEnumerable<PdfSemanticElement> ExtractAuthorBlocks(
@@ -6440,6 +6622,17 @@ public static class PdfSemanticExtractor
                     break;
                 }
 
+                if (HasInterveningTableSectionBreak(
+                    page,
+                    lines,
+                    consumed,
+                    group,
+                    row,
+                    bodyFontSize))
+                {
+                    break;
+                }
+
                 float gap = MathF.Max(0f, row.Bounds.Y - group[^1].Bounds.Bottom);
                 if (gap > MathF.Max(lineStep * 1.7f, bodyFontSize * 2.1f) &&
                     !IsLooseTableContinuation(group, row, page, gap, lineStep, bodyFontSize))
@@ -6497,6 +6690,46 @@ public static class PdfSemanticExtractor
 
             yield return CreateTableElement(page, group, consumed);
         }
+    }
+
+    private static bool HasInterveningTableSectionBreak(
+        PdfLayoutPage page,
+        IReadOnlyList<LineCandidate> lines,
+        HashSet<int> consumed,
+        IReadOnlyList<TableSourceRow> existingRows,
+        TableSourceRow nextRow,
+        float bodyFontSize)
+    {
+        PdfLayoutRectangle tableBounds = PdfLayoutRectangle.Union(
+            existingRows.Select(static row => row.Bounds).Append(nextRow.Bounds));
+        float previousBottom = existingRows[^1].Bounds.Bottom;
+        float nextTop = nextRow.Bounds.Y;
+        if (nextTop <= previousBottom + 2f)
+        {
+            return false;
+        }
+
+        bool hasConsumedSectionLabel = lines.Any(line =>
+            consumed.Contains(line.Index) &&
+            line.Bounds.Y >= previousBottom - 2f &&
+            line.Bounds.Bottom <= nextTop + 2f &&
+            line.Text.Length is > 0 and <= 80 &&
+            line.FontSize >= bodyFontSize * 0.95f &&
+            IsBoldFontName(line.FontName) &&
+            HorizontalOverlap(line.Bounds, tableBounds) >=
+                MathF.Min(line.Bounds.Width, tableBounds.Width) * 0.45f);
+        if (hasConsumedSectionLabel)
+        {
+            return true;
+        }
+
+        return page.Images.Any(image =>
+            (image.Kind is PdfLayoutImageKind.ComplexArtworkFallback or
+                PdfLayoutImageKind.TransparencyGroupFallback) &&
+            image.Bounds.Y >= previousBottom - 2f &&
+            image.Bounds.Bottom <= nextTop + 2f &&
+            image.Bounds.Height >= MathF.Max(10f, bodyFontSize) &&
+            HorizontalOverlap(image.Bounds, tableBounds) >= tableBounds.Width * 0.60f);
     }
 
     private static void PrependTableLeadRows(
