@@ -1220,6 +1220,110 @@ public sealed class PdfSemanticExtractorTest
     }
 
     [Fact]
+    public void Extract_SeparatedBoldLabelValueRowsAndTrailingCalloutsAreNotHeadings()
+    {
+        PdfLayoutDocument layout = CreateSemanticPassageFixture(
+        [
+            CreateFixtureLine("Opening prose establishes the ordinary body font and line rhythm.", 72f, 72f, 410f),
+            CreateFixtureLine("A second prose line completes the surrounding paragraph.", 72f, 84f, 340f),
+            CreateCompositeFixtureLine(
+                128f,
+                ("Total including tax", 72f, 92f, "Times-Bold"),
+                ("201.96 USD", 420f, 70f, "Times-Bold")),
+            CreateFixtureLine("Account: 4755990301", 72f, 164f, 120f, 10f, "Times-Bold"),
+            CreateFixtureLine("Details continue on the following page", 72f, 200f, 205f, 10f, "Times-Bold")
+        ]);
+
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+
+        Assert.DoesNotContain(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Heading &&
+            (element.Text.Contains("201.96 USD", StringComparison.Ordinal) ||
+                element.Text.Contains("4755990301", StringComparison.Ordinal) ||
+                element.Text.StartsWith("Details continue", StringComparison.Ordinal)));
+        Assert.Contains(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Paragraph &&
+            element.Text.Contains("201.96 USD", StringComparison.Ordinal));
+        Assert.Contains(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Paragraph &&
+            element.Text.Contains("4755990301", StringComparison.Ordinal));
+        Assert.Contains(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Paragraph &&
+            element.Text.StartsWith("Details continue", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_AlignedFooterBandExtendsUpwardFromBottomAnchor()
+    {
+        PdfLayoutDocument layout = CreateSemanticPassageFixture(
+        [
+            CreateFixtureLine("Opening prose establishes the ordinary body font and line rhythm.", 72f, 72f, 410f),
+            CreateFixtureLine("A second prose line completes the surrounding paragraph.", 72f, 84f, 340f),
+            CreateFixtureLine("Company register 981649141", 370f, 710f, 170f, 10f, "Times-Bold"),
+            CreateFixtureLine("Account 42131293032", 410f, 724f, 130f, 10f, "Times-Bold"),
+            CreateFixtureLine("SWIFT SPTRNO22", 440f, 738f, 100f, 10f, "Times-Bold"),
+            CreateFixtureLine("IBAN NO5042131293032", 400f, 752f, 140f, 10f, "Times-Bold")
+        ]);
+
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+        PdfSemanticElement[] footerLines = page.Elements
+            .Where(static element => element.Text.Contains("register", StringComparison.OrdinalIgnoreCase) ||
+                element.Text.StartsWith("Account", StringComparison.Ordinal) ||
+                element.Text.StartsWith("SWIFT", StringComparison.Ordinal) ||
+                element.Text.StartsWith("IBAN", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal(4, footerLines.Length);
+        Assert.All(footerLines, static element => Assert.Equal(PdfSemanticElementKind.Footer, element.Kind));
+    }
+
+    [Fact]
+    public void Extract_VisuallyLargerLeadHeadingOwnsBodySizeSubheading()
+    {
+        PdfLayoutDocument layout = CreateSemanticPassageFixture(
+        [
+            CreateFixtureLine("Opening prose establishes the ordinary body font and line rhythm.", 72f, 72f, 410f),
+            CreateFixtureLine("A second prose line completes the surrounding paragraph.", 72f, 84f, 340f),
+            CreateFixtureLine("Invoice", 72f, 120f, 90f, 12f, "Times-Bold"),
+            CreateFixtureLine("Summary", 72f, 150f, 80f, 10f, "Times-Bold"),
+            CreateFixtureLine("Ordinary section content follows the summary heading.", 72f, 164f, 330f)
+        ]);
+
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+        PdfSemanticElement invoice = Assert.Single(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Heading && element.Text == "Invoice");
+        PdfSemanticElement summary = Assert.Single(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Heading && element.Text == "Summary");
+
+        Assert.Equal(1, invoice.HeadingLevel);
+        Assert.Equal(2, summary.HeadingLevel);
+        Assert.False(invoice.IsDocumentTitle);
+    }
+
+    [Fact]
+    public void Extract_CompactCenteredModeratelyLargerTopTitleOwnsFollowingSection()
+    {
+        PdfLayoutDocument layout = CreateSemanticPassageFixture(
+        [
+            CreateFixtureLine("Invoice", 250f, 72f, 112f, 12f, "Times-Bold"),
+            CreateFixtureLine("Opening prose establishes the ordinary body font and line rhythm.", 72f, 120f, 410f),
+            CreateFixtureLine("A second prose line completes the surrounding paragraph.", 72f, 132f, 340f),
+            CreateFixtureLine("Summary", 72f, 170f, 80f, 10f, "Times-Bold"),
+            CreateFixtureLine("Ordinary section content follows the summary heading.", 72f, 184f, 330f)
+        ]);
+
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+        PdfSemanticElement invoice = Assert.Single(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Heading && element.Text == "Invoice");
+        PdfSemanticElement summary = Assert.Single(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Heading && element.Text == "Summary");
+
+        Assert.True(invoice.IsDocumentTitle);
+        Assert.Equal(1, invoice.HeadingLevel);
+        Assert.Equal(2, summary.HeadingLevel);
+    }
+
+    [Fact]
     public void Extract_BulletList_PreservesWrappedLinesAndInlineFormatting()
     {
         PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(
@@ -1996,6 +2100,115 @@ public sealed class PdfSemanticExtractorTest
         Assert.Contains(page.Elements, static element =>
             element.Kind == PdfSemanticElementKind.Paragraph &&
             element.Text == "Closing prose remains outside the ruled table.");
+    }
+
+    [Fact]
+    public void Extract_FallbackBackedSectionBand_SplitsAlignedInvoiceTables()
+    {
+        PdfLayoutRectangle bandBounds = new(44f, 208f, 520f, 24f);
+        PdfLayoutImage fallback = new(
+            0,
+            "invoice-section-band",
+            PdfLayoutImageKind.ComplexArtworkFallback,
+            bandBounds,
+            new PdfLayoutTransform(
+                bandBounds.Width,
+                0f,
+                0f,
+                bandBounds.Height,
+                bandBounds.X,
+                bandBounds.Y),
+            520,
+            24,
+            8,
+            "DeviceRGB",
+            false,
+            "complex-artwork");
+        PdfLayoutDocument layout = CreateSemanticPassageFixture(
+        [
+            CreateFixtureLine("Opening prose establishes the ordinary body font.", 72f, 56f, 330f),
+            CreateFixtureLine("A second line establishes the normal page rhythm.", 72f, 70f, 320f),
+            CreateFixtureLine("Call charges", 44f, 96f, 120f, 12f, "Arial-BoldMT"),
+            CreateCompositeFixtureLine(
+                128f,
+                ("Date", 44f, 52f, "Arial-BoldMT"),
+                ("Description", 120f, 170f, "Arial-BoldMT"),
+                ("Duration", 350f, 60f, "Arial-BoldMT"),
+                ("Amount", 486f, 70f, "Arial-BoldMT")),
+            CreateCompositeFixtureLine(
+                148f,
+                ("01.07.2026", 44f, 62f, "ArialMT"),
+                ("Domestic call", 120f, 170f, "ArialMT"),
+                ("00:03:00", 350f, 60f, "ArialMT"),
+                ("1.25", 486f, 70f, "ArialMT")),
+            CreateCompositeFixtureLine(
+                168f,
+                ("", 44f, 1f, "Arial-BoldMT"),
+                ("Total call charges", 120f, 170f, "Arial-BoldMT"),
+                ("", 350f, 1f, "Arial-BoldMT"),
+                ("1.25", 486f, 70f, "Arial-BoldMT")),
+            CreateFixtureLine("Fixed charges", 52f, 216f, 130f, 12f, "Arial-BoldMT"),
+            CreateCompositeFixtureLine(
+                252f,
+                ("Period", 44f, 62f, "Arial-BoldMT"),
+                ("Description", 120f, 170f, "Arial-BoldMT"),
+                ("Quantity", 350f, 60f, "Arial-BoldMT"),
+                ("Amount", 486f, 70f, "Arial-BoldMT")),
+            CreateCompositeFixtureLine(
+                272f,
+                ("01.07-31.07", 44f, 62f, "ArialMT"),
+                ("Telephone subscription", 120f, 170f, "ArialMT"),
+                ("1", 350f, 60f, "ArialMT"),
+                ("99.00", 486f, 70f, "ArialMT")),
+            CreateCompositeFixtureLine(
+                292f,
+                ("", 44f, 1f, "Arial-BoldMT"),
+                ("Total fixed charges", 120f, 170f, "Arial-BoldMT"),
+                ("", 350f, 1f, "Arial-BoldMT"),
+                ("99.00", 486f, 70f, "Arial-BoldMT"))
+        ],
+        images: [fallback]);
+
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+        PdfSemanticElement[] tables = page.Elements
+            .Where(static element => element.Kind == PdfSemanticElementKind.Table)
+            .OrderBy(static element => element.Bounds.Y)
+            .ToArray();
+
+        Assert.Equal(2, tables.Length);
+        Assert.All(tables, static table => Assert.Equal(3, table.TableRows.Count));
+        Assert.Contains(page.Elements, static element =>
+            element.Kind == PdfSemanticElementKind.Heading && element.Text == "Fixed charges");
+        Assert.True(tables[0].Bounds.Bottom < tables[1].Bounds.Y);
+    }
+
+    [Fact]
+    public void Extract_HeaderLineWithWideRunGap_PreservesIndependentAddressLanes()
+    {
+        PdfLayoutDocument layout = CreateSemanticPassageFixture(
+        [
+            CreateFixtureLine("Nextgentel AS / Telio", 330f, 28f, 180f, 10f, "ArialMT"),
+            CreateFixtureLine("Postbox 1234", 412f, 40f, 98f, 10f, "ArialMT"),
+            CreateCompositeFixtureLine(
+                52f,
+                ("Return: Postbox 782 Sentrum, 0106 Oslo", 42f, 205f, "ArialMT"),
+                ("Customer service: +47 98 70 21 01", 330f, 180f, "ArialMT")),
+            CreateFixtureLine("Invoice", 244f, 100f, 124f, 18f, "Arial-BoldMT"),
+            CreateFixtureLine("Opening invoice prose establishes the ordinary body font.", 72f, 142f, 340f),
+            CreateFixtureLine("A second body line establishes the normal page rhythm.", 72f, 156f, 330f)
+        ]);
+
+        PdfSemanticPage page = Assert.Single(PdfSemanticExtractor.Extract(layout).Pages);
+        PdfSemanticElement provider = Assert.Single(page.Elements, element =>
+            element.Kind == PdfSemanticElementKind.Header &&
+            element.Text.Contains("Nextgentel", StringComparison.Ordinal));
+        PdfSemanticElement returnAddress = Assert.Single(page.Elements, element =>
+            element.Kind == PdfSemanticElementKind.Header &&
+            element.Text.StartsWith("Return:", StringComparison.Ordinal));
+
+        Assert.Contains("Customer service", provider.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Return:", provider.Text, StringComparison.Ordinal);
+        Assert.Single(returnAddress.Lines);
     }
 
     [Fact]

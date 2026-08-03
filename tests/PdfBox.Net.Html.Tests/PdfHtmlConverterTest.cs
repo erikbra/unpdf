@@ -1602,6 +1602,40 @@ public class PdfHtmlConverterTest
             .Count(element => HasClass(element, "pdf-text-run")));
     }
 
+    [Theory]
+    [InlineData(PdfLayoutImageKind.XObject, true)]
+    [InlineData(PdfLayoutImageKind.TransparencyGroupFallback, false)]
+    [InlineData(PdfLayoutImageKind.ComplexArtworkFallback, false)]
+    public void Convert_SemanticContinuousFlow_GraphicDensityCountsOnlySourceImages(
+        PdfLayoutImageKind imageKind,
+        bool expectsFixedLayoutFallback)
+    {
+        PdfLayoutDocument layout = CreateGraphicDensityLayoutFixture(imageKind);
+        PdfLayoutPage page = Assert.Single(layout.Pages);
+        Assert.Equal(2, page.Images.Count);
+        Assert.Equal(8, page.Paths.Count);
+        Assert.All(page.Images, image => Assert.Equal(imageKind, image.Kind));
+
+        PdfHtmlDocument html = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(html.Html);
+
+        Assert.Equal(
+            expectsFixedLayoutFallback,
+            ElementsByClass(dom, "pdf-semantic-layout-fallback-page").Any());
+        Assert.Equal(
+            !expectsFixedLayoutFallback,
+            ElementsByClass(dom, "pdf-semantic-continuous-flow").Any());
+        Assert.Equal(
+            2,
+            dom.Descendants().Count(element => element.Name.LocalName ==
+                (expectsFixedLayoutFallback ? "img" : "image")));
+        Assert.Contains("Invoice item 01", dom.Root!.Value, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Convert_SemanticContinuousFlow_PreservesTaggedGraphicBackdropPages()
     {
@@ -1825,6 +1859,85 @@ public class PdfHtmlConverterTest
             ElementsByClass(dom, "pdf-semantic-figure"),
             element => !HasClass(element, "pdf-semantic-header-graphic") &&
                 element.Descendants().Any(path => path.Attribute("data-path-index") is not null));
+    }
+
+    [Fact]
+    public void Convert_SemanticContinuousFlow_RendersUngroupedFallbackHeaderArtworkWithoutRule()
+    {
+        PdfLayoutRectangle fallbackBounds = new(42f, 28f, 32f, 34f);
+        PdfLayoutImage fallback = new(
+            0,
+            "header-artwork-fallback",
+            PdfLayoutImageKind.ComplexArtworkFallback,
+            fallbackBounds,
+            new PdfLayoutTransform(
+                fallbackBounds.Width,
+                0f,
+                0f,
+                fallbackBounds.Height,
+                fallbackBounds.X,
+                fallbackBounds.Y),
+            32,
+            34,
+            8,
+            "DeviceRGB",
+            false,
+            "complex-artwork");
+        PdfLayoutColor black = new(0f, 0f, 0f, 1f, "DeviceGray");
+        List<PdfTextLine> lines =
+        [
+            CreateScientificFixtureLine("Nextgentel AS / Telio", 330f, 30f, 180f, 9f, "Arial-BoldMT"),
+            CreateScientificFixtureLine("Postbox 3, 5861 Bergen", 330f, 42f, 150f, 8f, "ArialMT"),
+            CreateScientificFixtureLine("Customer service: +47 98 70 21 01", 330f, 54f, 180f, 8f, "ArialMT"),
+            CreateScientificFixtureLine("Invoice", 244f, 100f, 124f, 18f, "Arial-BoldMT")
+        ];
+        lines.AddRange(Enumerable.Range(0, 16).Select(index => CreateScientificFixtureLine(
+            $"Semantic invoice body line {index + 1:00} keeps this page out of cover mode.",
+            72f,
+            140f + index * 18f,
+            390f)));
+        PdfLayoutPath[] paths =
+        [
+            CreateFilledRectanglePath(0, new PdfLayoutRectangle(73f, 34f, 12f, 24f), black),
+            CreateFilledRectanglePath(1, new PdfLayoutRectangle(86f, 34f, 14f, 24f), black),
+            CreateFilledRectanglePath(2, new PdfLayoutRectangle(101f, 34f, 18f, 24f), black)
+        ];
+        PdfLayoutDocument layout = CreateSemanticHtmlFixture(
+            lines,
+            paths,
+            images: [fallback],
+            imageAssets:
+            [
+                new PdfLayoutImageAsset(
+                    fallback.AssetId,
+                    "assets/images/header-artwork-fallback.png",
+                    "image/png",
+                    [137, 80, 78, 71])
+            ]);
+
+        PdfHtmlDocument converted = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(converted.Html);
+        XElement pageHeader = Assert.Single(ElementsByClass(dom, "pdf-semantic-page-header"));
+        XElement graphic = Assert.Single(pageHeader.Elements(), element =>
+            HasClass(element, "pdf-semantic-header-graphic"));
+        Dictionary<string, string> style = ParseStyle(pageHeader.Attribute("style")?.Value ?? "");
+
+        Assert.Equal("0pt", style["--pdf-semantic-page-header-rule-width"]);
+        Assert.True(HasClass(pageHeader, "pdf-semantic-page-header-source-wide"));
+        Assert.Contains("--pdf-semantic-page-header-source-width", style);
+        Assert.Contains("--pdf-semantic-page-header-text-offset", style);
+        XElement headerText = Assert.Single(pageHeader.DescendantsAndSelf(), element =>
+            HasClass(element, "pdf-semantic-page-header-text"));
+        Assert.True(HasClass(headerText, "pdf-semantic-page-header-text-align-left"));
+        Assert.Single(graphic.Descendants(), static element => element.Name.LocalName == "image");
+        Assert.Equal(2, graphic.Descendants().Count(static element =>
+            element.Name.LocalName == "path" && element.Attribute("data-path-index") != null));
+        Assert.Contains(ElementsByClass(dom, "pdf-semantic-page-header-line"), line =>
+            line.Value == "Nextgentel AS / Telio");
     }
 
     [Fact]
@@ -4706,6 +4819,59 @@ public class PdfHtmlConverterTest
     }
 
     [Fact]
+    public void Convert_SemanticTable_UsesBodyFontInsteadOfBoldHeaderFont()
+    {
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(
+            CreateWideHorizontalRuleTableLayoutFixture(),
+            new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        }).Html);
+        XElement table = Assert.Single(dom.Descendants("table"));
+
+        Assert.True(HasClass(table, "pdf-font-times-roman"));
+        Assert.False(HasClass(table, "pdf-font-times-bold"));
+        Assert.All(table.Elements("thead").Descendants("th"), static cell =>
+            Assert.True(HasClass(cell, "pdf-semantic-bold")));
+        Assert.All(table.Elements("tbody").Descendants("td"), static cell =>
+            Assert.False(HasClass(cell, "pdf-semantic-bold")));
+    }
+
+    [Fact]
+    public void Convert_SemanticInvoiceForm_PreservesSourceHeadingAndColumnAnchors()
+    {
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(
+            CreateSemanticInvoiceFormLayoutFixture(),
+            new PdfHtmlOptions
+            {
+                TextMode = PdfHtmlTextMode.Semantic,
+                SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+            }).Html);
+
+        XElement heading = Assert.Single(dom.Descendants("h1"), static element => element.Value == "Invoice");
+        Assert.True(
+            HasClass(heading, "pdf-semantic-source-positioned-heading"),
+            heading.ToString(SaveOptions.DisableFormatting));
+        Assert.Single(heading.DescendantsAndSelf(), element =>
+            HasClass(element, "pdf-semantic-source-positioned-heading-content"));
+        Dictionary<string, string> headingStyle = ParseStyle(heading.Attribute("style")?.Value ?? "");
+        Assert.InRange(ParsePoints(headingStyle["--pdf-semantic-source-positioned-width"]), 520f, 530f);
+        Assert.InRange(ParsePercent(headingStyle["--pdf-semantic-source-positioned-offset"]), 53f, 56f);
+
+        XElement table = Assert.Single(dom.Descendants("table"));
+        Assert.True(HasClass(table, "pdf-semantic-source-tracked-columns"));
+        Assert.Empty(table.Elements("thead"));
+        XElement[] columns = Assert.Single(table.Elements("colgroup")).Elements("col").ToArray();
+        Assert.Equal(3, columns.Length);
+        Assert.InRange(ParsePercent(ParseStyle(columns[0].Attribute("style")?.Value ?? "")["width"]), 53f, 56f);
+        XElement firstCell = Assert.Single(table.Elements("tbody").Elements("tr").First().Elements("td"),
+            static cell => cell.Value == "CUSTOMER NAME");
+        Assert.True(HasClass(firstCell, "pdf-semantic-table-cell-align-left"));
+        Assert.False(HasClass(firstCell, "pdf-semantic-bold"));
+    }
+
+    [Fact]
     public async Task Convert_WideHorizontalRuleTable_RendersAlignedNativeColumnsInBrowser()
     {
         PdfLayoutDocument layout = CreateWideHorizontalRuleTableLayoutFixture();
@@ -5332,6 +5498,247 @@ public class PdfHtmlConverterTest
         Assert.Equal(2, figures.Length);
         Assert.All(figures, figure =>
             Assert.Single(figure.Descendants(), static element => element.Name.LocalName == "image"));
+    }
+
+    [Fact]
+    public void Convert_SemanticContinuousFlow_KeepsSeparatedDensePathClustersAsBoundedFigures()
+    {
+        PdfLayoutDocument layout = CreateSeparatedDensePathClusterLayoutFixture();
+
+        XDocument dom = ParseHtml(PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        }).Html);
+
+        XElement[] figures = ElementsByClass(dom, "pdf-semantic-figure").ToArray();
+        Assert.Equal(2, figures.Length);
+        Assert.Equal(
+            ["0 0 132 40", "0 0 132 40"],
+            figures.Select(figure => Assert.Single(
+                figure.Elements(),
+                element => HasClass(element, "pdf-semantic-figure-svg")).Attribute("viewBox")?.Value));
+        Assert.DoesNotContain(figures, figure =>
+            ParsePoints(ParseStyle(figure.Attribute("style")?.Value ?? "")["--pdf-semantic-figure-width"]) > 140f);
+    }
+
+    [Fact]
+    public void Convert_SemanticContinuousFlow_PreservesFilledBackgroundBehindSemanticText()
+    {
+        PdfLayoutColor white = new(1f, 1f, 1f, 1f, "DeviceRGB");
+        PdfLayoutDocument layout = CreateSemanticHtmlFixture(
+        [
+            .. Enumerable.Range(0, 6).Select(index => CreateScientificFixtureLine(
+                $"Opening semantic prose line {index + 1:00} establishes ordinary page rhythm.",
+                72f,
+                50f + index * 14f,
+                340f)),
+            CreateColoredScientificFixtureLine(
+                "Automatic payment is enabled for this invoice.",
+                126f,
+                150f,
+                300f,
+                white),
+            .. Enumerable.Range(0, 6).Select(index => CreateScientificFixtureLine(
+                $"Following semantic prose line {index + 1:00} remains ordinary page content.",
+                72f,
+                180f + index * 14f,
+                340f))
+        ],
+        [CreateSemanticCalloutPath(new PdfLayoutRectangle(96f, 138f, 400f, 32f))]);
+
+        PdfHtmlDocument converted = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(converted.Html);
+        XElement notice = Assert.Single(dom.Descendants("p"), static paragraph =>
+            paragraph.Value.Contains("Automatic payment", StringComparison.Ordinal));
+
+        Assert.True(HasClass(notice, "pdf-semantic-source-backed"));
+        Dictionary<string, string> style = ParseStyle(notice.Attribute("style")?.Value ?? "");
+        Assert.Equal(-12f, ParsePoints(style["--pdf-semantic-source-inset-left"]), 2);
+        Assert.Equal(400f, ParsePoints(style["--pdf-semantic-source-width"]), 2);
+        Assert.Equal("rgba(235,240,245,1)", style["--pdf-semantic-source-background"]);
+        Assert.Equal(12f, ParsePoints(style["--pdf-semantic-source-padding-top"]), 2);
+        Assert.Equal(70f, ParsePoints(style["--pdf-semantic-source-padding-right"]), 2);
+        Assert.Equal(12.5f, ParsePoints(style["--pdf-semantic-source-padding-bottom"]), 2);
+        Assert.Equal(30f, ParsePoints(style["--pdf-semantic-source-padding-left"]), 2);
+        Assert.Empty(ElementsByClass(dom, "pdf-semantic-figure"));
+        Assert.Matches(
+            @"\.pdf-semantic-source-backed\s*\{[^}]*background\s*:",
+            converted.Css);
+    }
+
+    [Fact]
+    public void Convert_SemanticContinuousFlow_PreservesCompositeFilledBackgroundBehindSemanticText()
+    {
+        PdfLayoutColor gray = new(0.85f, 0.85f, 0.85f, 1f, "DeviceRGB");
+        PdfLayoutDocument layout = CreateSemanticHtmlFixture(
+        [
+            .. Enumerable.Range(0, 8).Select(index => CreateScientificFixtureLine(
+                $"Opening semantic prose line {index + 1:00} establishes ordinary page rhythm.",
+                72f,
+                50f + index * 14f,
+                340f)),
+            CreateSemanticBoldTableRowLine(
+                220f,
+                ("Telephone - invoice total", 48f, 220f),
+                ("201.96", 500f, 60f))
+        ],
+        [
+            CreateFilledRectanglePath(0, new PdfLayoutRectangle(40f, 214f, 264f, 24f), gray),
+            CreateFilledRectanglePath(1, new PdfLayoutRectangle(304f, 214f, 264f, 24f), gray)
+        ]);
+
+        PdfHtmlDocument converted = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(converted.Html);
+        XElement total = Assert.Single(dom.Descendants("p"), static paragraph =>
+            paragraph.Value.Contains("Telephone - invoice total", StringComparison.Ordinal));
+
+        Assert.True(HasClass(total, "pdf-semantic-source-backed"));
+        Dictionary<string, string> style = ParseStyle(total.Attribute("style")?.Value ?? "");
+        Assert.Equal(528f, ParsePoints(style["--pdf-semantic-source-width"]), 2);
+        Assert.Equal("rgba(217,217,217,1)", style["--pdf-semantic-source-background"]);
+    }
+
+    [Fact]
+    public void Convert_SemanticContinuousFlow_GroupsSummaryBesideAuthoredGraphic()
+    {
+        PdfLayoutRectangle imageBounds = new(324f, 284f, 247f, 250f);
+        PdfLayoutImage image = new(
+            0,
+            "summary-advert",
+            PdfLayoutImageKind.XObject,
+            imageBounds,
+            new PdfLayoutTransform(
+                imageBounds.Width,
+                0f,
+                0f,
+                imageBounds.Height,
+                imageBounds.X,
+                imageBounds.Y),
+            247,
+            250,
+            8,
+            "DeviceRGB",
+            false,
+            "Im0");
+        PdfLayoutDocument layout = CreateSemanticHtmlFixture(
+        [
+            .. Enumerable.Range(0, 10).Select(index => CreateScientificFixtureLine(
+                $"Opening semantic prose line {index + 1:00} establishes ordinary page rhythm.",
+                72f,
+                60f + index * 14f,
+                340f)),
+            CreateScientificFixtureLine("Summary", 40f, 288f, 90f, 12f, "Times-Bold"),
+            CreateSemanticTableRowLine(314f, ("Telephone", 44f, 120f), ("201.96", 240f, 58f)),
+            CreateSemanticTableRowLine(338f, ("VAT", 44f, 120f), ("40.39", 240f, 58f)),
+            CreateSemanticBoldTableRowLine(362f, ("Invoice total", 44f, 120f), ("201.96", 240f, 58f)),
+            CreateScientificFixtureLine("Following prose resumes below the authored mixed region.", 72f, 570f, 360f)
+        ],
+        images: [image],
+        imageAssets:
+        [
+            new PdfLayoutImageAsset(
+                image.AssetId,
+                "assets/images/summary-advert.png",
+                "image/png",
+                [137, 80, 78, 71])
+        ]);
+
+        PdfHtmlDocument converted = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(converted.Html);
+        XElement mixedRegion = Assert.Single(ElementsByClass(dom, "pdf-semantic-flow-mixed-region"));
+        XElement text = Assert.Single(mixedRegion.Elements(), element =>
+            HasClass(element, "pdf-semantic-flow-mixed-region-text"));
+        XElement figure = Assert.Single(mixedRegion.Elements(), element =>
+            HasClass(element, "pdf-semantic-flow-mixed-region-figure"));
+
+        Assert.Contains("Summary", text.Value, StringComparison.Ordinal);
+        Assert.Single(figure.Descendants(), static element => element.Name.LocalName == "image");
+        Assert.Contains("@media (max-width: 700px)", converted.Css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Convert_SemanticContinuousFlow_KeepsSemanticTextForArtworkFallbackBand()
+    {
+        PdfLayoutColor white = new(1f, 1f, 1f, 1f, "DeviceRGB");
+        PdfLayoutRectangle bandBounds = new(96f, 138f, 400f, 24f);
+        PdfLayoutImage fallback = new(
+            0,
+            "semantic-band-fallback",
+            PdfLayoutImageKind.ComplexArtworkFallback,
+            bandBounds,
+            new PdfLayoutTransform(
+                bandBounds.Width,
+                0f,
+                0f,
+                bandBounds.Height,
+                bandBounds.X,
+                bandBounds.Y),
+            400,
+            24,
+            8,
+            "DeviceRGB",
+            false,
+            "complex-artwork");
+        PdfLayoutDocument layout = CreateSemanticHtmlFixture(
+        [
+            .. Enumerable.Range(0, 6).Select(index => CreateScientificFixtureLine(
+                $"Opening semantic prose line {index + 1:00} establishes ordinary page rhythm.",
+                72f,
+                50f + index * 14f,
+                340f)),
+            CreateColoredScientificFixtureLine(
+                "Account: 4755990301",
+                126f,
+                146f,
+                150f,
+                white,
+                11f,
+                "Times-Bold"),
+            .. Enumerable.Range(0, 6).Select(index => CreateScientificFixtureLine(
+                $"Following semantic prose line {index + 1:00} remains ordinary page content.",
+                72f,
+                180f + index * 14f,
+                340f))
+        ],
+        [CreateSemanticCalloutPath(bandBounds)],
+        images: [fallback],
+        imageAssets:
+        [
+            new PdfLayoutImageAsset(
+                fallback.AssetId,
+                "assets/images/semantic-band-fallback.png",
+                "image/png",
+                [137, 80, 78, 71])
+        ]);
+
+        PdfHtmlDocument converted = PdfHtmlConverter.Convert(layout, new PdfHtmlOptions
+        {
+            TextMode = PdfHtmlTextMode.Semantic,
+            SemanticPageMode = PdfHtmlSemanticPageMode.ContinuousFlow
+        });
+        XDocument dom = ParseHtml(converted.Html);
+
+        XElement figure = Assert.Single(ElementsByClass(dom, "pdf-semantic-figure"));
+        Assert.Single(figure.Descendants(), static element => element.Name.LocalName == "image");
+        XElement account = Assert.Single(dom.Descendants("p"), static paragraph =>
+            paragraph.Value.Contains("Account: 4755990301", StringComparison.Ordinal));
+        Assert.True(HasClass(account, "pdf-semantic-visually-hidden"));
+        Assert.Matches(
+            @"\.pdf-semantic-visually-hidden\s*\{[^}]*clip-path\s*:",
+            converted.Css);
     }
 
     [Fact]
@@ -8858,6 +9265,37 @@ public class PdfHtmlConverterTest
         return CreateSemanticHtmlFixture(lines, paths);
     }
 
+    private static PdfLayoutDocument CreateSemanticInvoiceFormLayoutFixture()
+    {
+        PdfTextLine[] lines =
+        [
+            CreateScientificFixtureLine("Invoice", 328f, 90f, 44f, 12f, "Times-Bold"),
+            CreateScientificFixtureLine("CUSTOMER NAME", 42f, 104f, 156f),
+            CreateScientificFixtureLine("STREET 79", 42f, 118f, 96f),
+            CreateScientificFixtureLine("Invoice number:", 328f, 118f, 74f),
+            CreateScientificFixtureLine("25883847", 522f, 118f, 44f),
+            CreateScientificFixtureLine("5221 CITY", 42f, 132f, 72f),
+            CreateScientificFixtureLine("Customer number:", 328f, 132f, 82f),
+            CreateScientificFixtureLine("26568", 539f, 132f, 27f),
+            CreateScientificFixtureLine("Invoice date:", 328f, 146f, 58f),
+            CreateScientificFixtureLine("01.06.2026", 516f, 146f, 50f),
+            CreateScientificFixtureLine("Due date:", 328f, 160f, 50f),
+            CreateScientificFixtureLine("13.06.2026", 516f, 160f, 50f),
+            CreateScientificFixtureLine("Account:", 328f, 174f, 46f),
+            CreateScientificFixtureLine("42131293032", 505f, 174f, 61f),
+            CreateScientificFixtureLine("Summary", 42f, 246f, 70f, 12f, "Times-Bold"),
+            .. Enumerable.Range(0, 8).Select(index => CreateScientificFixtureLine(
+                $"Following semantic invoice prose line {index + 1:00} remains ordinary content.",
+                42f,
+                274f + index * 16f,
+                340f))
+        ];
+        PdfLayoutColor black = new(0f, 0f, 0f, 1f, "DeviceGray");
+        return CreateSemanticHtmlFixture(
+            lines,
+            [CreateSemanticRulePath(0, 328f, 101f, 567f, 101f, 0.5f, black)]);
+    }
+
     private static PdfLayoutPath CreateFilledRectanglePath(
         int index,
         PdfLayoutRectangle bounds,
@@ -9003,6 +9441,66 @@ public class PdfHtmlConverterTest
         return new PdfTextLine(text, bounds, [run]);
     }
 
+    private static PdfTextLine CreateColoredScientificFixtureLine(
+        string text,
+        float x,
+        float y,
+        float width,
+        PdfLayoutColor color,
+        float fontSize = 10f,
+        string fontName = "Times-Roman")
+    {
+        PdfLayoutRectangle bounds = new(x, y, width, fontSize * 0.75f);
+        PdfTextGlyph glyph = new(text, fontName, fontSize, 0f, bounds, color);
+        PdfTextRun run = new(text, fontName, fontSize, 0f, bounds, color, [glyph]);
+        return new PdfTextLine(text, bounds, [run]);
+    }
+
+    private static PdfLayoutDocument CreateSeparatedDensePathClusterLayoutFixture()
+    {
+        PdfTextLine[] lines = Enumerable.Range(0, 10)
+            .Select(index => CreateScientificFixtureLine(
+                $"Ordinary semantic flow line {index + 1:00} remains readable.",
+                250f,
+                72f + index * 18f,
+                280f))
+            .ToArray();
+        PdfTextRun[] runs = lines.SelectMany(static line => line.Runs).ToArray();
+        PdfTextGlyph[] glyphs = runs.SelectMany(static run => run.Glyphs).ToArray();
+        PdfLayoutColor fill = new(0.2f, 0.4f, 0.7f, 1f, "DeviceRGB");
+        PdfLayoutPath[] paths = Enumerable.Range(0, 16)
+            .Select(index =>
+            {
+                int clusterIndex = index / 8;
+                int itemIndex = index % 8;
+                PdfLayoutRectangle bounds = new(
+                    72f + itemIndex % 4 * 36f,
+                    250f + clusterIndex * 250f + itemIndex / 4 * 24f,
+                    24f,
+                    16f);
+                return new PdfLayoutPath(index, [], bounds, fill, null, fillRule: 1);
+            })
+            .ToArray();
+        PdfLayoutRectangle pageBounds = new(0f, 0f, 612f, 792f);
+        PdfLayoutPage page = new(
+            1,
+            pageBounds,
+            pageBounds,
+            pageBounds.Width,
+            pageBounds.Height,
+            0,
+            glyphs,
+            runs,
+            lines,
+            [],
+            [],
+            paths,
+            [],
+            [],
+            []);
+        return new PdfLayoutDocument([page], []);
+    }
+
     private static PdfTextLine CreateMonospacedSemanticFixtureLine(
         string text,
         float x,
@@ -9100,7 +9598,9 @@ public class PdfHtmlConverterTest
     private static PdfLayoutDocument CreateSemanticHtmlFixture(
         IReadOnlyList<PdfTextLine> lines,
         IReadOnlyList<PdfLayoutPath>? paths = null,
-        IReadOnlyList<PdfLayoutVectorGroup>? vectorGroups = null)
+        IReadOnlyList<PdfLayoutVectorGroup>? vectorGroups = null,
+        IReadOnlyList<PdfLayoutImage>? images = null,
+        IReadOnlyList<PdfLayoutImageAsset>? imageAssets = null)
     {
         PdfTextRun[] runs = lines.SelectMany(static line => line.Runs).ToArray();
         PdfTextGlyph[] glyphs = runs.SelectMany(static run => run.Glyphs).ToArray();
@@ -9116,12 +9616,79 @@ public class PdfHtmlConverterTest
             runs,
             lines,
             [],
-            [],
+            images ?? [],
             paths ?? [],
             vectorGroups ?? [],
             [],
             []);
-        return new PdfLayoutDocument([page], []);
+        return new PdfLayoutDocument([page], imageAssets ?? [], []);
+    }
+
+    private static PdfLayoutDocument CreateGraphicDensityLayoutFixture(PdfLayoutImageKind imageKind)
+    {
+        PdfTextLine[] lines = Enumerable.Range(0, 12)
+            .Select(index => CreateScientificFixtureLine(
+                $"Invoice item {index + 1:00}",
+                72f,
+                72f + index * 18f,
+                120f))
+            .ToArray();
+        PdfTextRun[] runs = lines.SelectMany(static line => line.Runs).ToArray();
+        PdfTextGlyph[] glyphs = runs.SelectMany(static run => run.Glyphs).ToArray();
+        PdfLayoutColor gray = new(0.55f, 0.55f, 0.55f, 1f, "DeviceRGB");
+        PdfLayoutPath[] paths = Enumerable.Range(0, 8)
+            .Select(index => CreateSemanticRulePath(
+                index,
+                72f,
+                300f + index * 12f,
+                540f,
+                300f + index * 12f,
+                0.5f,
+                gray))
+            .ToArray();
+        PdfLayoutImage[] images = Enumerable.Range(0, 2)
+            .Select(index =>
+            {
+                PdfLayoutRectangle bounds = new(360f, 90f + index * 100f, 150f, 60f);
+                return new PdfLayoutImage(
+                    index,
+                    $"graphic-density-{index}",
+                    imageKind,
+                    bounds,
+                    new PdfLayoutTransform(bounds.Width, 0f, 0f, bounds.Height, bounds.X, bounds.Y),
+                    150,
+                    60,
+                    8,
+                    "DeviceRGB",
+                    false,
+                    imageKind is PdfLayoutImageKind.XObject ? $"Im{index}" : "complex-artwork");
+            })
+            .ToArray();
+        PdfLayoutRectangle pageBounds = new(0f, 0f, 612f, 792f);
+        PdfLayoutPage page = new(
+            1,
+            pageBounds,
+            pageBounds,
+            pageBounds.Width,
+            pageBounds.Height,
+            0,
+            glyphs,
+            runs,
+            lines,
+            [],
+            images,
+            paths,
+            [],
+            [],
+            []);
+        PdfLayoutImageAsset[] assets = images
+            .Select(image => new PdfLayoutImageAsset(
+                image.AssetId,
+                $"assets/images/{image.AssetId}.png",
+                "image/png",
+                [137, 80, 78, 71]))
+            .ToArray();
+        return new PdfLayoutDocument([page], assets, []);
     }
 
     private static PdfLayoutDocument CreateCompactHeaderGraphicLayoutFixture()
