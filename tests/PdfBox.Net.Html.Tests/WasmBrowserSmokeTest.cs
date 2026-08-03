@@ -215,11 +215,24 @@ public sealed class WasmBrowserSmokeTest
             Assert.Equal(
                 "no-referrer",
                 await page.Locator("meta#unpdf-referrer").GetAttributeAsync("content"));
-            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(PublishedRootEnvironmentVariable)))
+            string applicationScript =
+                await page.Locator("script[src^='js/unpdf.']").GetAttributeAsync("src")
+                ?? string.Empty;
+            Assert.Matches("^js/unpdf\\.[a-z0-9]+\\.js$", applicationScript);
+
+            string? publishedRoot = Environment.GetEnvironmentVariable(PublishedRootEnvironmentVariable);
+            if (!string.IsNullOrWhiteSpace(publishedRoot))
             {
                 string scriptPolicy = policy.Split("style-src", StringSplitOptions.TrimEntries)[0];
                 Assert.DoesNotContain("'unsafe-inline'", scriptPolicy, StringComparison.Ordinal);
                 Assert.Contains("'sha256-", scriptPolicy, StringComparison.Ordinal);
+                Assert.True(File.Exists(Path.Combine(
+                    Path.GetFullPath(publishedRoot),
+                    applicationScript.Replace('/', Path.DirectorySeparatorChar))));
+                Assert.False(File.Exists(Path.Combine(
+                    Path.GetFullPath(publishedRoot),
+                    "js",
+                    "unpdf.js")));
             }
             Assert.Empty(policyViolations);
         }
