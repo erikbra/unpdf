@@ -217,7 +217,9 @@ The iframe uses the document Blob URL instead of retaining an expanded Base64
 `srcdoc` string in the component. Starting another conversion, a corrupt-input
 failure, cancellation, and component teardown all revoke every URL in the old
 session. Browsers without Blob URL support use the previous `srcdoc` path as a
-graceful fallback.
+graceful fallback. iPhone and iPad WebKit also use that fallback because those
+browsers expose the Blob URL APIs but can render a Blob-backed HTML iframe as an
+empty document.
 
 Cancellation is honored while reading, before parsing, at every extracted-page
 boundary, before HTML generation, and while transferring preview assets. The

@@ -14,6 +14,19 @@ function replaceAllLiteral(value, search, replacement) {
     return search ? value.split(search).join(replacement) : value;
 }
 
+function isAppleMobileWebKit() {
+    const navigator = globalThis.navigator;
+    if (!navigator) {
+        return false;
+    }
+
+    const userAgent = navigator.userAgent ?? "";
+    const isAppleWebKit = /AppleWebKit\//.test(userAgent);
+    const isMobileAppleDevice = /\b(iPhone|iPad|iPod)\b/.test(userAgent)
+        || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    return isAppleWebKit && isMobileAppleDevice;
+}
+
 window.unpdf = {
     normalizeCompatibility(value, form) {
         return value.normalize(form);
@@ -38,7 +51,11 @@ window.unpdf = {
             return typeof Blob === "function"
                 && typeof URL !== "undefined"
                 && typeof URL.createObjectURL === "function"
-                && typeof URL.revokeObjectURL === "function";
+                && typeof URL.revokeObjectURL === "function"
+                // iPhone and iPad WebKit expose the Blob URL APIs but can render
+                // a Blob-backed HTML iframe as an empty document. Use the existing
+                // srcdoc path there instead of treating API presence as sufficient.
+                && !isAppleMobileWebKit();
         },
         setBlobSupportOverride(value) {
             blobSupportOverride = value === null ? undefined : Boolean(value);
