@@ -11,6 +11,9 @@ namespace PdfBox.Net.Html.Tests;
 public sealed class WasmBrowserSmokeTest
 {
     private const string PublishedRootEnvironmentVariable = "UNPDF_WASM_PUBLISHED_ROOT";
+    private const string IphoneSafariUserAgent =
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) " +
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
 
     private readonly ITestOutputHelper _output;
 
@@ -435,6 +438,61 @@ public sealed class WasmBrowserSmokeTest
 
             await page.EvaluateAsync("() => window.unpdf.preview.setBlobSupportOverride(false)");
             await sampleButton.ClickAsync();
+            await page.GetByText("srcdoc fallback", new PageGetByTextOptions { Exact = true }).WaitForAsync();
+            Assert.Equal(
+                0,
+                await page.EvaluateAsync<int>("() => window.unpdf.preview.activeSessionCount()"));
+            string? inlinePreview = await page.Locator("iframe[title='Converted HTML preview']")
+                .GetAttributeAsync("srcdoc");
+            Assert.False(string.IsNullOrWhiteSpace(inlinePreview));
+            await page.FrameLocator("iframe[title='Converted HTML preview']")
+                .GetByText("Hello", new FrameLocatorGetByTextOptions { Exact = true })
+                .WaitForAsync();
+        }
+        finally
+        {
+            StopServer(server);
+        }
+    }
+
+    [Fact(Timeout = 120_000)]
+    public async Task BrowserAdaptive_IphoneWebKitUsesSrcdocPreview()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        int port = ReservePort();
+        using Process server = StartServer(repositoryRoot, port);
+
+        try
+        {
+            Uri appUri = new($"http://127.0.0.1:{port}");
+            await WaitForServerAsync(appUri, server);
+
+            using IPlaywright playwright = await Playwright.CreateAsync();
+            await using IBrowser browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
+            await using IBrowserContext context = await browser.NewContextAsync(new BrowserNewContextOptions
+            {
+                HasTouch = true,
+                IsMobile = true,
+                UserAgent = IphoneSafariUserAgent,
+                ViewportSize = new ViewportSize
+                {
+                    Width = 390,
+                    Height = 844
+                }
+            });
+            IPage page = await context.NewPageAsync();
+            await page.GotoAsync(appUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+
+            Assert.False(await page.EvaluateAsync<bool>("() => window.unpdf.preview.supportsBlobUrls()"));
+            await page.GetByRole(AriaRole.Button, new PageGetByRoleOptions
+            {
+                Name = "Try the built-in sample",
+                Exact = true
+            }).ClickAsync();
+
             await page.GetByText("srcdoc fallback", new PageGetByTextOptions { Exact = true }).WaitForAsync();
             Assert.Equal(
                 0,
