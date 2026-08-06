@@ -1,7 +1,7 @@
 {
   "assets": {
     "HarfBuzzSharp.wasm": {
-      "brotliBytes": 11176,
+      "brotliBytes": 11154,
       "rawBytes": 28949
     },
     "JBig2Decoder.NETStandard.wasm": {
@@ -9,35 +9,35 @@
       "rawBytes": 79637
     },
     "Microsoft.AspNetCore.Components.Web.wasm": {
-      "brotliBytes": 24190,
+      "brotliBytes": 24227,
       "rawBytes": 68885
     },
     "Microsoft.AspNetCore.Components.WebAssembly.wasm": {
-      "brotliBytes": 42485,
+      "brotliBytes": 42490,
       "rawBytes": 125205
     },
     "Microsoft.AspNetCore.Components.wasm": {
-      "brotliBytes": 92131,
+      "brotliBytes": 91953,
       "rawBytes": 256789
     },
     "Microsoft.Extensions.Configuration.Abstractions.wasm": {
-      "brotliBytes": 2339,
+      "brotliBytes": 2335,
       "rawBytes": 6933
     },
     "Microsoft.Extensions.Configuration.Json.wasm": {
-      "brotliBytes": 4193,
+      "brotliBytes": 4194,
       "rawBytes": 10517
     },
     "Microsoft.Extensions.Configuration.wasm": {
-      "brotliBytes": 3631,
+      "brotliBytes": 3652,
       "rawBytes": 8981
     },
     "Microsoft.Extensions.DependencyInjection.Abstractions.wasm": {
-      "brotliBytes": 10009,
+      "brotliBytes": 10070,
       "rawBytes": 26389
     },
     "Microsoft.Extensions.DependencyInjection.wasm": {
-      "brotliBytes": 19578,
+      "brotliBytes": 19590,
       "rawBytes": 46869
     },
     "Microsoft.Extensions.Logging.Abstractions.wasm": {
@@ -45,44 +45,44 @@
       "rawBytes": 30485
     },
     "Microsoft.Extensions.Logging.wasm": {
-      "brotliBytes": 7646,
+      "brotliBytes": 7635,
       "rawBytes": 17685
     },
     "Microsoft.Extensions.Options.wasm": {
-      "brotliBytes": 7167,
+      "brotliBytes": 7124,
       "rawBytes": 17173
     },
     "Microsoft.Extensions.Primitives.wasm": {
-      "brotliBytes": 4545,
+      "brotliBytes": 4577,
       "rawBytes": 11541
     },
     "Microsoft.JSInterop.WebAssembly.wasm": {
-      "brotliBytes": 4907,
+      "brotliBytes": 4891,
       "rawBytes": 12053
     },
     "Microsoft.JSInterop.wasm": {
-      "brotliBytes": 18871,
-      "rawBytes": 47893
+      "brotliBytes": 19052,
+      "rawBytes": 48405
     },
     "PdfBox.Net.FontBox.wasm": {
       "brotliBytes": 144492,
       "rawBytes": 514837
     },
     "PdfBox.Net.Html.Wasm.wasm": {
-      "brotliBytes": 15784,
+      "brotliBytes": 15896,
       "rawBytes": 41237
     },
     "PdfBox.Net.Html.wasm": {
-      "brotliBytes": 170091,
-      "rawBytes": 746261
+      "brotliBytes": 177323,
+      "rawBytes": 795413
     },
     "PdfBox.Net.IO.wasm": {
       "brotliBytes": 15706,
       "rawBytes": 39189
     },
     "PdfBox.Net.Layout.wasm": {
-      "brotliBytes": 194639,
-      "rawBytes": 641301
+      "brotliBytes": 197042,
+      "rawBytes": 650005
     },
     "PdfBox.Net.SkiaSharp.wasm": {
       "brotliBytes": 41947,
@@ -93,7 +93,7 @@
       "rawBytes": 1830677
     },
     "SkiaSharp.wasm": {
-      "brotliBytes": 30012,
+      "brotliBytes": 29908,
       "rawBytes": 83221
     },
     "System.Collections.Concurrent.wasm": {
@@ -137,7 +137,7 @@
       "rawBytes": 5909
     },
     "System.Linq.wasm": {
-      "brotliBytes": 34319,
+      "brotliBytes": 34330,
       "rawBytes": 97045
     },
     "System.Memory.wasm": {
@@ -153,8 +153,8 @@
       "rawBytes": 7445
     },
     "System.Private.CoreLib.wasm": {
-      "brotliBytes": 569298,
-      "rawBytes": 1839381
+      "brotliBytes": 570477,
+      "rawBytes": 1840405
     },
     "System.Private.Uri.wasm": {
       "brotliBytes": 27445,
@@ -173,8 +173,8 @@
       "rawBytes": 8981
     },
     "System.Runtime.wasm": {
-      "brotliBytes": 3356,
-      "rawBytes": 11029
+      "brotliBytes": 3426,
+      "rawBytes": 11541
     },
     "System.Security.Cryptography.wasm": {
       "brotliBytes": 19500,
@@ -205,15 +205,15 @@
       "rawBytes": 5397
     },
     "Unicode.Bidi.wasm": {
-      "brotliBytes": 28521,
-      "rawBytes": 99605
+      "brotliBytes": 28875,
+      "rawBytes": 100117
     },
     "blazor.webassembly.js": {
-      "brotliBytes": 16723,
-      "rawBytes": 60576
+      "brotliBytes": 16754,
+      "rawBytes": 60682
     },
     "dotnet.js": {
-      "brotliBytes": 14291,
+      "brotliBytes": 14318,
       "rawBytes": 53840
     },
     "dotnet.native.js": {
@@ -221,8 +221,8 @@
       "rawBytes": 219338
     },
     "dotnet.native.wasm": {
-      "brotliBytes": 2014493,
-      "rawBytes": 7007722
+      "brotliBytes": 2023018,
+      "rawBytes": 7039300
     },
     "dotnet.runtime.js": {
       "brotliBytes": 47864,
@@ -248,7 +248,7 @@
   },
   "schemaVersion": 1,
   "totals": {
-    "brotliBytes": 5265883,
-    "rawBytes": 18609608
+    "brotliBytes": 5322768,
+    "rawBytes": 18834828
   }
 }
