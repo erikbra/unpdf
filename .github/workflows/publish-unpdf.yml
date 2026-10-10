@@ -75,7 +75,7 @@ jobs:
           --signing-status unsigned-preview
 
       - name: Upload RID artifact
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: unpdf-${{ env.RELEASE_VERSION }}-${{ matrix.rid }}
           path: |
@@ -130,7 +130,7 @@ jobs:
             artifacts/release/*.zip
 
       - name: Upload assembled release contract
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: unpdf-${{ env.RELEASE_VERSION }}-release
           path: artifacts/release

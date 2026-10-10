@@ -85,7 +85,7 @@ jobs:
 
       - name: Upload browser payload report
         if: ${{ always() }}
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: wasm-payload-report
           path: artifacts/wasm-payload
@@ -133,7 +133,7 @@ jobs:
           echo "framework_wasm=${framework_wasm#artifacts/pages/now/}" >> "$GITHUB_OUTPUT"
 
       - name: Save assembled Pages site
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pages-site-state
           path: artifacts/pages
