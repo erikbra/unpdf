@@ -102,7 +102,7 @@ jobs:
           grep -q 'Preview channel' artifacts/pages/apt/index.html
           grep -q 'Signed-By: /etc/apt/keyrings/unpdf.gpg' artifacts/pages/apt/unpdf-preview.sources
 
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: unpdf-apt-test-repository
           path: artifacts/apt-repository
